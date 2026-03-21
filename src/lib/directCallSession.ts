@@ -11,6 +11,11 @@ import type {
 import { loadCallSettings, saveCallSettings } from './callSettings';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
+import {
+  buildLegacyCallStateUpdate,
+  isCallsModernSchemaMissingError,
+  normalizeCallStateFromRow,
+} from './callsCompat';
 
 type Listener = () => void;
 export type ScreenShareQuality = '720p30' | '1080p120' | '4k60';
@@ -955,11 +960,23 @@ class DirectCallSessionStore {
         try {
           await withTimeout(
             (async () => {
-              await supabase
+              const modernResponse = await supabase
                 .from('calls')
                 .update({ state: 'ended' } as any)
                 .eq('id', signalCallId)
                 .in('state', ['ringing', 'accepted']);
+              if (!modernResponse.error) return;
+              if (!isCallsModernSchemaMissingError(modernResponse.error)) {
+                throw modernResponse.error;
+              }
+              const legacyResponse = await supabase
+                .from('calls')
+                .update(buildLegacyCallStateUpdate('ended') as any)
+                .eq('id', signalCallId)
+                .in('status', ['ringing', 'accepted']);
+              if (legacyResponse.error) {
+                throw legacyResponse.error;
+              }
             })(),
             2000,
             'Timed out signaling ended call state.',
@@ -1051,8 +1068,9 @@ class DirectCallSessionStore {
         { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
         async (payload) => {
           const updated = payload.new as any;
-          if (!updated?.state) return;
-          if ((updated.state === 'ended' || updated.state === 'declined') && this.state.phase !== 'idle') {
+          const nextState = normalizeCallStateFromRow(updated);
+          if (!nextState) return;
+          if ((nextState === 'ended' || nextState === 'declined') && this.state.phase !== 'idle') {
             void this.hangup({ signalEnded: false });
           }
         },

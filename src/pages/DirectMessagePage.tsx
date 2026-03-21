@@ -23,6 +23,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { supabase } from '../lib/supabase';
+import {
+  buildLegacyCallInsertPayload,
+  isActiveCallState,
+  isCallsModernSchemaMissingError,
+  normalizeCallRow,
+} from '../lib/callsCompat';
 import { extractMentionHandles, hasBroadcastMention, isMentioningTarget } from '../lib/mentions';
 import type { DirectConversation, DirectMessage, DirectMessageAttachment, Profile } from '../lib/types';
 import { formatFileSize, formatRelativeTime } from '../lib/utils';
@@ -295,40 +301,79 @@ export function DirectMessagePage() {
   }
 
   async function fetchActiveCallRowWithRetry(targetConversationId: string) {
-    const run = () => supabase
+    const runModern = () => supabase
       .from('calls')
-      .select('id, state, expires_at, metadata')
+      .select('id, conversation_id, caller_id, callee_ids, state, metadata, created_at, expires_at')
       .eq('conversation_id', targetConversationId)
       .in('state', ['ringing', 'accepted'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-
-    let response = await run();
-    if (response.error && isAuthOrJwtError(response.error)) {
-      const refreshed = await ensureFreshAuthSession(60, { forceRefresh: true, verifyOnServer: false });
-      if (refreshed.ok) {
-        response = await run();
-      }
-    }
-    return response;
-  }
-
-  async function insertCallRowWithRetry(payload: Record<string, any>) {
-    const run = () => supabase
+    const runLegacy = () => supabase
       .from('calls')
-      .insert(payload as any)
-      .select('*')
+      .select('id, room, caller_id, callee_id, status, accepted, metadata, created_at, updated_at')
+      .eq('room', targetConversationId)
+      .in('status', ['ringing', 'accepted'])
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
-    let response = await run();
+    let response = await runModern();
+    let usingLegacy = false;
+    if (response.error && isCallsModernSchemaMissingError(response.error)) {
+      usingLegacy = true;
+      response = await runLegacy();
+    }
     if (response.error && isAuthOrJwtError(response.error)) {
       const refreshed = await ensureFreshAuthSession(60, { forceRefresh: true, verifyOnServer: false });
       if (refreshed.ok) {
-        response = await run();
+        response = usingLegacy ? await runLegacy() : await runModern();
+        if (!usingLegacy && response.error && isCallsModernSchemaMissingError(response.error)) {
+          usingLegacy = true;
+          response = await runLegacy();
+        }
       }
     }
-    return response;
+    const normalized = response.data ? normalizeCallRow(response.data, CALL_JOIN_WINDOW_MS) : null;
+    return {
+      ...response,
+      data: normalized,
+    };
+  }
+
+  async function insertCallRowWithRetry(modernPayload: Record<string, any>, legacyPayload: Record<string, any>) {
+    const runModern = () => supabase
+      .from('calls')
+      .insert(modernPayload as any)
+      .select('id, conversation_id, caller_id, callee_ids, state, metadata, created_at, expires_at')
+      .maybeSingle();
+    const runLegacy = () => supabase
+      .from('calls')
+      .insert(legacyPayload as any)
+      .select('id, room, caller_id, callee_id, status, accepted, metadata, created_at, updated_at')
+      .maybeSingle();
+
+    let response = await runModern();
+    let usingLegacy = false;
+    if (response.error && isCallsModernSchemaMissingError(response.error)) {
+      usingLegacy = true;
+      response = await runLegacy();
+    }
+    if (response.error && isAuthOrJwtError(response.error)) {
+      const refreshed = await ensureFreshAuthSession(60, { forceRefresh: true, verifyOnServer: false });
+      if (refreshed.ok) {
+        response = usingLegacy ? await runLegacy() : await runModern();
+        if (!usingLegacy && response.error && isCallsModernSchemaMissingError(response.error)) {
+          usingLegacy = true;
+          response = await runLegacy();
+        }
+      }
+    }
+    const normalized = response.data ? normalizeCallRow(response.data, CALL_JOIN_WINDOW_MS) : null;
+    return {
+      ...response,
+      data: normalized || response.data,
+    };
   }
 
   async function fetchHydratedDirectMessage(messageId: string) {
@@ -636,7 +681,13 @@ export function DirectMessagePage() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calls' },
         (payload) => {
-          const changedConversationId = String((payload.new as any)?.conversation_id || (payload.old as any)?.conversation_id || '');
+          const changedConversationId = String(
+            (payload.new as any)?.conversation_id
+            || (payload.old as any)?.conversation_id
+            || (payload.new as any)?.room
+            || (payload.old as any)?.room
+            || ''
+          );
           if (!changedConversationId || !isUuid(changedConversationId)) return;
           if (!trackedConversationIdsRef.current.has(changedConversationId)) return;
           const existingTimer = callRefreshTimersRef.current[changedConversationId];
@@ -780,17 +831,17 @@ export function DirectMessagePage() {
   }, [conversationContextMenu]);
 
   function isCallRowActive(row: any): boolean {
-    if (!row) return false;
-    const state = String(row.state || '').toLowerCase();
-    if (state !== 'ringing' && state !== 'accepted') return false;
-    if (state === 'ringing') {
-      const createdAtMs = Date.parse(String(row.created_at || ''));
+    const normalized = normalizeCallRow(row, CALL_JOIN_WINDOW_MS);
+    if (!normalized) return false;
+    if (!isActiveCallState(normalized.state)) return false;
+    if (normalized.state === 'ringing') {
+      const createdAtMs = Date.parse(String(normalized.created_at || ''));
       if (Number.isFinite(createdAtMs) && createdAtMs > 0 && createdAtMs + CALL_JOIN_WINDOW_MS <= Date.now()) {
         return false;
       }
     }
-    if (!row.expires_at) return true;
-    const expires = new Date(String(row.expires_at));
+    if (!normalized.expires_at) return true;
+    const expires = new Date(String(normalized.expires_at));
     if (Number.isNaN(expires.getTime())) return true;
     return expires.getTime() > Date.now();
   }
@@ -832,12 +883,29 @@ export function DirectMessagePage() {
       return;
     }
 
-    const { data: callRows, error: callsError } = await supabase
+    let callRows: any[] | null = null;
+    let callsError: any = null;
+
+    const modernCallsResponse = await supabase
       .from('calls')
       .select('id, conversation_id, caller_id, callee_ids, state, metadata, created_at, expires_at')
       .in('conversation_id', conversationIds)
       .in('state', ['ringing', 'accepted'])
       .order('created_at', { ascending: false });
+
+    if (modernCallsResponse.error && isCallsModernSchemaMissingError(modernCallsResponse.error)) {
+      const legacyCallsResponse = await supabase
+        .from('calls')
+        .select('id, room, caller_id, callee_id, status, accepted, metadata, created_at, updated_at')
+        .in('room', conversationIds)
+        .in('status', ['ringing', 'accepted'])
+        .order('created_at', { ascending: false });
+      callRows = legacyCallsResponse.data as any[] | null;
+      callsError = legacyCallsResponse.error;
+    } else {
+      callRows = modernCallsResponse.data as any[] | null;
+      callsError = modernCallsResponse.error;
+    }
 
     if (callsError) {
       const shouldDisable = shouldDisableCallsSignaling(callsError);
@@ -857,8 +925,11 @@ export function DirectMessagePage() {
     }
 
     const latestByConversation = new Map<string, any>();
-    for (const row of (callRows || []) as any[]) {
-      const conversationId = String(row?.conversation_id || '');
+    const normalizedCallRows = (callRows || [])
+      .map((row) => normalizeCallRow(row, CALL_JOIN_WINDOW_MS))
+      .filter(Boolean) as Array<NonNullable<ReturnType<typeof normalizeCallRow>>>;
+    for (const row of normalizedCallRows) {
+      const conversationId = String(row.conversation_id || '');
       if (!conversationId || latestByConversation.has(conversationId)) continue;
       if (!isCallRowActive(row)) continue;
       latestByConversation.set(conversationId, row);
@@ -915,7 +986,7 @@ export function DirectMessagePage() {
         calleeIds,
         state: String(row.state) === 'accepted' ? 'accepted' : 'ringing',
         expiresAt: row.expires_at ? String(row.expires_at) : null,
-        video: Boolean((row.metadata as any)?.video),
+        video: Boolean(row.video || (row.metadata as any)?.video),
         participantNames,
       };
     }
@@ -1742,8 +1813,8 @@ export function DirectMessagePage() {
         let callId: string | null = null;
 
         if (!callsSignalingUnavailableRef.current) {
-          // Prefer persistent call row signaling, but do not hard-fail if DB policy/migration is missing.
-          const { data: callData, error: callError } = await insertCallRowWithRetry({
+          const startedAtIso = new Date().toISOString();
+          const modernPayload = {
             conversation_id: targetConversationId,
             caller_id: profile.id,
             callee_ids: calleeIds,
@@ -1751,10 +1822,22 @@ export function DirectMessagePage() {
             channel_name: channelName,
             metadata: {
               video,
-              started_at: new Date().toISOString(),
+              started_at: startedAtIso,
             },
             expires_at: new Date(Date.now() + CALL_JOIN_WINDOW_MS).toISOString(),
+          };
+          const legacyPayload = buildLegacyCallInsertPayload({
+            conversationId: targetConversationId,
+            callerId: profile.id,
+            calleeIds,
+            video,
+            metadata: {
+              started_at: startedAtIso,
+              channel_name: channelName,
+            },
           });
+          // Prefer persistent call row signaling, but do not hard-fail if DB policy/migration is missing.
+          const { data: callData, error: callError } = await insertCallRowWithRetry(modernPayload, legacyPayload);
 
           if (!callError && callData && (callData as any).id) {
             callId = String((callData as any).id);

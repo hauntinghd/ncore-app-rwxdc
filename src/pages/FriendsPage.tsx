@@ -19,6 +19,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { isCallsModernSchemaMissingError, normalizeCallRow } from '../lib/callsCompat';
 import type { Profile } from '../lib/types';
 import { formatRelativeTime } from '../lib/utils';
 
@@ -195,15 +196,39 @@ export function FriendsPage() {
       const conversationIds = Array.from(friendIdToConversationId.values());
       if (conversationIds.length > 0) {
         const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-        const { data: callRows } = await supabase
+        let callRows: any[] | null = null;
+        let callRowsError: any = null;
+
+        const modernResponse = await supabase
           .from('calls')
-          .select('id, conversation_id, caller_id, callee_ids, state, video, created_at')
+          .select('id, conversation_id, caller_id, callee_ids, state, video, metadata, created_at, expires_at')
           .in('conversation_id', conversationIds)
           .in('state', ['ringing', 'accepted'])
           .gte('created_at', since)
           .order('created_at', { ascending: false });
 
-        for (const row of (callRows || []) as any[]) {
+        if (modernResponse.error && isCallsModernSchemaMissingError(modernResponse.error)) {
+          const legacyResponse = await supabase
+            .from('calls')
+            .select('id, room, caller_id, callee_id, status, accepted, metadata, created_at, updated_at')
+            .in('room', conversationIds)
+            .in('status', ['ringing', 'accepted'])
+            .gte('created_at', since)
+            .order('created_at', { ascending: false });
+          callRows = legacyResponse.data as any[] | null;
+          callRowsError = legacyResponse.error;
+        } else {
+          callRows = modernResponse.data as any[] | null;
+          callRowsError = modernResponse.error;
+        }
+
+        if (callRowsError) {
+          console.warn('Could not load active friend calls:', callRowsError);
+        }
+
+        for (const rawRow of (callRows || []) as any[]) {
+          const row = normalizeCallRow(rawRow);
+          if (!row) continue;
           const conversationId = String(row.conversation_id || '');
           if (!conversationId || activeCallByConversationId.has(conversationId)) continue;
           activeCallByConversationId.set(conversationId, {
@@ -213,7 +238,7 @@ export function FriendsPage() {
             callee_ids: Array.isArray(row.callee_ids) ? row.callee_ids.map((id: any) => String(id)) : [],
             state: row.state,
             video: Boolean(row.video),
-            created_at: String(row.created_at),
+            created_at: String(row.created_at || ''),
           });
         }
       }

@@ -7,6 +7,13 @@ import { supabase } from '../lib/supabase';
 import { directCallSession, ScreenShareQuality, useDirectCallSession } from '../lib/directCallSession';
 import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
 import { clampScreenShareQuality, compareScreenShareQuality, useEntitlements } from '../lib/entitlements';
+import {
+  buildLegacyCallStateUpdate,
+  isCallsModernSchemaMissingError,
+  normalizeCallRow,
+  normalizeCallStateFromRow,
+  type CallState,
+} from '../lib/callsCompat';
 import type { Profile } from '../lib/types';
 
 const AGORA_APP_ID = import.meta.env.VITE_AGORA_APP_ID || '';
@@ -48,6 +55,60 @@ function resolveCallStartedAtMs(callRow: any): number | null {
     }
   }
   return null;
+}
+
+async function loadLatestCallRowForConversation(targetConversationId: string) {
+  const modernResponse = await supabase
+    .from('calls')
+    .select('*')
+    .eq('conversation_id', targetConversationId)
+    .in('state', ['ringing', 'accepted'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!modernResponse.error) {
+    return {
+      row: modernResponse.data ? normalizeCallRow(modernResponse.data) : null,
+      error: null,
+    };
+  }
+
+  if (!isCallsModernSchemaMissingError(modernResponse.error)) {
+    return {
+      row: null,
+      error: modernResponse.error,
+    };
+  }
+
+  const legacyResponse = await supabase
+    .from('calls')
+    .select('*')
+    .eq('room', targetConversationId)
+    .in('status', ['ringing', 'accepted'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    row: legacyResponse.data ? normalizeCallRow(legacyResponse.data) : null,
+    error: legacyResponse.error,
+  };
+}
+
+async function updateCallStateWithFallback(callId: string, nextState: CallState) {
+  const modernResponse = await supabase
+    .from('calls')
+    .update({ state: nextState } as any)
+    .eq('id', callId);
+  if (!modernResponse.error) return null;
+  if (!isCallsModernSchemaMissingError(modernResponse.error)) return modernResponse.error;
+
+  const legacyResponse = await supabase
+    .from('calls')
+    .update(buildLegacyCallStateUpdate(nextState) as any)
+    .eq('id', callId);
+  return legacyResponse.error || null;
 }
 
 function RemoteVideoMount({ uid }: { uid: string }) {
@@ -320,14 +381,7 @@ export function DirectCallPage() {
 
       const rtcUid = user?.id || profile.id;
 
-      const { data: callRow, error: callError } = await supabase
-        .from('calls')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .in('state', ['ringing', 'accepted'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { row: callRow, error: callError } = await loadLatestCallRowForConversation(conversationId);
 
       if (callError) {
         console.warn('Call row lookup failed; using fallback join path.', callError);
@@ -336,9 +390,10 @@ export function DirectCallPage() {
 
       if (callRow && (callRow as any).id) {
         const c = callRow as any;
+        const sourceRow = c.raw || c;
         const rowCallId = String(c.id);
         const callerFlag = String(c.caller_id) === String(profile.id);
-        const rowStartedAtMs = resolveCallStartedAtMs(c);
+        const rowStartedAtMs = resolveCallStartedAtMs(sourceRow);
         setCallStartedAtMs(rowStartedAtMs);
 
         setCallId(rowCallId);
@@ -377,9 +432,10 @@ export function DirectCallPage() {
               if (nextStartedAt) {
                 setCallStartedAtMs(nextStartedAt);
               }
-              setCallState(updated.state || null);
+              const nextState = normalizeCallStateFromRow(updated);
+              setCallState(nextState || null);
 
-              if (updated.state === 'accepted') {
+              if (nextState === 'accepted') {
                 const updatedCallerFlag = String(updated.caller_id) === String(profile.id);
                 setIsCaller(updatedCallerFlag);
                 await directCallSession.join({
@@ -393,7 +449,7 @@ export function DirectCallPage() {
                 });
               }
 
-              if (updated.state === 'declined' || updated.state === 'ended') {
+              if (nextState === 'declined' || nextState === 'ended') {
                 void directCallSession.hangup({ signalEnded: false });
                 navigate(`/app/dm/${conversationId}`);
               }
@@ -406,12 +462,13 @@ export function DirectCallPage() {
           pollingTimer = window.setInterval(async () => {
             const { data } = await supabase
               .from('calls')
-              .select('state, created_at, metadata')
+              .select('*')
               .eq('id', rowCallId)
               .maybeSingle();
             if (!data || cancelled) return;
-            const nextState = (data as any).state;
-            const nextStartedAt = resolveCallStartedAtMs(data);
+            const normalizedPollRow = normalizeCallRow(data);
+            const nextState = normalizedPollRow?.state || normalizeCallStateFromRow(data);
+            const nextStartedAt = resolveCallStartedAtMs((normalizedPollRow?.raw || data));
             if (nextStartedAt) {
               setCallStartedAtMs(nextStartedAt);
             }
@@ -596,7 +653,10 @@ export function DirectCallPage() {
     if (!conversationId || !profile) return;
     if (callId) {
       try {
-        await supabase.from('calls').update({ state: 'accepted' } as any).eq('id', callId);
+        const updateError = await updateCallStateWithFallback(callId, 'accepted');
+        if (updateError) {
+          throw updateError;
+        }
       } catch (error) {
         console.error('Failed to accept call state', error);
       }
@@ -616,7 +676,10 @@ export function DirectCallPage() {
   async function declineCall() {
     if (callId) {
       try {
-        await supabase.from('calls').update({ state: 'declined' } as any).eq('id', callId);
+        const updateError = await updateCallStateWithFallback(callId, 'declined');
+        if (updateError) {
+          throw updateError;
+        }
       } catch (error) {
         console.error('Failed to decline call', error);
       }
