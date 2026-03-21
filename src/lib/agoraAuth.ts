@@ -4,6 +4,7 @@ const AGORA_STATIC_TOKEN = (import.meta.env.VITE_AGORA_TEMP_TOKEN || '').trim();
 const AGORA_TOKEN_FUNCTION = (import.meta.env.VITE_AGORA_TOKEN_FUNCTION || 'agora-token').trim();
 const AGORA_ALLOW_UNAUTH_JOIN = String(import.meta.env.VITE_AGORA_ALLOW_UNAUTH_JOIN || 'true').toLowerCase() === 'true';
 const AGORA_REQUIRE_TOKEN = String(import.meta.env.VITE_AGORA_REQUIRE_TOKEN || '').toLowerCase() === 'true';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 const AGORA_TOKEN_FALLBACK_FUNCTIONS = ['agora-token-relaxed', 'agora-token-debug'];
 
 function isFunctionsMissingError(message: string): boolean {
@@ -32,6 +33,47 @@ function isLikelyTransientFunctionsError(message: string): boolean {
     || normalized.includes('504');
 }
 
+async function resolveInvokeAuthBearer(): Promise<string> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = String(data?.session?.access_token || '').trim();
+    if (accessToken) return accessToken;
+  } catch {
+    // ignore auth session read failures and continue fallback.
+  }
+  return SUPABASE_ANON_KEY;
+}
+
+async function buildInvokeErrorReason(error: any, functionReason: string): Promise<string> {
+  const baseReason = String(error?.message || functionReason || '').trim();
+  const response = (error as any)?.context;
+  if (!response || typeof response !== 'object') {
+    return baseReason;
+  }
+
+  const status = Number((response as any)?.status || 0);
+  let parsedMessage = '';
+  try {
+    const bodyText = String(await (response as Response).clone().text()).trim();
+    if (bodyText) {
+      try {
+        const parsed = JSON.parse(bodyText) as any;
+        parsedMessage = String(parsed?.error || parsed?.message || bodyText).trim();
+      } catch {
+        parsedMessage = bodyText;
+      }
+    }
+  } catch {
+    // ignore response parse failures
+  }
+
+  return [
+    Number.isFinite(status) && status > 0 ? `status ${status}` : '',
+    baseReason,
+    parsedMessage,
+  ].filter(Boolean).join(' | ');
+}
+
 export async function resolveAgoraJoinToken(channelName: string, uid: string): Promise<string | null> {
   if (AGORA_STATIC_TOKEN) {
     return AGORA_STATIC_TOKEN;
@@ -40,6 +82,14 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
   const candidateFunctions = Array.from(
     new Set([AGORA_TOKEN_FUNCTION, ...AGORA_TOKEN_FALLBACK_FUNCTIONS].map((name) => String(name || '').trim()).filter(Boolean)),
   );
+  const invokeBearer = await resolveInvokeAuthBearer();
+  const invokeHeaders: Record<string, string> = {};
+  if (invokeBearer) {
+    invokeHeaders.Authorization = `Bearer ${invokeBearer}`;
+  }
+  if (SUPABASE_ANON_KEY) {
+    invokeHeaders.apikey = SUPABASE_ANON_KEY;
+  }
   const errors: string[] = [];
 
   for (const functionName of candidateFunctions) {
@@ -48,6 +98,7 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
     try {
       const response = await supabase.functions.invoke(functionName, {
         body: { channelName, uid },
+        headers: invokeHeaders,
       });
       data = response?.data;
       error = response?.error;
@@ -69,7 +120,7 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
       data && typeof data === 'object' && typeof (data as any).error === 'string'
         ? (data as any).error
         : '';
-    const reason = String(error?.message || functionReason || '').trim();
+    const reason = await buildInvokeErrorReason(error, functionReason);
     if (reason) {
       errors.push(`${functionName}: ${reason}`);
     } else {

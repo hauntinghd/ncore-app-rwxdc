@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.70",
+            "version": "11.7.71",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Agora token requests now always include explicit auth headers (session token or anon fallback) to satisfy edge auth requirements.",
+                "Function token fetch now surfaces real HTTP status/body details for faster diagnostics.",
+                "Call startup flow is more robust against transient Supabase edge auth timing issues."
+            ],
+            "bugFixes": [
+                "Fixed call token fetch failures caused by missing Authorization header on edge function invoke.",
+                "Fixed opaque non-2xx token errors by parsing and reporting edge response context.",
+                "Reduced false 'Agora token setup required' failures when token function itself is available."
+            ]
+        },
+        {
+            "version": "11.7.70",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Agora join now falls back to unauthenticated tokenless path when token edge functions are temporarily unavailable.",
                 "Call initialization no longer hard-stops on token-function non-2xx responses in permissive mode.",
