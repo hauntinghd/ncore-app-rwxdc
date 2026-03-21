@@ -25,7 +25,7 @@
     "build:exe": "npm run icons:sync && npm run build:electron:web && electron-builder --win portable --x64 -c.win.signAndEditExecutable=false",
     "build:exe:auto:nobump": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "build:exe:auto": "npm run version:bump && npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
-    "release:web": "node scripts/ensure-latest-installer.cjs && npm run build && npx vercel --prod --yes",
+    "release:web": "node scripts/release-web.cjs",
     "release:update": "npm run build:exe:auto && npm run release:web"
   },
   "dependencies": {
