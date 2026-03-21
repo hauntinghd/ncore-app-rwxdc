@@ -4,6 +4,3 @@ dist
 supabase
 tools
 *.log
-public/updates/*.exe
-public/updates/*.blockmap
-public/updates/*.apk

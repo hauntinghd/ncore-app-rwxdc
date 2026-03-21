@@ -1,8 +1,8 @@
 version: 11.7.63
 files:
   - url: NCore Setup 11.7.63.exe
-    sha512: rJPkpf8uSjdoENNVPEbChNaZLaKUU/+kjJt4TVJVBQeK/JGsS5XYaQJysRFZCUi+SuRGjXwOCGh1cLqBpbeNog==
-    size: 108821449
+    sha512: zupOxvAcRQ4x+xNiVMQbcbdhLwlngNBynvH3dbjwZIWy6Kv9d0w3AuWRANb4+6pY+0t8B22TU12bwCM0KlaKbQ==
+    size: 87274752
 path: NCore Setup 11.7.63.exe
-sha512: rJPkpf8uSjdoENNVPEbChNaZLaKUU/+kjJt4TVJVBQeK/JGsS5XYaQJysRFZCUi+SuRGjXwOCGh1cLqBpbeNog==
-releaseDate: '2026-03-21T09:41:06.018Z'
+sha512: zupOxvAcRQ4x+xNiVMQbcbdhLwlngNBynvH3dbjwZIWy6Kv9d0w3AuWRANb4+6pY+0t8B22TU12bwCM0KlaKbQ==
+releaseDate: '2026-03-21T10:00:08.979Z'

@@ -43,6 +43,24 @@ function copyFile(sourcePath, targetDir) {
   return true;
 }
 
+function pruneTargetBinaries(targetDir, keepFileNames) {
+  ensureDir(targetDir);
+  const keep = new Set((Array.isArray(keepFileNames) ? keepFileNames : []).filter(Boolean));
+  const binaryExtensions = new Set(['.exe', '.blockmap', '.apk']);
+  const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!binaryExtensions.has(ext)) continue;
+    if (keep.has(entry.name)) continue;
+    try {
+      fs.unlinkSync(path.join(targetDir, entry.name));
+    } catch (error) {
+      console.warn(`Warning: failed to remove stale update artifact ${entry.name}: ${error?.message || error}`);
+    }
+  }
+}
+
 function parseSemver(value) {
   const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
@@ -173,6 +191,7 @@ function syncMobileFeed(version) {
     const outputPath = path.join(targetDir, mobileFeedFileName);
     fs.writeFileSync(outputPath, `${JSON.stringify(mobileFeed, null, 2)}\n`, 'utf8');
   }
+  return latestApk ? latestApk.name : '';
 }
 
 function sanitizeList(value) {
@@ -323,6 +342,8 @@ function main() {
   }
 
   const blockmapPath = `${installerPath}.blockmap`;
+  const installerFileName = path.basename(installerPath);
+  const blockmapFileName = path.basename(blockmapPath);
   syncReleaseNotes(parsed.version);
 
   for (const targetDir of targets) {
@@ -331,7 +352,10 @@ function main() {
     copyFile(blockmapPath, targetDir);
     copyFile(publicReleaseNotesPath, targetDir);
   }
-  syncMobileFeed(parsed.version);
+  const latestApkFileName = syncMobileFeed(parsed.version);
+  for (const targetDir of targets) {
+    pruneTargetBinaries(targetDir, [installerFileName, blockmapFileName, latestApkFileName]);
+  }
 
   console.log(`Update feed synced: v${parsed.version}`);
   console.log(`Installer: ${path.basename(installerPath)}`);
