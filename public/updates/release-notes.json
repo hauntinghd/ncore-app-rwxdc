@@ -1,9 +1,26 @@
 {
     "releases": [
         {
-            "version": "11.7.63",
+            "version": "11.7.64",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Quickdraw Deploy now includes a dedicated Issue New Contract modal with staged draft and funding-queue actions for founder workflows.",
+                "Quickdraw command rail now separates Find Contracts (being hired) and Deploy (hiring) views with richer operations navigation and deploy-queue visibility.",
+                "Games marketplace storefront upgraded toward a Steam-style browsing surface with featured capsule controls, category chips, and improved game card presentation.",
+                "Settings rollout now persists advanced app toggles locally and syncs Streamer Mode preferences into the desktop runtime in real time."
+            ],
+            "bugFixes": [
+                "Fixed DM call signaling reliability by shortening stale ring windows and preventing old ringing rows from blocking new outgoing calls.",
+                "Added bandwidth-safe auto-disconnect behavior for unattended call sessions to reduce idle media usage.",
+                "Fixed desktop notification behavior so Streamer Mode can suppress sounds and hide DM/call previews in both renderer and Electron main-process notifications.",
+                "Updated billing action label to open the NCore Building Portal via Stripe from billing surfaces."
+            ]
+        },
+        {
+            "version": "11.7.63",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Marketplace now uses dedicated Quickdraw and Games experiences with role-oriented layouts, command rail navigation, and searchable contract/store grids.",
                 "Quickdraw now includes in-app briefing modals for Terms of Engagement, Tier II Clearance, and Operational Protocols to guide hiring and specialist workflows.",
