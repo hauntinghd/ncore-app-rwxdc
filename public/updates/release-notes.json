@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.64",
+            "version": "11.7.65",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Quickdraw command navigation is now fully interactive with role-aware views for Find Contracts, Contract Radar, Listed Contracts, Working Contracts, and Escrow History.",
+                "Buy/Sell Games storefront chips (Store, New & Trending, Top Sellers, Recently Updated, Your Library) now switch sections correctly and update listing order in real time.",
+                "Account Standing now opens detailed briefings in animated modal views, and Billing now surfaces live portal status feedback instead of silently failing."
+            ],
+            "bugFixes": [
+                "Fixed DM call initiation from profile/community actions by wiring auto-call route handling for /app/dm/:id?autocall=1.",
+                "Fixed server/sidebar moderation UX by adding channel and category right-click context menus plus direct member kick/ban actions in community member context menus.",
+                "Fixed streamer mode visibility by showing an in-app top banner when streamer mode is enabled, including privacy-state messaging."
+            ]
+        },
+        {
+            "version": "11.7.64",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Quickdraw Deploy now includes a dedicated Issue New Contract modal with staged draft and funding-queue actions for founder workflows.",
                 "Quickdraw command rail now separates Find Contracts (being hired) and Deploy (hiring) views with richer operations navigation and deploy-queue visibility.",
