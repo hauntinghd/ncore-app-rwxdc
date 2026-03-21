@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.68",
+            "version": "11.7.69",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "DM caller now stays on the call screen while the call is still ringing.",
+                "Outgoing call fallback flow now preserves call-route state instead of forcing a DM redirect.",
+                "Call session guard logic is more resilient to transient signaling/lookup timing gaps."
+            ],
+            "bugFixes": [
+                "Fixed regression where callers were kicked back to DMs before the recipient answered.",
+                "Fixed no-row call fallback branch to honor outgoing fallback route state.",
+                "Reduced false idle-route exits during active ringing handoff."
+            ]
+        },
+        {
+            "version": "11.7.68",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Updated NCore brand source image to your provided high-resolution NCore.jpg.",
                 "Regenerated desktop executable, installer, and web icon assets from the new canonical brand file.",
