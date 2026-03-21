@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Hash, Mic, Megaphone, ChevronDown, ChevronRight,
-  Plus, Settings, Users, Volume2, VolumeX
+  Plus, Settings, Users, Volume2, VolumeX, Pencil, Trash2
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,7 +17,18 @@ interface ChannelSidebarProps {
   currentVoiceChannelId?: string;
   onAddChannel?: (categoryId: string, type: 'text' | 'voice') => void;
   onAddCategory?: () => void;
+  onEditCategory?: (categoryId: string) => void;
+  onDeleteCategory?: (categoryId: string) => void;
+  onEditChannel?: (channelId: string) => void;
+  onDeleteChannel?: (channelId: string) => void;
   onClose?: () => void;
+}
+
+interface SidebarContextMenuState {
+  x: number;
+  y: number;
+  category?: ChannelCategory;
+  channel?: Channel;
 }
 
 function ChannelIcon({ type }: { type: string }) {
@@ -28,11 +39,13 @@ function ChannelIcon({ type }: { type: string }) {
 
 export function ChannelSidebar({
   community, categories = [], activeChannelId,
-  voiceSessions = {}, currentVoiceChannelId, onAddChannel, onAddCategory, onClose,
+  voiceSessions = {}, currentVoiceChannelId, onAddChannel, onAddCategory,
+  onEditCategory, onDeleteCategory, onEditChannel, onDeleteChannel, onClose,
 }: ChannelSidebarProps) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
 
   const isAdmin = community && (
     community.owner_id === profile?.id ||
@@ -59,8 +72,48 @@ export function ChannelSidebar({
     onClose?.();
   }
 
+  function openCategoryContextMenu(event: MouseEvent, category: ChannelCategory) {
+    if (!isAdmin) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      category,
+    });
+  }
+
+  function openChannelContextMenu(event: MouseEvent, channel: Channel) {
+    if (!isAdmin) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      channel,
+    });
+  }
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = () => setContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('contextmenu', close);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contextMenu]);
+
   return (
-    <div className="w-60 bg-surface-900 flex h-full min-h-0 flex-col border-r border-surface-800 flex-shrink-0">
+    <div className="relative w-60 bg-surface-900 flex h-full min-h-0 flex-col border-r border-surface-800 flex-shrink-0">
       {community && (
         <div className="h-14 flex items-center justify-between px-4 border-b border-surface-800">
           <button
@@ -96,6 +149,7 @@ export function ChannelSidebar({
               <button
                 type="button"
                 onClick={() => toggleCategory(category.id)}
+                onContextMenu={(event) => openCategoryContextMenu(event, category)}
                 className="flex items-center gap-1 flex-1 text-left"
               >
                 {collapsed[category.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
@@ -135,6 +189,7 @@ export function ChannelSidebar({
                     onClick={() => {
                       handleChannelClick(channel);
                     }}
+                    onContextMenu={(event) => openChannelContextMenu(event, channel)}
                     className={`channel-item mx-1 w-full text-left ${isActive ? 'active' : ''} ${isCurrentVoice ? 'text-nyptid-300' : ''}`}
                   >
                     <ChannelIcon type={channel.channel_type} />
@@ -214,6 +269,106 @@ export function ChannelSidebar({
             <div className="flex items-center gap-1">
               <span className={`rank-badge ${rankClasses}`}>{profile.rank}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div className="fixed inset-0 z-[95] pointer-events-none">
+          <div
+            className="pointer-events-auto fixed w-56 rounded-xl border border-surface-700 bg-surface-900/95 py-2 shadow-2xl backdrop-blur"
+            style={{
+              left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 224 - 8)),
+              top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 220 - 8)),
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {contextMenu.category && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onEditCategory?.(contextMenu.category!.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors flex items-center gap-2"
+                >
+                  <Pencil size={13} />
+                  Rename Category
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddChannel?.(contextMenu.category!.id, 'text');
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors"
+                >
+                  Add Text Channel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddChannel?.(contextMenu.category!.id, 'voice');
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors"
+                >
+                  Add Voice Channel
+                </button>
+                <div className="my-1 border-t border-surface-700" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteCategory?.(contextMenu.category!.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                >
+                  <Trash2 size={13} />
+                  Delete Category
+                </button>
+              </>
+            )}
+
+            {contextMenu.channel && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleChannelClick(contextMenu.channel!);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors"
+                >
+                  Open Channel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onEditChannel?.(contextMenu.channel!.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors flex items-center gap-2"
+                >
+                  <Pencil size={13} />
+                  Rename Channel
+                </button>
+                <div className="my-1 border-t border-surface-700" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteChannel?.(contextMenu.channel!.id);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                >
+                  <Trash2 size={13} />
+                  Delete Channel
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

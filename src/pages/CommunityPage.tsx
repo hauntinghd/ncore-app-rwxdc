@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Users, MessageSquare, Settings, UserPlus, UserMinus, Crown, Shield, ChevronRight } from 'lucide-react';
+import { Users, MessageSquare, Settings, UserPlus, UserMinus, Crown, Shield, ChevronRight, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
@@ -456,6 +456,87 @@ export function CommunityPage() {
       return;
     }
     setUserRelationships((prev) => ({ ...prev, [targetUserId]: nextRelationship }));
+  }
+
+  function canModerateCommunityMember(member: CommunityMember): boolean {
+    const targetUserId = String(member.user_id || '').trim();
+    if (!community || !profile || !targetUserId) return false;
+    if (targetUserId === String(profile.id)) return false;
+
+    const targetRole = String(member.role || 'member').toLowerCase();
+    if (targetRole === 'owner' || targetUserId === String(community.owner_id || '')) return false;
+
+    if (String(profile.platform_role || '').toLowerCase() === 'owner') return true;
+
+    const currentRole = String(community.member_role || 'member').toLowerCase();
+    if (currentRole === 'owner' || currentRole === 'admin') return true;
+    if (currentRole === 'moderator') return targetRole === 'member';
+    return false;
+  }
+
+  async function handleKickMember(member: CommunityMember) {
+    if (!communityId || !community || !canModerateCommunityMember(member)) return;
+    const targetProfile = getMemberProfile(member);
+    const targetName = targetProfile?.display_name || targetProfile?.username || 'this member';
+    const confirmed = window.confirm(`Remove ${targetName} from ${community.name}?`);
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from('community_members')
+      .delete()
+      .eq('community_id', communityId)
+      .eq('user_id', member.user_id);
+
+    if (error) {
+      window.alert(error.message || 'Could not remove member.');
+      return;
+    }
+    await refreshCommunityMembersSnapshot(communityId);
+  }
+
+  async function handleBanMember(member: CommunityMember) {
+    if (!communityId || !community || !canModerateCommunityMember(member)) return;
+    const targetProfile = getMemberProfile(member);
+    const targetName = targetProfile?.display_name || targetProfile?.username || 'this member';
+    const reason = String(window.prompt(`Ban ${targetName} from ${community.name}. Optional reason:`, 'Violation of server rules') || '').trim();
+    const confirmed = window.confirm(`Confirm ban for ${targetName}?`);
+    if (!confirmed) return;
+
+    const rpcResult = await (supabase as any).rpc('ban_community_member', {
+      p_community_id: communityId,
+      p_target_user_id: member.user_id,
+      p_reason: reason || null,
+    });
+
+    if (!rpcResult.error) {
+      await refreshCommunityMembersSnapshot(communityId);
+      return;
+    }
+
+    const errorText = String(rpcResult.error?.message || '').toLowerCase();
+    const missingBanRpc =
+      errorText.includes('ban_community_member')
+      || errorText.includes('does not exist')
+      || errorText.includes('not found');
+
+    if (!missingBanRpc) {
+      window.alert(rpcResult.error.message || 'Could not ban member.');
+      return;
+    }
+
+    // Fallback path if ban RPC is not deployed yet: remove from server and block relation.
+    const { error: removeError } = await supabase
+      .from('community_members')
+      .delete()
+      .eq('community_id', communityId)
+      .eq('user_id', member.user_id);
+    if (removeError) {
+      window.alert(removeError.message || 'Could not remove member.');
+      return;
+    }
+    await handleSetRelationship(String(member.user_id), 'blocked');
+    await refreshCommunityMembersSnapshot(communityId);
+    window.alert('Ban service is not deployed yet. User was removed and blocked as a fallback.');
   }
 
   useEffect(() => {
@@ -1035,8 +1116,10 @@ export function CommunityPage() {
         const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : memberContextMenu.y + menuHeight + 8;
         const left = Math.max(8, Math.min(memberContextMenu.x, viewportWidth - menuWidth - 8));
         const top = Math.max(8, Math.min(memberContextMenu.y, viewportHeight - menuHeight - 8));
+        const targetMember = memberContextMenu.member;
         const targetUser = memberContextMenu.targetUser;
         const isSelf = String(targetUser?.id || '') === String(profile?.id || '');
+        const canModerateMember = canModerateCommunityMember(targetMember);
         const currentRelationship = targetUser ? userRelationships[targetUser.id] : undefined;
         const addFriendLabel =
           currentRelationship === 'friend'
@@ -1126,7 +1209,7 @@ export function CommunityPage() {
                             window.alert('Could not open call route right now.');
                             return;
                           }
-                          navigate(`/app/dm/${conversationId}/call`);
+                          navigate(`/app/dm/${conversationId}?autocall=1`);
                         })();
                       }
                       setMemberContextMenu(null);
@@ -1247,6 +1330,34 @@ export function CommunityPage() {
                   >
                     {blockLabel}
                   </button>
+
+                  {canModerateMember && (
+                    <>
+                      <div className="my-2 border-t border-surface-700" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleKickMember(targetMember);
+                          setMemberContextMenu(null);
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm text-amber-200 hover:bg-amber-500/10 transition-colors flex items-center gap-2"
+                      >
+                        <UserX size={14} />
+                        Kick / Remove From Server
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleBanMember(targetMember);
+                          setMemberContextMenu(null);
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                      >
+                        <Shield size={14} />
+                        Ban From Server
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>

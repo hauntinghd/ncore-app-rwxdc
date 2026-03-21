@@ -53,6 +53,8 @@ interface CosmeticPreviewMeta {
 type MarketplaceTrack = 'cosmetics' | 'quickdraw' | 'games';
 type QuickdrawRoleView = 'hiring' | 'specialist';
 type QuickdrawBriefingId = 'terms' | 'tier2' | 'protocols' | null;
+type QuickdrawNavId = 'my_contracts' | 'listed_contracts' | 'working_contracts' | 'escrow_history' | 'find_contracts' | 'contract_radar';
+type GameStoreSection = 'store' | 'new_trending' | 'top_sellers' | 'recently_updated' | 'library';
 
 interface QuickdrawContractDraft {
   id: string;
@@ -443,9 +445,11 @@ export function MarketplacePage() {
   const [newGameProofUrl, setNewGameProofUrl] = useState('');
   const [orderActionLoadingKey, setOrderActionLoadingKey] = useState<string | null>(null);
   const [quickdrawRoleView, setQuickdrawRoleView] = useState<QuickdrawRoleView>('hiring');
+  const [quickdrawNavId, setQuickdrawNavId] = useState<QuickdrawNavId>('my_contracts');
   const [quickdrawBriefingId, setQuickdrawBriefingId] = useState<QuickdrawBriefingId>(null);
   const [quickdrawSearch, setQuickdrawSearch] = useState('');
   const [gamesSearch, setGamesSearch] = useState('');
+  const [gameStoreSection, setGameStoreSection] = useState<GameStoreSection>('store');
   const [showIssueContractModal, setShowIssueContractModal] = useState(false);
   const [issueContractTitle, setIssueContractTitle] = useState('');
   const [issueContractDescription, setIssueContractDescription] = useState('');
@@ -483,7 +487,25 @@ export function MarketplacePage() {
     () => gameOrders.filter((order) => String(order.buyer_id) === String(profile?.id || '')),
     [gameOrders, profile?.id],
   );
-  const filteredServiceListings = useMemo(() => {
+  const quickdrawNavItems = useMemo(() => (
+    quickdrawRoleView === 'hiring'
+      ? [
+          { id: 'my_contracts' as QuickdrawNavId, label: 'My Contracts', subtitle: 'Founder command center' },
+          { id: 'listed_contracts' as QuickdrawNavId, label: 'Listed Contracts', subtitle: 'Drafted and staged' },
+          { id: 'working_contracts' as QuickdrawNavId, label: 'Working Contracts', subtitle: 'Live escrow orders' },
+          { id: 'escrow_history' as QuickdrawNavId, label: 'Escrow History', subtitle: 'Closed settlements' },
+        ]
+      : [
+          { id: 'find_contracts' as QuickdrawNavId, label: 'Find Contracts', subtitle: 'Open specialist opportunities' },
+          { id: 'contract_radar' as QuickdrawNavId, label: 'Contract Radar', subtitle: 'Live demand pulse' },
+          { id: 'escrow_history' as QuickdrawNavId, label: 'Escrow History', subtitle: 'Delivered and disputed' },
+        ]
+  ), [quickdrawRoleView]);
+  const activeQuickdrawNav = useMemo(
+    () => quickdrawNavItems.find((item) => item.id === quickdrawNavId) || quickdrawNavItems[0],
+    [quickdrawNavId, quickdrawNavItems],
+  );
+  const searchedServiceListings = useMemo(() => {
     const needle = quickdrawSearch.trim().toLowerCase();
     if (!needle) return serviceListings;
     return serviceListings.filter((listing) => {
@@ -500,7 +522,29 @@ export function MarketplacePage() {
       return haystack.includes(needle);
     });
   }, [quickdrawSearch, serviceListings]);
-  const filteredGameListings = useMemo(() => {
+  const visibleServiceListings = useMemo(() => {
+    if (quickdrawRoleView === 'hiring') {
+      if (quickdrawNavId === 'working_contracts' || quickdrawNavId === 'escrow_history' || quickdrawNavId === 'listed_contracts') {
+        return [];
+      }
+      return searchedServiceListings;
+    }
+    if (quickdrawNavId === 'escrow_history') {
+      return [];
+    }
+    if (quickdrawNavId === 'contract_radar') {
+      return [...searchedServiceListings].sort((a, b) => {
+        const aCreated = Date.parse(String(a.created_at || ''));
+        const bCreated = Date.parse(String(b.created_at || ''));
+        if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
+          return bCreated - aCreated;
+        }
+        return b.base_price_cents - a.base_price_cents;
+      });
+    }
+    return searchedServiceListings;
+  }, [quickdrawNavId, quickdrawRoleView, searchedServiceListings]);
+  const searchedGameListings = useMemo(() => {
     const needle = gamesSearch.trim().toLowerCase();
     if (!needle) return gameListings;
     return gameListings.filter((game) => {
@@ -517,6 +561,50 @@ export function MarketplacePage() {
       return haystack.includes(needle);
     });
   }, [gameListings, gamesSearch]);
+  const gameOrderCountsByListingId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const order of gameOrders) {
+      const key = String(order.game_listing_id || '').trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }, [gameOrders]);
+  const purchasedGameListingIds = useMemo(
+    () => new Set(myGameOrdersAsBuyer.map((order) => String(order.game_listing_id || '').trim()).filter(Boolean)),
+    [myGameOrdersAsBuyer],
+  );
+  const filteredGameListings = useMemo(() => {
+    const working = [...searchedGameListings];
+    if (gameStoreSection === 'library') {
+      return working
+        .filter((listing) => purchasedGameListingIds.has(String(listing.id)))
+        .sort((a, b) => Date.parse(String(b.updated_at || '')) - Date.parse(String(a.updated_at || '')));
+    }
+    if (gameStoreSection === 'new_trending') {
+      return working.sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')));
+    }
+    if (gameStoreSection === 'recently_updated') {
+      return working.sort((a, b) => Date.parse(String(b.updated_at || '')) - Date.parse(String(a.updated_at || '')));
+    }
+    if (gameStoreSection === 'top_sellers') {
+      return working.sort((a, b) => {
+        const aOrders = gameOrderCountsByListingId.get(String(a.id)) || 0;
+        const bOrders = gameOrderCountsByListingId.get(String(b.id)) || 0;
+        if (aOrders !== bOrders) return bOrders - aOrders;
+        return b.price_cents - a.price_cents;
+      });
+    }
+    return working;
+  }, [gameOrderCountsByListingId, gameStoreSection, purchasedGameListingIds, searchedGameListings]);
+  const activeServiceOrdersForRole = useMemo(() => {
+    const roleOrders = quickdrawRoleView === 'hiring' ? myServiceOrdersAsBuyer : myServiceOrdersAsSeller;
+    return roleOrders.filter((order) => ['funded', 'in_progress', 'delivered'].includes(String(order.status || '').toLowerCase()));
+  }, [myServiceOrdersAsBuyer, myServiceOrdersAsSeller, quickdrawRoleView]);
+  const historicalServiceOrdersForRole = useMemo(() => {
+    const roleOrders = quickdrawRoleView === 'hiring' ? myServiceOrdersAsBuyer : myServiceOrdersAsSeller;
+    return roleOrders.filter((order) => !['funded', 'in_progress', 'delivered'].includes(String(order.status || '').toLowerCase()));
+  }, [myServiceOrdersAsBuyer, myServiceOrdersAsSeller, quickdrawRoleView]);
   const featuredGameListing = filteredGameListings[0] || null;
   const hiringContractDrafts = useMemo(
     () => quickdrawContractDrafts.filter((draft) => draft.status === 'draft'),
@@ -553,6 +641,13 @@ export function MarketplacePage() {
   useEffect(() => {
     setActiveTrack(routeTrack);
   }, [routeTrack]);
+
+  useEffect(() => {
+    const validIds = new Set(quickdrawNavItems.map((item) => item.id));
+    if (!validIds.has(quickdrawNavId)) {
+      setQuickdrawNavId(quickdrawNavItems[0]?.id || 'my_contracts');
+    }
+  }, [quickdrawNavId, quickdrawNavItems]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1463,20 +1558,20 @@ export function MarketplacePage() {
                     {quickdrawRoleView === 'hiring' ? 'Deploy Terminal' : 'Specialist Console'}
                   </div>
                   <div className="space-y-1.5">
-                    {(quickdrawRoleView === 'hiring'
-                      ? ['My Contracts', 'Listed Contracts', 'Working Contracts', 'Escrow History']
-                      : ['Active Contracts', 'Contract Radar', 'Escrow History']
-                    ).map((itemLabel, index) => (
-                      <div
-                        key={`${quickdrawRoleView}-${itemLabel}`}
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                          index === 0
+                    {quickdrawNavItems.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setQuickdrawNavId(item.id)}
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                          quickdrawNavId === item.id
                             ? 'border-nyptid-300/35 bg-nyptid-300/10 text-nyptid-100'
-                            : 'border-surface-700 bg-surface-900/60 text-surface-300'
+                            : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
                         }`}
                       >
-                        {itemLabel}
-                      </div>
+                        <div className="font-semibold">{item.label}</div>
+                        <div className="text-[11px] text-surface-500 mt-0.5">{item.subtitle}</div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -1508,15 +1603,25 @@ export function MarketplacePage() {
                 <div className="nyptid-card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <div className="text-lg font-black text-surface-100">Contract Grid</div>
+                      <div className="text-lg font-black text-surface-100">{activeQuickdrawNav?.label || 'Contract Grid'}</div>
                       <div className="text-sm text-surface-500">
                         {quickdrawRoleView === 'hiring'
-                          ? 'Browse specialist contracts and issue escrow-backed hires.'
-                          : 'Manage your specialist profile, listings, and active contract flow.'}
+                          ? (quickdrawNavId === 'listed_contracts'
+                            ? 'Track your drafted and staged contracts before they move into escrow.'
+                            : quickdrawNavId === 'working_contracts'
+                              ? 'Monitor active escrow-backed orders currently in execution.'
+                              : quickdrawNavId === 'escrow_history'
+                                ? 'Review historical orders, releases, and closed disputes.'
+                                : 'Browse specialist contracts and issue escrow-backed hires.')
+                          : (quickdrawNavId === 'contract_radar'
+                            ? 'Live specialist demand radar with newest contracts and category momentum.'
+                            : quickdrawNavId === 'escrow_history'
+                              ? 'Review your completed deliveries and settlement outcomes.'
+                              : 'Manage your specialist profile, listings, and active contract flow.')}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {quickdrawRoleView === 'hiring' && (
+                      {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
                         <button
                           type="button"
                           onClick={() => setShowIssueContractModal(true)}
@@ -1540,11 +1645,17 @@ export function MarketplacePage() {
                     <input
                       value={quickdrawSearch}
                       onChange={(event) => setQuickdrawSearch(event.target.value)}
-                      placeholder="Search contracts, categories, specialists..."
+                      placeholder={
+                        quickdrawNavId === 'contract_radar'
+                          ? 'Scan radar by category, contract type, specialist...'
+                          : quickdrawNavId === 'listed_contracts'
+                            ? 'Search your listed contracts and drafts...'
+                            : 'Search contracts, categories, specialists...'
+                      }
                       className="w-full bg-transparent border-0 outline-none text-sm text-surface-200 placeholder:text-surface-600"
                     />
                   </div>
-                  {quickdrawRoleView === 'hiring' && (
+                  {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wide text-surface-500">Contracts Tracked</div>
@@ -1563,7 +1674,7 @@ export function MarketplacePage() {
                 </div>
 
                 <div className="space-y-3">
-                  {filteredServiceListings.map((listing) => {
+                  {visibleServiceListings.map((listing) => {
                     const loadingKey = `svc-buy:${listing.id}`;
                     const sellerLabel = listing.seller_profile?.display_name || listing.seller_profile?.username || 'Verified specialist';
                     return (
@@ -1607,12 +1718,20 @@ export function MarketplacePage() {
                       </div>
                     );
                   })}
-                  {!loadingQuickdraw && filteredServiceListings.length === 0 && (
-                    <div className="nyptid-card p-4 text-sm text-surface-500">No approved Quickdraw listings found for this filter.</div>
+                  {!loadingQuickdraw && visibleServiceListings.length === 0 && (
+                    <div className="nyptid-card p-4 text-sm text-surface-500">
+                      {quickdrawNavId === 'listed_contracts'
+                        ? 'No listed contracts found yet. Use Issue New Contract to stage your first contract.'
+                        : quickdrawNavId === 'working_contracts'
+                          ? 'No active contracts in execution right now.'
+                          : quickdrawNavId === 'escrow_history'
+                            ? 'No historical settlements yet.'
+                            : 'No approved Quickdraw listings found for this filter.'}
+                    </div>
                   )}
                 </div>
 
-                {quickdrawRoleView === 'hiring' && (
+                {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
                   <div className="nyptid-card p-4">
                     <div className="flex items-center justify-between gap-3 mb-3">
                       <div>
@@ -1652,6 +1771,44 @@ export function MarketplacePage() {
                         <div className="rounded-lg border border-dashed border-surface-700 bg-surface-900/50 px-3 py-4 text-sm text-surface-500">
                           No contract drafts yet. Click <span className="text-surface-300 font-semibold">Issue New Contract</span> to open the deploy composer.
                         </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {quickdrawNavId === 'working_contracts' && (
+                  <div className="nyptid-card p-4">
+                    <div className="font-bold text-surface-100 mb-2">Working Contracts</div>
+                    <div className="space-y-2">
+                      {activeServiceOrdersForRole.slice(0, 10).map((order) => (
+                        <div key={order.id} className="rounded-lg border border-surface-700 bg-surface-900/60 p-2.5">
+                          <div className="text-sm font-semibold text-surface-100">{order.listing?.title || 'Service Order'}</div>
+                          <div className="text-[11px] text-surface-500 mt-1">
+                            {formatUsdFromCents(order.amount_cents)} - {String(order.status || 'unknown')} - Escrow due {formatDateTime(order.escrow_release_due_at)}
+                          </div>
+                        </div>
+                      ))}
+                      {activeServiceOrdersForRole.length === 0 && (
+                        <div className="text-xs text-surface-500">No active contracts right now.</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {quickdrawNavId === 'escrow_history' && (
+                  <div className="nyptid-card p-4">
+                    <div className="font-bold text-surface-100 mb-2">Escrow History</div>
+                    <div className="space-y-2">
+                      {historicalServiceOrdersForRole.slice(0, 12).map((order) => (
+                        <div key={order.id} className="rounded-lg border border-surface-700 bg-surface-900/60 p-2.5">
+                          <div className="text-sm font-semibold text-surface-100">{order.listing?.title || 'Service Order'}</div>
+                          <div className="text-[11px] text-surface-500 mt-1">
+                            {formatUsdFromCents(order.amount_cents)} - {String(order.status || 'unknown')} - Updated {formatDateTime(order.updated_at)}
+                          </div>
+                        </div>
+                      ))}
+                      {historicalServiceOrdersForRole.length === 0 && (
+                        <div className="text-xs text-surface-500">No closed settlements yet.</div>
                       )}
                     </div>
                   </div>
@@ -1926,17 +2083,25 @@ export function MarketplacePage() {
                     Steam-style browsing surface with featured capsules, publisher cards, and direct installer delivery from purchase history.
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {['Store', 'New & Trending', 'Top Sellers', 'Recently Updated', 'Your Library'].map((chip, index) => (
-                      <span
-                        key={chip}
-                        className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                          index === 0
+                    {[
+                      { id: 'store' as GameStoreSection, label: 'Store' },
+                      { id: 'new_trending' as GameStoreSection, label: 'New & Trending' },
+                      { id: 'top_sellers' as GameStoreSection, label: 'Top Sellers' },
+                      { id: 'recently_updated' as GameStoreSection, label: 'Recently Updated' },
+                      { id: 'library' as GameStoreSection, label: 'Your Library' },
+                    ].map((chip) => (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        onClick={() => setGameStoreSection(chip.id)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] border transition-colors ${
+                          gameStoreSection === chip.id
                             ? 'border-nyptid-300/40 bg-nyptid-300/15 text-nyptid-100'
-                            : 'border-surface-700 bg-surface-900/70 text-surface-300'
+                            : 'border-surface-700 bg-surface-900/70 text-surface-300 hover:border-surface-600'
                         }`}
                       >
-                        {chip}
-                      </span>
+                        {chip.label}
+                      </button>
                     ))}
                   </div>
                   <div className="mt-4 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
@@ -2048,7 +2213,11 @@ export function MarketplacePage() {
                     );
                   })}
                   {!loadingQuickdraw && filteredGameListings.length === 0 && (
-                    <div className="nyptid-card p-4 text-sm text-surface-500">No approved game listings found for this filter.</div>
+                    <div className="nyptid-card p-4 text-sm text-surface-500">
+                      {gameStoreSection === 'library'
+                        ? 'No purchases in your library yet. Buy a game to unlock direct installer access here.'
+                        : 'No approved game listings found for this filter.'}
+                    </div>
                   )}
                 </div>
               </div>

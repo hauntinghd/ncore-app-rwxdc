@@ -1,6 +1,20 @@
-import { useState, useEffect, useRef, type ClipboardEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { Hash, Send, Smile, Reply, CreditCard as Edit3, Trash2, Paperclip, X } from 'lucide-react';
+import {
+  BellOff,
+  BellRing,
+  Hash,
+  MessageSquareQuote,
+  Paperclip,
+  Pin,
+  Reply,
+  Send,
+  Smile,
+  CreditCard as Edit3,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,11 +29,42 @@ interface MessageGroupProps {
   onReact: (messageId: string, emoji: string) => void;
   onReply: (message: Message) => void;
   onEdit: (message: Message) => void;
+  onTogglePin: (message: Message) => void;
   onDelete: (messageId: string) => void;
+  onOpenContextMenu: (event: ReactMouseEvent, message: Message) => void;
   currentUserId?: string;
+  canModerateMessages?: boolean;
 }
 
-function MessageGroup({ messages, onReact, onReply, onEdit, onDelete, currentUserId }: MessageGroupProps) {
+interface ChatMember {
+  id: string;
+  role: 'owner' | 'admin' | 'moderator' | 'member' | string;
+  profile: {
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    status?: string | null;
+  } | null;
+}
+
+interface MessageContextMenuState {
+  x: number;
+  y: number;
+  message: Message;
+}
+
+function MessageGroup({
+  messages,
+  onReact,
+  onReply,
+  onEdit,
+  onTogglePin,
+  onDelete,
+  onOpenContextMenu,
+  currentUserId,
+  canModerateMessages = false,
+}: MessageGroupProps) {
   const [showEmojiFor, setShowEmojiFor] = useState<string | null>(null);
   const first = messages[0];
 
@@ -38,7 +83,11 @@ function MessageGroup({ messages, onReact, onReply, onEdit, onDelete, currentUse
           <span className="text-xs text-surface-600">{formatMessageTime(first.created_at)}</span>
         </div>
         {messages.map(msg => (
-          <div key={msg.id} className="relative group/msg">
+          <div
+            key={msg.id}
+            className="relative group/msg"
+            onContextMenu={(event) => onOpenContextMenu(event, msg)}
+          >
             <div className="text-sm text-surface-300 leading-relaxed break-words">
               {msg.content && (
                 <div className="whitespace-pre-wrap break-words">{msg.content}</div>
@@ -121,7 +170,20 @@ function MessageGroup({ messages, onReact, onReply, onEdit, onDelete, currentUse
                   <Edit3 size={14} />
                 </button>
               )}
-              {msg.author_id === currentUserId && (
+              {(msg.author_id === currentUserId || canModerateMessages) && (
+                <button
+                  onClick={() => onTogglePin(msg)}
+                  className={`p-1.5 rounded transition-colors ${
+                    msg.is_pinned
+                      ? 'text-nyptid-300 hover:bg-nyptid-300/10'
+                      : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700'
+                  }`}
+                  title={msg.is_pinned ? 'Unpin message' : 'Pin message'}
+                >
+                  <Pin size={14} />
+                </button>
+              )}
+              {(msg.author_id === currentUserId || canModerateMessages) && (
                 <button
                   onClick={() => onDelete(msg.id)}
                   className="p-1.5 rounded text-red-400 hover:bg-red-500/10 transition-colors"
@@ -190,9 +252,32 @@ export function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [composerError, setComposerError] = useState('');
+  const [communityRole, setCommunityRole] = useState<'owner' | 'admin' | 'moderator' | 'member'>('member');
+  const [members, setMembers] = useState<ChatMember[]>([]);
+  const [memberListHidden, setMemberListHidden] = useState(false);
+  const [channelNotificationMode, setChannelNotificationMode] = useState<'all' | 'mentions' | 'none'>(() => {
+    if (typeof window === 'undefined') return 'all';
+    return (window.localStorage.getItem('ncore.chat.channelNotifMode') as 'all' | 'mentions' | 'none') || 'all';
+  });
+  const [showThreadsModal, setShowThreadsModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [showPinnedModal, setShowPinnedModal] = useState(false);
+  const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+
+  const canModerateMessages = useMemo(() => (
+    profile?.platform_role === 'owner'
+    || communityRole === 'owner'
+    || communityRole === 'admin'
+    || communityRole === 'moderator'
+  ), [communityRole, profile?.platform_role]);
+
+  const pinnedMessages = useMemo(
+    () => messages.filter((message) => Boolean(message.is_pinned)),
+    [messages],
+  );
 
   useEffect(() => {
     if (!channelId) return;
@@ -205,6 +290,95 @@ export function ChatPage() {
         if (data) setChannel(data as Channel);
       });
   }, [channelId]);
+
+  useEffect(() => {
+    if (!profile?.id || !communityId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('community_members')
+        .select('role')
+        .eq('community_id', communityId)
+        .eq('user_id', profile.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const role = String((data as any)?.role || 'member').toLowerCase();
+      if (role === 'owner' || role === 'admin' || role === 'moderator' || role === 'member') {
+        setCommunityRole(role);
+      } else {
+        setCommunityRole('member');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [communityId, profile?.id]);
+
+  useEffect(() => {
+    if (!communityId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data: memberRows } = await supabase
+        .from('community_members')
+        .select('id,user_id,role')
+        .eq('community_id', communityId)
+        .limit(300);
+      if (cancelled || !memberRows) return;
+
+      const userIds = Array.from(new Set((memberRows as any[]).map((row) => String(row.user_id || '').trim()).filter(Boolean)));
+      let profileRows: any[] = [];
+      if (userIds.length > 0) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('id,username,display_name,avatar_url,status')
+          .in('id', userIds);
+        profileRows = (data || []) as any[];
+      }
+      if (cancelled) return;
+      const profileMap = new Map(profileRows.map((row) => [String(row.id), row]));
+      setMembers((memberRows as any[]).map((member) => ({
+        id: String(member.id),
+        role: String(member.role || 'member'),
+        profile: profileMap.get(String(member.user_id)) || null,
+      })));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [communityId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
+    const next = window.localStorage.getItem(storageKey) as 'all' | 'mentions' | 'none' | null;
+    if (next === 'all' || next === 'mentions' || next === 'none') {
+      setChannelNotificationMode(next);
+    } else {
+      setChannelNotificationMode('all');
+    }
+  }, [channelId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
+    window.localStorage.setItem(storageKey, channelNotificationMode);
+  }, [channelId, channelNotificationMode]);
+
+  useEffect(() => {
+    if (!messageContextMenu) return undefined;
+    const close = () => setMessageContextMenu(null);
+    const onEsc = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setMessageContextMenu(null);
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('contextmenu', close);
+    window.addEventListener('keydown', onEsc);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+      window.removeEventListener('keydown', onEsc);
+    };
+  }, [messageContextMenu]);
 
   useEffect(() => {
     if (!communityId || !channelId) return;
@@ -527,11 +701,41 @@ export function ChatPage() {
   }
 
   async function handleDelete(messageId: string) {
-    await supabase.from('messages').delete().eq('id', messageId);
+    const { error: deleteError } = await supabase.from('messages').delete().eq('id', messageId);
+    if (deleteError) {
+      setComposerError(deleteError.message || 'Failed to delete message.');
+      return;
+    }
     setMessages(prev => prev.filter(m => m.id !== messageId));
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
+  async function handleTogglePin(message: Message) {
+    if (!message?.id) return;
+    const nextPinned = !Boolean(message.is_pinned);
+    const { error: updateError } = await supabase
+      .from('messages')
+      .update({ is_pinned: nextPinned } as any)
+      .eq('id', message.id);
+    if (updateError) {
+      setComposerError(updateError.message || 'Failed to update pin state.');
+      return;
+    }
+    setMessages((prev) => prev.map((entry) => (
+      entry.id === message.id ? { ...entry, is_pinned: nextPinned } : entry
+    )));
+  }
+
+  function openMessageContextMenu(event: ReactMouseEvent, message: Message) {
+    event.preventDefault();
+    event.stopPropagation();
+    setMessageContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      message,
+    });
+  }
+
+  function handleKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -543,6 +747,46 @@ export function ChatPage() {
   }
 
   const messageGroups = groupMessages(messages);
+  const topBarActions = (
+    <div className="hidden md:flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setShowThreadsModal(true)}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Threads"
+      >
+        <MessageSquareQuote size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowNotificationModal(true)}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Notification settings"
+      >
+        {channelNotificationMode === 'none' ? <BellOff size={15} /> : <BellRing size={15} />}
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowPinnedModal(true)}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Pinned messages"
+      >
+        <Pin size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setMemberListHidden((prev) => !prev)}
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+          memberListHidden
+            ? 'text-surface-500 hover:text-surface-300 hover:bg-surface-700'
+            : 'text-nyptid-300 bg-nyptid-300/10 hover:bg-nyptid-300/20'
+        }`}
+        title={memberListHidden ? 'Show member list' : 'Hide member list'}
+      >
+        <Users size={15} />
+      </button>
+    </div>
+  );
 
   return (
     <AppShell
@@ -550,8 +794,10 @@ export function ChatPage() {
       activeChannelId={channelId}
       title={channel ? `# ${channel.name}` : 'Loading...'}
       subtitle={channel?.description}
+      topBarActions={topBarActions}
     >
-      <div className="flex flex-col h-full">
+      <div className="flex h-full">
+        <div className="flex min-w-0 flex-1 flex-col">
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
@@ -572,15 +818,18 @@ export function ChatPage() {
               </div>
             )}
 
-            {messageGroups.map((group, i) => (
+            {messageGroups.map((group) => (
               <MessageGroup
                 key={group[0].id}
                 messages={group}
                 onReact={handleReact}
                 onReply={msg => { setReplyTo(msg); setEditingMsg(null); inputRef.current?.focus(); }}
                 onEdit={msg => { setEditingMsg(msg); setInput(msg.content); setReplyTo(null); inputRef.current?.focus(); }}
+                onTogglePin={handleTogglePin}
                 onDelete={handleDelete}
+                onOpenContextMenu={openMessageContextMenu}
                 currentUserId={profile?.id}
+                canModerateMessages={canModerateMessages}
               />
             ))}
 
@@ -693,6 +942,169 @@ export function ChatPage() {
             Up to 10GB per file. Message limit: 20,000 characters.
           </div>
         </div>
+
+        </div>
+
+        {!memberListHidden && (
+          <aside className="hidden lg:flex w-64 border-l border-surface-800 bg-surface-900/70 flex-col">
+            <div className="px-3 py-2 border-b border-surface-800 text-xs font-bold uppercase tracking-wider text-surface-500">
+              Members ({members.length})
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {members.map((member) => (
+                <div key={member.id} className="rounded-lg border border-surface-700/70 bg-surface-900/60 px-2 py-1.5 flex items-center gap-2">
+                  <Avatar
+                    src={member.profile?.avatar_url || null}
+                    name={member.profile?.display_name || member.profile?.username || 'User'}
+                    size="sm"
+                    status={member.profile?.status as any}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs text-surface-200 truncate">
+                      {member.profile?.display_name || member.profile?.username || 'User'}
+                    </div>
+                    <div className="text-[10px] text-surface-500 uppercase">{member.role}</div>
+                  </div>
+                </div>
+              ))}
+              {members.length === 0 && (
+                <div className="text-xs text-surface-500 px-1 py-2">No member list data available yet.</div>
+              )}
+            </div>
+          </aside>
+        )}
+
+        {messageContextMenu && (
+          <div className="fixed inset-0 z-[90] pointer-events-none">
+            <div
+              className="pointer-events-auto fixed w-56 rounded-xl border border-surface-700 bg-surface-900/95 py-2 shadow-2xl"
+              style={{
+                left: Math.max(8, Math.min(messageContextMenu.x, window.innerWidth - 224 - 8)),
+                top: Math.max(8, Math.min(messageContextMenu.y, window.innerHeight - 220 - 8)),
+              }}
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setReplyTo(messageContextMenu.message);
+                  setEditingMsg(null);
+                  setMessageContextMenu(null);
+                  inputRef.current?.focus();
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors flex items-center gap-2"
+              >
+                <Reply size={13} />
+                Reply
+              </button>
+              {(String(messageContextMenu.message.author_id || '') === String(profile?.id || '') || canModerateMessages) && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleTogglePin(messageContextMenu.message);
+                      setMessageContextMenu(null);
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-surface-200 hover:bg-surface-800 transition-colors flex items-center gap-2"
+                  >
+                    <Pin size={13} />
+                    {messageContextMenu.message.is_pinned ? 'Unpin Message' : 'Pin Message'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDelete(messageContextMenu.message.id);
+                      setMessageContextMenu(null);
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                  >
+                    <Trash2 size={13} />
+                    Delete Message
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showThreadsModal && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowThreadsModal(false)} />
+            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+              <div className="text-lg font-semibold text-surface-100">Threads</div>
+              <p className="text-sm text-surface-400 mt-2">
+                Thread channels are being rolled out. This channel will support full thread creation and management in an upcoming patch.
+              </p>
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowThreadsModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showNotificationModal && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowNotificationModal(false)} />
+            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+              <div className="text-lg font-semibold text-surface-100">Notification Settings</div>
+              <p className="text-sm text-surface-400 mt-2">Choose how notifications work for this channel.</p>
+              <div className="mt-4 space-y-2">
+                {[
+                  { id: 'all' as const, label: 'All Messages', desc: 'Receive notifications for all channel activity.' },
+                  { id: 'mentions' as const, label: 'Only @mentions', desc: 'Only notify when you are directly mentioned.' },
+                  { id: 'none' as const, label: 'Nothing', desc: 'Mute this channel.' },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setChannelNotificationMode(option.id)}
+                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                      channelNotificationMode === option.id
+                        ? 'border-nyptid-300/40 bg-nyptid-300/10'
+                        : 'border-surface-700 bg-surface-900/60 hover:border-surface-600'
+                    }`}
+                  >
+                    <div className="text-sm font-semibold text-surface-100">{option.label}</div>
+                    <div className="text-xs text-surface-500 mt-0.5">{option.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowNotificationModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPinnedModal && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowPinnedModal(false)} />
+            <div className="relative w-full max-w-2xl rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+              <div className="text-lg font-semibold text-surface-100">Pinned Messages</div>
+              <div className="mt-3 max-h-[60vh] overflow-y-auto space-y-2">
+                {pinnedMessages.map((message) => (
+                  <div key={message.id} className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
+                    <div className="text-xs text-surface-500">{formatShortTime(message.created_at)}</div>
+                    <div className="text-sm text-surface-200 mt-1 whitespace-pre-wrap">{message.content || '(attachment only)'}</div>
+                  </div>
+                ))}
+                {pinnedMessages.length === 0 && (
+                  <div className="text-sm text-surface-500">No pinned messages in this channel yet.</div>
+                )}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowPinnedModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

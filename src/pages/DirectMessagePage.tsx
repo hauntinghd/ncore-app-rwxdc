@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type ClipboardEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -68,6 +68,7 @@ export function DirectMessagePage() {
   const maxUploadBytes = entitlements.uploadBytesCap;
   const maxGroupDmMembers = 10 + Math.max(entitlements.groupDmMemberBonus || 0, 0);
   const navigate = useNavigate();
+  const location = useLocation();
   const [conversations, setConversations] = useState<DirectConversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<DirectConversation | null>(null);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
@@ -126,6 +127,7 @@ export function DirectMessagePage() {
   const trackedConversationIdsRef = useRef<Set<string>>(new Set());
   const trackedConversationMemberIdsRef = useRef<Set<string>>(new Set());
   const callRefreshTimersRef = useRef<Record<string, number>>({});
+  const autoCallAttemptKeyRef = useRef<string>('');
   const conversationMembershipRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -554,6 +556,30 @@ export function DirectMessagePage() {
     const found = conversations.find((c) => c.id === conversationId) || null;
     setActiveConversation(found);
   }, [conversationId, conversations]);
+
+  useEffect(() => {
+    if (!conversationId || !profile?.id) return;
+    const params = new URLSearchParams(location.search || '');
+    const shouldAutoCall = ['1', 'true', 'yes'].includes(String(params.get('autocall') || '').toLowerCase());
+    if (!shouldAutoCall) return;
+
+    const shouldStartVideo = ['1', 'true', 'yes'].includes(String(params.get('video') || '').toLowerCase());
+    const attemptKey = `${conversationId}:${shouldStartVideo ? 'video' : 'voice'}`;
+    if (autoCallAttemptKeyRef.current === attemptKey) return;
+    autoCallAttemptKeyRef.current = attemptKey;
+
+    void (async () => {
+      try {
+        await startCallForConversation(conversationId, shouldStartVideo);
+      } finally {
+        const cleanParams = new URLSearchParams(location.search || '');
+        cleanParams.delete('autocall');
+        const nextQuery = cleanParams.toString();
+        const nextRoute = `/app/dm/${conversationId}${nextQuery ? `?${nextQuery}` : ''}`;
+        navigate(nextRoute, { replace: true });
+      }
+    })();
+  }, [conversationId, location.search, navigate, profile?.id]);
 
   useEffect(() => {
     if (!conversationId) {

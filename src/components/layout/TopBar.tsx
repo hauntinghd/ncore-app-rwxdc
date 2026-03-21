@@ -122,6 +122,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const noDragStyle: CSSProperties | undefined = isElectronClient
     ? ({ WebkitAppRegion: 'no-drag' } as CSSProperties)
     : undefined;
+  const streamerBannerTop = isElectronClient ? 36 : 8;
   const activeCallConversationId = callSession.conversationId;
   const isOnActiveCallRoute = activeCallConversationId
     ? location.pathname === `/app/dm/${activeCallConversationId}/call`
@@ -474,6 +475,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   }
 
   return (
+    <>
     <div
       className="relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4"
       style={topBarStyle}
@@ -724,6 +726,20 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         </div>
       )}
     </div>
+      {streamerMode.enabled && (
+        <div
+          className="fixed left-1/2 z-[95] -translate-x-1/2 rounded-lg border border-violet-400/40 bg-violet-500/20 px-3 py-1.5 text-xs text-violet-100 shadow-xl backdrop-blur"
+          style={{ top: streamerBannerTop }}
+        >
+          <span className="font-semibold">Streamer Mode Enabled</span>
+          <span className="mx-1.5 text-violet-200/80">•</span>
+          <span>
+            Sensitive previews hidden and notifications reduced
+            {String(profile?.status || '').toLowerCase() === 'streaming' ? '. Streaming status detected.' : '.'}
+          </span>
+        </div>
+      )}
+    </>
   );
 }
 

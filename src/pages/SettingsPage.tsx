@@ -123,6 +123,50 @@ interface ConnectionProvider {
   comingSoon?: boolean;
 }
 
+type StandingResourceId = 'guidelines' | 'terms' | 'appeal';
+
+const STANDING_RESOURCE_CONTENT: Record<StandingResourceId, {
+  title: string;
+  subtitle: string;
+  highlights: string[];
+  body: string[];
+  actionLabel: string;
+}> = {
+  guidelines: {
+    title: 'Community Guidelines',
+    subtitle: 'NCore participation standards',
+    highlights: ['Respect members', 'No harassment', 'No coordinated abuse'],
+    body: [
+      'Freedom of speech is supported across NCore, but direct harassment, targeted abuse, and doxxing are not allowed.',
+      'Spam, scam automation, impersonation, and malicious account behavior can trigger warnings, restrictions, or removals.',
+      'Owners and moderators can remove content that violates community safety constraints.',
+    ],
+    actionLabel: 'Acknowledge Guidelines',
+  },
+  terms: {
+    title: 'Terms of Service',
+    subtitle: 'Account and platform obligations',
+    highlights: ['Protect account access', 'Follow payment rules', 'No platform abuse'],
+    body: [
+      'Accounts are personal and cannot be transferred or used to evade moderation actions.',
+      'Billing misuse, chargeback abuse, and fraudulent marketplace behavior are treated as severe violations.',
+      'Repeated policy evasion may result in permanent restrictions at account or platform level.',
+    ],
+    actionLabel: 'Acknowledge Terms',
+  },
+  appeal: {
+    title: 'Appeal a Decision',
+    subtitle: 'Request moderation review',
+    highlights: ['Reference action ID', 'Provide evidence', 'Keep appeal concise'],
+    body: [
+      'Appeals should include the action date, decision type, and why you believe the action was inaccurate.',
+      'Attach objective evidence where possible (message links, timestamps, screenshots).',
+      'Submitted appeals are reviewed in order of severity and volume.',
+    ],
+    actionLabel: 'Start Appeal Flow',
+  },
+};
+
 const SECTION_GROUPS: SectionGroup[] = [
   {
     label: 'User Settings',
@@ -938,6 +982,7 @@ export function SettingsPage() {
     }
   });
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+  const [standingResourceModal, setStandingResourceModal] = useState<StandingResourceId | null>(null);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
   const comingSoonSection = rolledOutSection ? null : COMING_SOON_SECTION_CONTENT[activeSection];
 
@@ -1568,13 +1613,13 @@ export function SettingsPage() {
         data = retry.data;
       }
 
-      const payload = data as { portalUrl?: string; error?: string };
+      const payload = data as { portalUrl?: string; portal_url?: string; url?: string; checkoutUrl?: string; error?: string };
       if (payload?.error) {
         setBillingActionMessage(payload.error);
         return;
       }
 
-      const portalUrl = String(payload?.portalUrl || '').trim();
+      const portalUrl = String(payload?.portalUrl || payload?.portal_url || payload?.url || payload?.checkoutUrl || '').trim();
       if (!portalUrl) {
         setBillingActionMessage('Billing portal URL was not returned by the backend.');
         return;
@@ -2735,16 +2780,22 @@ export function SettingsPage() {
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Resources</div>
                   <div className="space-y-2">
                     {[
-                      { label: 'Community Guidelines', desc: 'Read the full NYPTID Community Guidelines' },
-                      { label: 'Terms of Service', desc: 'Review NYPTID Terms of Service' },
-                      { label: 'Appeal a Decision', desc: 'Dispute a moderation action on your account' },
+                      { id: 'guidelines' as StandingResourceId, label: 'Community Guidelines', desc: 'Read the full NYPTID Community Guidelines' },
+                      { id: 'terms' as StandingResourceId, label: 'Terms of Service', desc: 'Review NYPTID Terms of Service' },
+                      { id: 'appeal' as StandingResourceId, label: 'Appeal a Decision', desc: 'Dispute a moderation action on your account' },
                     ].map(r => (
                       <div key={r.label} className="flex items-center justify-between py-2 border-b border-surface-700/50 last:border-0">
                         <div>
                           <div className="text-sm text-surface-200">{r.label}</div>
                           <div className="text-xs text-surface-500">{r.desc}</div>
                         </div>
-                        <button className="text-xs text-nyptid-300 hover:text-nyptid-200 transition-colors font-medium">View</button>
+                        <button
+                          type="button"
+                          onClick={() => setStandingResourceModal(r.id)}
+                          className="text-xs text-nyptid-300 hover:text-nyptid-200 transition-colors font-medium"
+                        >
+                          View
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -2935,6 +2986,11 @@ export function SettingsPage() {
                     >
                       {checkoutLoadingKey === 'portal' ? 'Opening portal...' : 'Open NCore Building Portal (Stripe)'}
                     </button>
+                    {(billingActionMessage || checkoutLoadingKey === 'portal') && (
+                      <div className="mt-2 text-xs text-surface-400">
+                        {checkoutLoadingKey === 'portal' ? 'Requesting billing portal session...' : billingActionMessage}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3308,6 +3364,53 @@ export function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={standingResourceModal !== null}
+        onClose={() => setStandingResourceModal(null)}
+        title={standingResourceModal ? STANDING_RESOURCE_CONTENT[standingResourceModal].title : ''}
+        size="lg"
+      >
+        {standingResourceModal && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-nyptid-300/25 bg-gradient-to-br from-nyptid-300/10 to-surface-900/40 p-4">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-nyptid-200">NCore Standing Briefing</div>
+              <div className="mt-1 text-sm text-surface-300">{STANDING_RESOURCE_CONTENT[standingResourceModal].subtitle}</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {STANDING_RESOURCE_CONTENT[standingResourceModal].highlights.map((point) => (
+                  <span key={point} className="rounded-full border border-surface-600 bg-surface-900/60 px-2 py-0.5 text-[11px] text-surface-300">
+                    {point}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {STANDING_RESOURCE_CONTENT[standingResourceModal].body.map((paragraph) => (
+                <div key={paragraph} className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2 text-sm text-surface-300 leading-relaxed">
+                  {paragraph}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={() => setStandingResourceModal(null)} className="nyptid-btn-secondary text-sm px-3 py-2">
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStandingResourceModal(null);
+                  if (activeSection !== 'standing') activateSection('standing');
+                }}
+                className="nyptid-btn-primary text-sm px-3 py-2"
+              >
+                {STANDING_RESOURCE_CONTENT[standingResourceModal].actionLabel}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Delete Account Modal */}
       <Modal

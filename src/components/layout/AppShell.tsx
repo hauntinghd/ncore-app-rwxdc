@@ -595,6 +595,151 @@ export function AppShell({
     }
   }
 
+  function findFirstRoutableChannel(nextCategories: ChannelCategory[]): { id: string; type: ChannelType } | null {
+    for (const category of nextCategories) {
+      for (const channel of category.channels || []) {
+        const channelId = String(channel.id || '').trim();
+        if (!channelId) continue;
+        if (channel.channel_type === 'voice' || channel.channel_type === 'text' || channel.channel_type === 'announcement') {
+          return { id: channelId, type: channel.channel_type };
+        }
+      }
+    }
+    return null;
+  }
+
+  async function handleEditCategory(categoryId: string) {
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return;
+    const targetCategory = categories.find((category) => String(category.id) === String(categoryId));
+    if (!targetCategory) return;
+    const requestedName = window.prompt('Rename category', String(targetCategory.name || ''));
+    const name = String(requestedName || '').trim();
+    if (!name) return;
+
+    const { error } = await supabase
+      .from('channel_categories')
+      .update({ name: name.toUpperCase() } as any)
+      .eq('id', categoryId)
+      .eq('server_id', activeServerId);
+
+    if (error) {
+      console.warn('Could not rename category:', error);
+      return;
+    }
+
+    setCategories((prev) => prev.map((category) => (
+      String(category.id) === String(categoryId)
+        ? { ...category, name: name.toUpperCase() }
+        : category
+    )));
+  }
+
+  async function handleDeleteCategory(categoryId: string) {
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return;
+    const targetCategory = categories.find((category) => String(category.id) === String(categoryId));
+    if (!targetCategory) return;
+    const confirmed = window.confirm(`Delete category "${targetCategory.name}" and all channels inside it?`);
+    if (!confirmed) return;
+
+    const targetChannelIds = (targetCategory.channels || []).map((channel) => String(channel.id || '').trim()).filter(Boolean);
+    if (targetChannelIds.length > 0) {
+      const { error: deleteChannelsError } = await supabase
+        .from('channels')
+        .delete()
+        .in('id', targetChannelIds);
+      if (deleteChannelsError) {
+        console.warn('Could not delete channels for category:', deleteChannelsError);
+        return;
+      }
+    }
+
+    const { error } = await supabase
+      .from('channel_categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('server_id', activeServerId);
+
+    if (error) {
+      console.warn('Could not delete category:', error);
+      return;
+    }
+
+    const nextCategories = categories.filter((category) => String(category.id) !== String(categoryId));
+    setCategories(nextCategories);
+
+    if (activeChannelId && targetChannelIds.includes(String(activeChannelId))) {
+      const fallback = findFirstRoutableChannel(nextCategories);
+      if (fallback && activeCommunity?.id) {
+        navigate(`/app/community/${activeCommunity.id}/${fallback.type === 'voice' ? 'voice' : 'channel'}/${fallback.id}`);
+      } else if (activeCommunity?.id) {
+        navigate(`/app/community/${activeCommunity.id}`);
+      }
+    }
+  }
+
+  async function handleEditChannel(channelId: string) {
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return;
+    const targetChannel = categories.flatMap((category) => category.channels || []).find((channel) => String(channel.id) === String(channelId));
+    if (!targetChannel) return;
+    const requestedName = window.prompt('Rename channel', String(targetChannel.name || ''));
+    const name = String(requestedName || '').trim();
+    if (!name) return;
+
+    const { error } = await supabase
+      .from('channels')
+      .update({ name } as any)
+      .eq('id', channelId)
+      .eq('server_id', activeServerId);
+
+    if (error) {
+      console.warn('Could not rename channel:', error);
+      return;
+    }
+
+    setCategories((prev) => prev.map((category) => ({
+      ...category,
+      channels: (category.channels || []).map((channel) => (
+        String(channel.id) === String(channelId)
+          ? { ...channel, name }
+          : channel
+      )),
+    })));
+  }
+
+  async function handleDeleteChannel(channelId: string) {
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return;
+    const targetChannel = categories.flatMap((category) => category.channels || []).find((channel) => String(channel.id) === String(channelId));
+    if (!targetChannel) return;
+    const confirmed = window.confirm(`Delete channel "${targetChannel.name}"?`);
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from('channels')
+      .delete()
+      .eq('id', channelId)
+      .eq('server_id', activeServerId);
+
+    if (error) {
+      console.warn('Could not delete channel:', error);
+      return;
+    }
+
+    const nextCategories = categories.map((category) => ({
+      ...category,
+      channels: (category.channels || []).filter((channel) => String(channel.id) !== String(channelId)),
+    }));
+    setCategories(nextCategories);
+
+    if (activeChannelId && String(activeChannelId) === String(channelId)) {
+      const fallback = findFirstRoutableChannel(nextCategories);
+      if (fallback && activeCommunity?.id) {
+        navigate(`/app/community/${activeCommunity.id}/${fallback.type === 'voice' ? 'voice' : 'channel'}/${fallback.id}`);
+      } else if (activeCommunity?.id) {
+        navigate(`/app/community/${activeCommunity.id}`);
+      }
+    }
+  }
+
   function handleTemplateChange(rawTemplateId: string) {
     const templateId = normalizeTemplateId(rawTemplateId);
     const blueprint = getCommunityBlueprint(templateId);
@@ -683,6 +828,10 @@ export function AppShell({
             currentVoiceChannelId={currentVoice?.channelId}
             onAddCategory={handleAddCategory}
             onAddChannel={handleAddChannel}
+            onEditCategory={handleEditCategory}
+            onDeleteCategory={handleDeleteCategory}
+            onEditChannel={handleEditChannel}
+            onDeleteChannel={handleDeleteChannel}
             onClose={() => setSidebarOpen(false)}
           />
         </div>
@@ -704,6 +853,10 @@ export function AppShell({
                 currentVoiceChannelId={currentVoice?.channelId}
                 onAddCategory={handleAddCategory}
                 onAddChannel={handleAddChannel}
+                onEditCategory={handleEditCategory}
+                onDeleteCategory={handleDeleteCategory}
+                onEditChannel={handleEditChannel}
+                onDeleteChannel={handleDeleteChannel}
                 onClose={() => setSidebarOpen(false)}
               />
             </div>
