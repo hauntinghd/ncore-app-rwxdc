@@ -33,7 +33,20 @@ function isLikelyTransientFunctionsError(message: string): boolean {
     || normalized.includes('504');
 }
 
-async function resolveInvokeAuthBearer(): Promise<string> {
+function isLikelyAuthFailure(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('status 401')
+    || normalized.includes('status 403')
+    || normalized.includes('unauthorized')
+    || normalized.includes('forbidden')
+    || normalized.includes('invalid bearer')
+    || normalized.includes('invalid jwt')
+    || normalized.includes('expired token')
+    || normalized.includes('jwt')
+    || normalized.includes('missing authorization');
+}
+
+async function resolveSessionAuthBearer(): Promise<string> {
   try {
     const { data } = await supabase.auth.getSession();
     const accessToken = String(data?.session?.access_token || '').trim();
@@ -41,7 +54,26 @@ async function resolveInvokeAuthBearer(): Promise<string> {
   } catch {
     // ignore auth session read failures and continue fallback.
   }
-  return SUPABASE_ANON_KEY;
+  return '';
+}
+
+async function resolveInvokeBearerCandidates(): Promise<Array<{ label: string; token: string }>> {
+  const sessionToken = await resolveSessionAuthBearer();
+  const candidates: Array<{ label: string; token: string }> = [];
+
+  if (sessionToken) {
+    candidates.push({ label: 'session', token: sessionToken });
+  }
+  if (SUPABASE_ANON_KEY) {
+    candidates.push({ label: 'anon', token: SUPABASE_ANON_KEY });
+  }
+  if (!candidates.length && sessionToken) {
+    candidates.push({ label: 'fallback', token: sessionToken });
+  }
+
+  return candidates.filter((candidate, index, all) =>
+    all.findIndex((other) => other.token === candidate.token) === index,
+  );
 }
 
 async function buildInvokeErrorReason(error: any, functionReason: string): Promise<string> {
@@ -82,49 +114,60 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
   const candidateFunctions = Array.from(
     new Set([AGORA_TOKEN_FUNCTION, ...AGORA_TOKEN_FALLBACK_FUNCTIONS].map((name) => String(name || '').trim()).filter(Boolean)),
   );
-  const invokeBearer = await resolveInvokeAuthBearer();
-  const invokeHeaders: Record<string, string> = {};
-  if (invokeBearer) {
-    invokeHeaders.Authorization = `Bearer ${invokeBearer}`;
-  }
-  if (SUPABASE_ANON_KEY) {
-    invokeHeaders.apikey = SUPABASE_ANON_KEY;
-  }
+  const bearerCandidates = await resolveInvokeBearerCandidates();
   const errors: string[] = [];
 
   for (const functionName of candidateFunctions) {
-    let data: any = null;
-    let error: any = null;
-    try {
-      const response = await supabase.functions.invoke(functionName, {
-        body: { channelName, uid },
-        headers: invokeHeaders,
-      });
-      data = response?.data;
-      error = response?.error;
-    } catch (invokeError) {
-      error = invokeError;
-    }
+    const attempts = bearerCandidates.length ? bearerCandidates : [{ label: 'none', token: '' }];
+    for (let i = 0; i < attempts.length; i += 1) {
+      const attempt = attempts[i];
+      const invokeHeaders: Record<string, string> = {};
+      if (attempt.token) {
+        invokeHeaders.Authorization = `Bearer ${attempt.token}`;
+      }
+      if (SUPABASE_ANON_KEY) {
+        invokeHeaders.apikey = SUPABASE_ANON_KEY;
+      }
 
-    const resolvedToken =
-      typeof data === 'string'
-        ? data.trim()
-        : typeof (data as any)?.token === 'string'
-          ? (data as any).token.trim()
+      let data: any = null;
+      let error: any = null;
+      try {
+        const response = await supabase.functions.invoke(functionName, {
+          body: { channelName, uid },
+          headers: invokeHeaders,
+        });
+        data = response?.data;
+        error = response?.error;
+      } catch (invokeError) {
+        error = invokeError;
+      }
+
+      const resolvedToken =
+        typeof data === 'string'
+          ? data.trim()
+          : typeof (data as any)?.token === 'string'
+            ? (data as any).token.trim()
+            : '';
+      if (resolvedToken) {
+        return resolvedToken;
+      }
+
+      const functionReason =
+        data && typeof data === 'object' && typeof (data as any).error === 'string'
+          ? (data as any).error
           : '';
-    if (resolvedToken) {
-      return resolvedToken;
-    }
+      const reason = await buildInvokeErrorReason(error, functionReason);
+      if (reason) {
+        errors.push(`${functionName}/${attempt.label}: ${reason}`);
+      } else {
+        errors.push(`${functionName}/${attempt.label}: empty token payload`);
+      }
 
-    const functionReason =
-      data && typeof data === 'object' && typeof (data as any).error === 'string'
-        ? (data as any).error
-        : '';
-    const reason = await buildInvokeErrorReason(error, functionReason);
-    if (reason) {
-      errors.push(`${functionName}: ${reason}`);
-    } else {
-      errors.push(`${functionName}: empty token payload`);
+      // Keep trying alternate bearer candidates (e.g. anon) when the current
+      // session bearer is stale/invalid.
+      if (!isLikelyAuthFailure(reason) && i < attempts.length - 1) {
+        continue;
+      }
     }
   }
 

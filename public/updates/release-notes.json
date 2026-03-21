@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.71",
+            "version": "11.7.72",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Agora token fetch now retries bearer strategies (session then anon) for each edge function to survive stale-session auth failures.",
+                "Token invocation flow now records per-attempt diagnostics by function and auth mode for clearer production triage.",
+                "Call startup path now resists invalid/expired session JWTs without blocking DM call media initialization."
+            ],
+            "bugFixes": [
+                "Fixed persistent 'Agora token setup required' failures caused by stale Authorization bearer values during edge invoke.",
+                "Fixed token acquisition dead path where valid anon fallback credentials were not successfully rescuing failed session-auth attempts.",
+                "Improved join reliability for microphone/camera/screen-share initialization by stabilizing token retrieval under mixed auth states."
+            ]
+        },
+        {
+            "version": "11.7.71",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Agora token requests now always include explicit auth headers (session token or anon fallback) to satisfy edge auth requirements.",
                 "Function token fetch now surfaces real HTTP status/body details for faster diagnostics.",
