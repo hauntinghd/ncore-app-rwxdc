@@ -1,0 +1,8 @@
+node_modules
+release
+dist
+supabase
+tools
+*.log
+public/updates/Cordty Nano Setup 11.0.0.exe
+public/updates/Cordty Nano Setup 11.0.0.exe.blockmap

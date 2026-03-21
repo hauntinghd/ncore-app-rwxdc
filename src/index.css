@@ -1,0 +1,303 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    background: #0b1018;
+  }
+
+  body {
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(1200px 700px at 18% -10%, rgba(201, 118, 33, 0.18), transparent 62%),
+      radial-gradient(1000px 620px at 88% -4%, rgba(129, 59, 22, 0.20), transparent 58%),
+      radial-gradient(900px 580px at 50% 110%, rgba(243, 187, 82, 0.08), transparent 64%),
+      #0b1018;
+    color: #e3e5e8;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  html.ncore-standalone body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  html[data-device-tier="low"] .bg-hero-gradient,
+  html[data-device-tier="low"] .shadow-glow,
+  html[data-device-tier="low"] .shadow-glow-sm {
+    filter: none !important;
+    box-shadow: none !important;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #36393f;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4f545c;
+  }
+
+  ::selection {
+    background: rgba(243, 187, 82, 0.25);
+    color: #ffffff;
+  }
+}
+
+@layer components {
+  .nyptid-card {
+    @apply border rounded-2xl backdrop-blur-sm;
+    background: linear-gradient(165deg, rgba(98, 54, 28, 0.55) 0%, rgba(33, 20, 12, 0.82) 60%, rgba(21, 12, 7, 0.92) 100%);
+    border-color: rgba(243, 187, 82, 0.28);
+  }
+
+  .nyptid-card-hover {
+    @apply nyptid-card hover:border-nyptid-300/45 hover:shadow-glow transition-all duration-200;
+  }
+
+  .nyptid-input {
+    @apply w-full bg-surface-900 border border-surface-600 rounded-lg px-4 py-2.5
+           text-surface-100 placeholder-surface-400 text-sm
+           focus:outline-none focus:border-nyptid-300 focus:ring-1 focus:ring-nyptid-300/30
+           transition-colors duration-200;
+  }
+
+  .nyptid-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+           text-surface-950 font-semibold text-sm shadow-glow-sm
+           transition-all duration-150 cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background-image: linear-gradient(135deg, #f3bb52 0%, #df9732 52%, #b14024 100%);
+  }
+
+  .nyptid-btn-primary:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.06);
+  }
+
+  .nyptid-btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .nyptid-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+           text-surface-100 font-medium text-sm
+           transition-all duration-150 cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, rgba(87, 51, 29, 0.82) 0%, rgba(63, 39, 24, 0.86) 100%);
+    border: 1px solid rgba(243, 187, 82, 0.22);
+  }
+
+  .nyptid-btn-secondary:hover {
+    background: linear-gradient(135deg, rgba(115, 66, 37, 0.88) 0%, rgba(82, 51, 30, 0.9) 100%);
+  }
+
+  .nyptid-btn-secondary:active {
+    background: linear-gradient(135deg, rgba(76, 45, 26, 0.94) 0%, rgba(56, 34, 20, 0.95) 100%);
+  }
+
+  .nyptid-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+           text-surface-300 font-medium text-sm
+           hover:bg-surface-700 hover:text-surface-100
+           transition-all duration-150 cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .nyptid-btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+           bg-red-600 text-white font-semibold text-sm
+           hover:bg-red-500 active:bg-red-700
+           transition-all duration-150 cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .channel-item {
+    @apply flex items-center gap-2 px-2 py-1.5 rounded-md text-sm
+           text-surface-400 hover:bg-surface-700/50 hover:text-surface-200
+           cursor-pointer transition-all duration-100;
+  }
+
+  .channel-item.active {
+    @apply bg-surface-700/70 text-surface-100;
+  }
+
+  .server-icon {
+    @apply w-12 h-12 rounded-2xl flex items-center justify-center
+           hover:bg-nyptid-300 hover:rounded-xl
+           transition-all duration-200 cursor-pointer
+           text-surface-200 hover:text-surface-950 font-bold text-lg;
+    background: linear-gradient(145deg, rgba(76, 45, 26, 0.88) 0%, rgba(45, 27, 16, 0.96) 100%);
+    border: 1px solid rgba(243, 187, 82, 0.14);
+  }
+
+  .server-icon.active {
+    @apply bg-nyptid-300 rounded-xl text-surface-950;
+  }
+
+  .message-row {
+    @apply flex gap-3 px-4 py-1 group hover:bg-surface-800/40 rounded transition-colors;
+  }
+
+  .status-indicator {
+    @apply w-3 h-3 rounded-full border-2 border-surface-800 absolute bottom-0 right-0;
+  }
+
+  .status-online { @apply bg-green-500; }
+  .status-idle { @apply bg-yellow-500; }
+  .status-dnd { @apply bg-red-500; }
+  .status-offline { @apply bg-surface-500; }
+
+  .rank-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .nyptid-separator {
+    @apply w-full h-px bg-surface-700/50 my-2;
+  }
+
+  .voice-participant-card {
+    @apply relative flex flex-col items-center justify-center
+           bg-surface-800 rounded-xl overflow-hidden
+           border border-surface-700 aspect-video;
+  }
+
+  .voice-participant-card.speaking {
+    @apply border-nyptid-300/60 shadow-glow;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #f3bb52, #dc8f2c, #f8ecd0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-subtle {
+    background: linear-gradient(135deg, #e39b34, #8e9297);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-grid {
+    background-image: linear-gradient(rgba(243,187,82,0.04) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(201,118,33,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #36393f transparent;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.typing-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.35;
+  animation: typing-dot-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Mobile/PWA safety guards to prevent desktop split panes from rendering on phones. */
+html.ncore-mobile .ncore-settings-desktop-nav,
+html.ncore-mobile .ncore-admin-desktop-nav {
+  display: none !important;
+}
+
+@media (max-width: 1023px) {
+  .ncore-settings-desktop-nav,
+  .ncore-admin-desktop-nav {
+    display: none !important;
+  }
+}
+
+/* Dedicated experience skin for /app/marketplace/quickdraw and /app/marketplace/games. */
+.ncore-marketplace-ops {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(27, 88, 173, 0.18), transparent 70%),
+    radial-gradient(900px 500px at 20% 0%, rgba(30, 150, 120, 0.1), transparent 70%),
+    linear-gradient(180deg, #041223 0%, #050f1d 100%);
+}
+
+.ncore-marketplace-ops .nyptid-card {
+  background: linear-gradient(180deg, rgba(8, 24, 44, 0.96) 0%, rgba(7, 18, 33, 0.98) 100%);
+  border-color: rgba(76, 125, 194, 0.34);
+}
+
+.ncore-marketplace-ops .nyptid-input {
+  background: rgba(7, 20, 37, 0.92);
+  border-color: rgba(76, 125, 194, 0.36);
+}
+
+.ncore-marketplace-ops .nyptid-btn-secondary {
+  background: linear-gradient(135deg, rgba(12, 33, 57, 0.96) 0%, rgba(9, 24, 41, 0.96) 100%);
+  border-color: rgba(96, 143, 211, 0.4);
+  color: #d7e4fb;
+}

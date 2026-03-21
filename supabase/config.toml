@@ -1,0 +1,7 @@
+project_id = "pndfytihpwpdhkramuvm"
+
+[functions.billing-create-checkout-session]
+verify_jwt = false
+
+[functions.billing-create-portal-session]
+verify_jwt = false

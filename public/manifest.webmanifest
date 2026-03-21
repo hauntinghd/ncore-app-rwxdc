@@ -1,0 +1,48 @@
+{
+  "name": "NCore",
+  "short_name": "NCore",
+  "description": "NCore by NYPTID Industries - unified communication platform.",
+  "id": "/?source=ncore-pwa",
+  "start_url": "/app/dm?source=ncore-pwa",
+  "scope": "/",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b1018",
+  "theme_color": "#0b1018",
+  "categories": ["communication", "social", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Direct Messages",
+      "short_name": "DMs",
+      "url": "/app/dm",
+      "description": "Jump straight into direct messages."
+    },
+    {
+      "name": "Discover",
+      "short_name": "Discover",
+      "url": "/app/discover",
+      "description": "Browse public communities."
+    }
+  ],
+  "icons": [
+    {
+      "src": "/NCore.jpg",
+      "sizes": "960x960",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/ncore-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/ncore-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

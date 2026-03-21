@@ -1,0 +1,5 @@
+{
+  "version": "__APP_VERSION__",
+  "buildTime": "__BUILD_TIME__",
+  "serviceWorker": "/sw.js"
+}

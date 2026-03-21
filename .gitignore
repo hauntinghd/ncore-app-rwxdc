@@ -1,0 +1,40 @@
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.env
+
+.vercel
+
+# Build artifacts
+dist-mobile
+release
+android/app/build
+android/.gradle
+
+# Update binaries (keep metadata files)
+public/updates/*.exe
+public/updates/*.blockmap
+public/updates/*.apk
+
+# Local scratch/debug artifacts
+.bolt
+tmp_*

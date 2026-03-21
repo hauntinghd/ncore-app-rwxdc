@@ -1,0 +1,865 @@
+{
+    "releases": [
+        {
+            "version": "11.7.62",
+            "date": "2026-03-21",
+            "badge": "Current Build",
+            "improvements": [
+                "Auto-update installer flow now runs a stronger uninstall fallback path when replacing an older NCore build.",
+                "Installer startup now force-cleans lingering Electron helper and crashpad processes before uninstall/update starts.",
+                "Fallback uninstall now retries current-user and all-users silent paths before final cleanup to reduce manual installer retries."
+            ],
+            "bugFixes": [
+                "Fixed updater failure path that could show uninstall-old-version errors even when the main NCore window was already closed.",
+                "Fixed locked-file update scenarios by expanding installer process termination coverage beyond only NCore.exe.",
+                "Improved update reliability for users receiving auto-downloaded patches from in-app updater."
+            ]
+        },
+        {
+            "version": "11.7.61",
+            "date": "2026-03-21",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace now includes My Service Orders and My Game Purchases panels with clearer lifecycle visibility.",
+                "Quickdraw workflows were expanded with in-app order actions for delivered, escrow release, and dispute creation.",
+                "Admin Panel now includes a dedicated Marketplace moderation section for seller clearance, listing review, and dispute resolution."
+            ],
+            "bugFixes": [
+                "Resolved missing marketplace hydration paths so order/dispute context now loads with profile and listing detail mapping.",
+                "Improved release pipeline consistency by requiring curated notes before feed sync, preventing generic log drift.",
+                "Maintained icon and installer feed alignment with website update metadata for cleaner release rollout behavior."
+            ]
+        },
+        {
+            "version": "11.7.60",
+            "date": "2026-03-21",
+            "badge": "Previous",
+            "improvements": [
+                "NCore Marketplace now includes two new tracks: Quickdraw Services and Buy/Sell Games alongside cosmetics.",
+                "Added seller clearance + vetting flow foundation, wallet snapshot, service listings, and game listing creation in-app.",
+                "Checkout flow now supports service listing fees, service orders, game publish fees, and game purchases through Stripe sessions.",
+                "Startup performance pass reduced DM bootstrap fan-out and community membership resubscribe churn for faster launch feel."
+            ],
+            "bugFixes": [
+                "Marketplace backend now persists marketplace payment lifecycle events through webhook handling and order status transitions.",
+                "Fixed auth/session handoff path for marketplace checkout retries by refreshing expired JWT before second attempt.",
+                "Database schema now includes escrow/order/wallet primitives needed for Quickdraw and game marketplace reliability."
+            ]
+        },
+        {
+            "version": "11.7.59",
+            "date": "2026-03-21",
+            "badge": "Previous",
+            "improvements": [
+                "Desktop launch flow now skips PWA runtime bootstrap so Electron startup is faster and cleaner.",
+                "Community rail now restores from local cache first, then hydrates in the background to reduce first-load waiting.",
+                "Direct Messages startup hydration was tuned to load a capped recent set first, with leaner profile payloads and lighter active-call sync."
+            ],
+            "bugFixes": [
+                "Removed heavy boot-time community member fan-out hydration that was causing slow startup spikes.",
+                "Reduced unnecessary DM bootstrap query pressure that could make initial app open feel laggy.",
+                "Improved startup responsiveness by prioritizing first render before non-critical background work."
+            ]
+        },
+        {
+            "version": "11.7.58",
+            "date": "2026-03-20",
+            "badge": "Previous",
+            "improvements": [
+                "Website landing page was fully overhauled into a cleaner, more professional product-site layout with stronger visual hierarchy.",
+                "Hero, platform, compare, and deploy sections were rebuilt for clearer messaging and better credibility at first glance.",
+                "Mobile and desktop website presentation now use a more polished structure while preserving existing installer and PWA download behavior."
+            ],
+            "bugFixes": [
+                "Removed dense legacy landing composition that made the public site feel cluttered and less professional.",
+                "Improved content organization so release, deployment, and platform information are easier to scan quickly.",
+                "Kept website branding and logo fallback behavior consistent while modernizing page structure."
+            ]
+        },
+        {
+            "version": "11.7.57",
+            "date": "2026-03-20",
+            "badge": "Previous",
+            "improvements": [
+                "Windows installer now includes a pre-install process cleanup step for NCore desktop runtime.",
+                "Update installs now handle hidden tray/background sessions automatically without requiring manual process hunting.",
+                "Release and web update feed remain aligned to the latest NSIS package and metadata."
+            ],
+            "bugFixes": [
+                "Fixed setup blocker where installer reported NCore could not be closed even when no main window was open.",
+                "Fixed hidden-process update deadlock caused by tray-mode runtime instances remaining active during install.",
+                "Improved installation reliability for users updating from website downloads while NCore background tasks are running."
+            ]
+        },
+        {
+            "version": "11.7.56",
+            "date": "2026-03-20",
+            "badge": "Previous",
+            "improvements": [
+                "Auto-update install flow now forces updater quit mode before install so background/tray behavior no longer blocks patch application.",
+                "Updater now tears down tray state and closes all windows before invoking quit-and-install to avoid hidden-window shutdown deadlocks.",
+                "Desktop updater fallback path now escalates to forced app exit if normal quit-and-install does not terminate promptly."
+            ],
+            "bugFixes": [
+                "Fixed failure mode where update download completed but NCore stayed running and users had to install manually.",
+                "Fixed close-to-tray interception during update install by bypassing normal hide-on-close behavior while installing.",
+                "Improved updater reliability on Windows by handling before-quit-for-update with explicit app quit flags."
+            ]
+        },
+        {
+            "version": "11.7.55",
+            "date": "2026-03-20",
+            "badge": "Previous",
+            "improvements": [
+                "Mobile layout detection now combines viewport + device runtime checks so phones no longer fall into desktop Settings/Admin split panes.",
+                "Settings page now hard-switches to dedicated mobile navigation mode on handheld devices for cleaner one-column rendering.",
+                "Admin panel now follows the same mobile-first detection path so mobile moderation screens use touch-friendly section tabs."
+            ],
+            "bugFixes": [
+                "Fixed iPhone/Android rendering issue where Settings could show desktop left-nav plus clipped content side-by-side.",
+                "Fixed mobile admin navigation mismatch where desktop rail could appear even when the app was opened on a phone.",
+                "Added mobile CSS safety guards to suppress desktop-only nav panes when runtime is flagged as mobile."
+            ]
+        },
+        {
+            "version": "11.7.54",
+            "date": "2026-03-20",
+            "badge": "Previous",
+            "improvements": [
+                "Stabilized direct-call fallback join flow by removing a stale undefined timer mutation that could break call transitions.",
+                "Marketplace and billing URL opening now normalizes absolute, relative, and domain-only links so checkout routing is more resilient across desktop/web contexts.",
+                "Server settings delete flow now supports a direct owner delete fallback path when the delete RPC is unavailable on a deployment."
+            ],
+            "bugFixes": [
+                "Fixed runtime crash risk in Direct Call fallback flow caused by an undefined call-duration setter reference.",
+                "Fixed checkout launcher failures that surfaced as invalid URL errors for otherwise recoverable URL formats.",
+                "Fixed server deletion dead-end scenarios when delete_owned_community RPC was missing by adding guarded fallback delete handling."
+            ]
+        },
+        {
+            "version": "11.7.53",
+            "date": "2026-03-16",
+            "badge": "Previous",
+            "improvements": [
+                "Mobile Settings now uses a dedicated section selector instead of a compressed desktop sidebar.",
+                "Admin Panel now has phone-optimized navigation chips for quick tab switching without layout squeeze.",
+                "Settings and Admin content areas now expand to full mobile width with tighter spacing for touch screens."
+            ],
+            "bugFixes": [
+                "Fixed the split-pane overflow bug that made Settings unreadable on iPhone and Android.",
+                "Fixed Admin navigation collapsing behavior on mobile where labels were hidden and content was clipped.",
+                "Fixed narrow-screen rendering regressions that caused desktop columns to overlap in portrait mode."
+            ]
+        },
+        {
+            "version": "11.7.52",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Web/PWA build pipeline now emits absolute asset URLs for website deployments so deep links load reliably.",
+                "Electron packaging now uses a dedicated build mode to keep relative file:// assets without affecting web releases.",
+                "iOS installed-app startup is now aligned with route-based start URLs used by NCore PWA entrypoints."
+            ],
+            "bugFixes": [
+                "Fixed iPhone home-screen white screen caused by relative asset paths when launching from /app/* start URLs.",
+                "Fixed deep-link startup asset resolution for web app installs opened directly into DM/app routes.",
+                "Fixed build-mode crossover where Electron-compatible paths could leak into website output."
+            ]
+        },
+        {
+            "version": "11.7.51",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "iPhone startup path now runs an automatic one-time recovery pass to remove stale web app runtime caches.",
+                "Standalone mobile launches now self-heal by forcing a clean navigation after legacy service-worker cleanup.",
+                "PWA install flow reliability improved for users upgrading from older iOS web app builds."
+            ],
+            "bugFixes": [
+                "Fixed iOS home-screen launch blank state caused by stale service worker/cache state from prior builds.",
+                "Fixed persistent white screen scenario where installed web app could stay pinned to outdated startup assets.",
+                "Improved startup consistency between Safari-tab usage and installed web app usage on iPhone."
+            ]
+        },
+        {
+            "version": "11.7.50",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Web runtime snapshot handling was hardened so Firefox and Safari render reliably after load.",
+                "PWA boot path now keeps a stable external-store snapshot to prevent client render loops.",
+                "Service worker recovery flow remains available via ?sw-reset=1 for stale-client cleanup."
+            ],
+            "bugFixes": [
+                "Fixed blank-page crash on web caused by unstable useSyncExternalStore snapshot reads in PWA runtime.",
+                "Fixed production startup loop where repeated snapshot object creation could trigger React update-depth failure.",
+                "Improved cross-browser launch stability on ncore.nyptidindustries.com after fresh deploys."
+            ]
+        },
+        {
+            "version": "11.7.49",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Added a dedicated mobile update feed file at /updates/mobile-latest.json for installer-aware mobile download routing.",
+                "Landing page now reads feed metadata first so Android users are sent to the latest published APK automatically when available.",
+                "Settings > What's New download flow now supports desktop updater, browser desktop installer download, and mobile installer/PWA fallback paths."
+            ],
+            "bugFixes": [
+                "Fixed mobile download flow relying only on hardcoded APK filename probes by introducing feed-driven resolution.",
+                "Fixed update UX mismatch where web/mobile users were told desktop updater only, despite having a valid hosted feed.",
+                "Fixed release sync gap by generating and publishing mobile-latest.json with every feed sync."
+            ]
+        },
+        {
+            "version": "11.7.48",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Landing page download now routes by device: desktop keeps Windows installer while mobile gets install-ready flow.",
+                "Android now auto-detects hosted APK candidates under /updates and serves them when available.",
+                "PWA install support added (manifest + service worker) so iOS/Android users can install NCore from the site."
+            ],
+            "bugFixes": [
+                "Fixed server deletion reliability by moving delete into a secure owner-verified RPC path.",
+                "Updated server settings delete action to use backend RPC instead of fragile direct table delete.",
+                "Improved mobile app shell and DM layout behavior for smaller screens."
+            ]
+        },
+        {
+            "version": "11.7.47",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Friend add flow now uses true request-based behavior: sending a request puts it in Pending until the other user accepts.",
+                "Friends page now includes a Pending tab with incoming and outgoing request cards, plus Accept, Decline, and Cancel controls.",
+                "Shared-server right-click Add Friend now follows the same pending-request system for consistent behavior across NCore."
+            ],
+            "bugFixes": [
+                "Fixed immediate auto-friend behavior so users are no longer connected instantly when a request is sent.",
+                "Fixed inconsistent relationship state handling by adding explicit pending incoming/outgoing states to backend relationship logic.",
+                "Fixed request lifecycle edge cases with dedicated send/respond/cancel RPC paths and synchronized client refresh handling."
+            ]
+        },
+        {
+            "version": "11.7.46",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Server member right-click menu now includes Profile, Mention, Message, Start a Call, Add Note, Invite to Server, Add Friend, Ignore, and Block.",
+                "Mention from a server member now pre-fills @username directly into server chat and opens the channel route automatically.",
+                "Invite to Server from the context menu now creates a one-use invite link and sends it through DM for faster onboarding."
+            ],
+            "bugFixes": [
+                "Fixed missing server-member context actions in community views where right-click previously had no moderation/social shortcuts.",
+                "Fixed mention flow so server mentions no longer require manual typing after opening chat.",
+                "Improved shared-server relationship action reliability for friend, ignore, and block updates from the member context menu."
+            ]
+        },
+        {
+            "version": "11.7.45",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "DM conversations now promote to the top immediately when you send a message, including group DMs.",
+                "DM send flow now also updates conversation activity timestamps in direct_conversations for stable cross-client ordering.",
+                "Call start flow now uses stronger recipient resolution fallbacks before failing, improving reliability when membership lookups are inconsistent."
+            ],
+            "bugFixes": [
+                "Fixed DM call start route bug where fallback join mode was not always enabled when calls-table signaling failed to create a row.",
+                "Fixed strict call auth preflight behavior that could block calling on temporary verify failures even with a valid local session.",
+                "Fixed no-recipient call edge case by adding a secondary members lookup and deduped recipient normalization."
+            ]
+        },
+        {
+            "version": "11.7.44",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Added distinct notification sound types across NCore: call ring, direct message ding, and mention/ping alert.",
+                "Server mentions now generate mention notifications for @username, <@id>, @everyone, and @here so ping events are detected reliably.",
+                "Desktop background notifications now keep sound behavior aligned with in-app routing for calls, DMs, and pings."
+            ],
+            "bugFixes": [
+                "Fixed missing server ping sound path where channel mentions were not being queued as mention notifications.",
+                "Fixed desktop notification audio fallback using one generic sound for all events; call and mention now use separate patterns.",
+                "Improved mention-notification insertion safety to avoid send-flow interruption when notification writes fail."
+            ]
+        },
+        {
+            "version": "11.7.43",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Added owner-controlled server deletion flow in Server Settings with typed confirmation and final safety prompt.",
+                "Added a full Friends surface with Online/All/Add Friend tabs, add-by-username flow, and quick Message/Voice/Video actions.",
+                "Added custom status text + emoji persistence and profile rendering support.",
+                "Expanded Settings navigation to include Discord-style sections (chat, keybinds, language/time, streamer mode, activity, and billing groups).",
+                "Brand icon sync now prioritizes NCore.jpg when present so installer, runtime icon resources, and website branding stay aligned."
+            ],
+            "bugFixes": [
+                "Fixed missing custom status DB fields by shipping and applying migration 20260315164000 to remote Supabase.",
+                "Fixed logo source mismatch where JPG branding assets could be ignored in icon generation.",
+                "Added runtime logo fallbacks so clients recover cleanly between NCore.jpg and ncore-logo.png across key pages.",
+                "Ensured release version increments to 11.7.43 and build artifacts regenerate against the new version metadata."
+            ]
+        },
+        {
+            "version": "11.7.42",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Windows desktop now uses a cleaner hidden-titlebar overlay layout so the app surface feels closer to a single unified Discord-style top chrome.",
+                "Top navigation now reserves right-side space for native window controls in desktop builds to avoid overlap with search/notification/profile controls.",
+                "Desktop branding and update feed deployment remain synchronized with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed remaining heavy native titlebar appearance that made NCore look less clean than intended.",
+                "Fixed top-right control crowding in desktop runtime when window buttons share the same horizontal band as app actions.",
+                "Improved desktop UI consistency so updated chrome behavior is delivered to all clients through the same versioned installer feed."
+            ]
+        },
+        {
+            "version": "11.7.41",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Windows executable resource editing is now enabled during packaging so the installed launcher icon and metadata are stamped from NCore branding.",
+                "Settings content layout now uses full available desktop width so the page no longer feels constrained after update.",
+                "Release and website feed continue to publish from the same installer artifact to keep all clients aligned."
+            ],
+            "bugFixes": [
+                "Fixed stale launcher metadata path where Start menu/Recommended could continue showing legacy icon identity.",
+                "Fixed remaining narrow Settings content behavior on larger fullscreen windows.",
+                "Improved packaging consistency so new installs pick up the current NCore visual identity faster."
+            ]
+        },
+        {
+            "version": "11.7.40",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Settings now uses a full desktop-width content layout so fullscreen no longer stays in the old narrow column mode.",
+                "Publisher/byline labeling is now aligned to NYPTID Industries Advanced Technologies across settings metadata surfaces.",
+                "Desktop release packaging and website update feed remain synchronized to keep both clients on the same UI build."
+            ],
+            "bugFixes": [
+                "Fixed legacy Settings container width cap that made updated UI changes look like they were not applied.",
+                "Fixed client-to-client visual mismatch where two users on the same version could still see the old compact Settings layout.",
+                "Improved update visibility so this patch appears cleanly in What’s New after install/update."
+            ]
+        },
+        {
+            "version": "11.7.39",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Windows installer metadata now includes explicit organization details for stronger Publisher identity in desktop environments.",
+                "Packaging metadata now ships complete app description and legal branding fields for cleaner install/uninstall surfaces.",
+                "Release pipeline remains aligned to website + desktop updater with the newest installer artifacts."
+            ],
+            "bugFixes": [
+                "Fixed installer build failure caused by invalid electron-builder keys in the previous packaging config attempt.",
+                "Restored valid build schema so installer generation and release sync complete successfully.",
+                "Improved metadata consistency between app package fields and Windows installer outputs."
+            ]
+        },
+        {
+            "version": "11.7.37",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Brand icon generation is now automatic during packaging, so the Windows app icon is rebuilt directly from the exact `public/ncore-logo.png` asset each release.",
+                "Desktop installer and runtime icon resources now stay synchronized from one logo source to reduce logo drift across taskbar, window, and installer surfaces.",
+                "Release changelog flow continues to publish cleaner user-facing notes in both website feed and in-app What's New."
+            ],
+            "bugFixes": [
+                "Fixed logo pipeline fragility where stale `.ico` assets could persist between builds.",
+                "Fixed update-log quality drift by enforcing curated notes for each version bump before feed sync.",
+                "Improved release consistency between installer artifacts and update metadata publication."
+            ]
+        },
+        {
+            "version": "11.7.36",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "What's New entries are now written in a cleaner user-facing format so update logs read like product changes, not internal pipeline notes.",
+                "Notification/update feed alignment was tightened so the same release details appear consistently in app settings and website update endpoints.",
+                "Release metadata flow was hardened to keep top entries ordered and readable after every version bump."
+            ],
+            "bugFixes": [
+                "Fixed repetitive boilerplate wording that made multiple releases look identical.",
+                "Fixed release-note generation fallback path so new versions no longer silently publish generic copy.",
+                "Improved changelog reliability by requiring curated notes before a new release is synced."
+            ]
+        },
+        {
+            "version": "11.7.35",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "What's New release entries now publish from curated notes so each version shows real update details instead of repeated boilerplate text.",
+                "Release feed sync now preserves detailed notes on rebuilds and re-deploys for the same version.",
+                "Desktop and website update metadata remain aligned while keeping detailed changelog entries intact."
+            ],
+            "bugFixes": [
+                "Fixed release note overwrite behavior that could replace detailed logs with generic fallback copy.",
+                "Fixed pending release note discovery so deployment can read note payloads from the project root reliably.",
+                "Improved update-log consistency between app Settings > What's New and the public /updates release notes feed."
+            ]
+        },
+        {
+            "version": "11.7.34",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "App now opens DM-first by default (`/app` routes directly to `/app/dm`) for a chat-focused launch flow.",
+                "Server member counts now sync in real time across shell, community pages, and sidebar labels.",
+                "Community member lists now live-refresh profile details (username, display name, avatar, and status).",
+                "DM and Group DM membership now live-refresh when members are added, removed, or conversation metadata changes."
+            ],
+            "bugFixes": [
+                "Fixed stale member totals where some views showed old counts after joins/leaves.",
+                "Fixed profile hydration drift in community member cards that could show fallback or outdated identity data.",
+                "Fixed release-note pipeline overwriting detailed entries with generic boilerplate on subsequent syncs."
+            ]
+        },
+        {
+            "version": "11.7.33",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Release pipeline advanced to v11.7.33 with the newest installer package.",
+                "Desktop installer and website update feed are now aligned.",
+                "What's New and release metadata now stay in sync automatically per version bump."
+            ],
+            "bugFixes": [
+                "Fixed feed mismatch where latest installer version could advance without a matching top release note entry.",
+                "Release badge rotation now updates consistently so only the newest entry is marked Current Build.",
+                "Improved deployment consistency for update metadata across public and dist feed directories."
+            ]
+        },
+        {
+            "version": "11.7.32",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Release pipeline advanced to v11.7.32 with the newest installer package.",
+                "Desktop installer and website update feed are now aligned.",
+                "What's New and release metadata now stay in sync automatically per version bump."
+            ],
+            "bugFixes": [
+                "Fixed feed mismatch where latest installer version could advance without a matching top release note entry.",
+                "Release badge rotation now updates consistently so only the newest entry is marked Current Build.",
+                "Improved deployment consistency for update metadata across public and dist feed directories."
+            ]
+        },
+        {
+            "version": "11.7.31",
+            "date": "2026-03-15",
+            "badge": "Previous",
+            "improvements": [
+                "Release pipeline advanced to v11.7.31 with the newest installer package.",
+                "Desktop installer and website update feed are now aligned.",
+                "What's New and release metadata now stay in sync automatically per version bump."
+            ],
+            "bugFixes": [
+                "Fixed feed mismatch where latest installer version could advance without a matching top release note entry.",
+                "Release badge rotation now updates consistently so only the newest entry is marked Current Build.",
+                "Improved deployment consistency for update metadata across public and dist feed directories."
+            ]
+        },
+        {
+            "version": "11.7.30",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Fixed Settings section routing so tabs like What's New no longer glitch or bounce between sections.",
+                "Server settings now include invite management with open/invite-only join control plus create/copy/revoke invite links.",
+                "Server moderation panel now supports role changes, member removal, and ownership transfer with live profile hydration."
+            ],
+            "bugFixes": [
+                "Fixed server settings layout leak by hiding channel sidebar while editing server settings.",
+                "Improved channel sidebar reliability by converting channel rows to proper buttons and hardening wheel-scroll behavior.",
+                "Added invite-only enforcement at DB policy/RPC layer to prevent bypass joins and stabilize public-but-invite-only servers."
+            ]
+        },
+        {
+            "version": "11.7.29",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Removed the course-first community overview so normal server usage now focuses on chat and member presence.",
+                "Server settings now include a full add/remove role editor so owners can create and customize role labels directly.",
+                "Community and sidebar data hydration now resolves real profile records to keep usernames and avatars accurate across member/voice surfaces."
+            ],
+            "bugFixes": [
+                "Fixed member card fallbacks caused by profile relation mismatches (`profiles` vs `profile`) that showed generic names/avatars.",
+                "Removed stale Courses quick-link wiring from the channel sidebar to prevent dead-end navigation.",
+                "Hardened left sidebar scrolling (wheel + min-height overflow behavior) to stop stuck/bugged scroll behavior in long channel lists."
+            ]
+        },
+        {
+            "version": "11.7.28",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Added AnimeHub server preset with a full category/channel layout for anime communities.",
+                "Community creation now supports preset selection and auto-seeds server customization defaults for role labels and onboarding.",
+                "Server sidebar now supports owner/admin category creation and text/voice channel creation directly from the channel list."
+            ],
+            "bugFixes": [
+                "What's New now resolves release notes from the configured update feed URL instead of stale local-only fallback data.",
+                "Notification bell now surfaces product update entries with unread version tracking and direct jump to What's New.",
+                "Community chat bootstrap now seeds template channels when missing, improving Discord-style server consistency for new servers."
+            ]
+        },
+        {
+            "version": "11.7.27",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Auth routing now ships a source-owned AuthPage again so login/signup updates are included in production builds.",
+                "Login and signup surfaces now use NCore branding with live global stats from Supabase instead of hardcoded values.",
+                "Onboarding header now uses the same NCore logo asset pipeline as the website and app shell."
+            ],
+            "bugFixes": [
+                "Marketplace checkout now sends both Authorization header and body token to reduce edge-function auth mismatches.",
+                "Checkout external-open flow now validates and normalizes Stripe URLs before launch to avoid invalid URL failures.",
+                "Release feed aligned to v11.7.27 with new installer and blockmap."
+            ]
+        },
+        {
+            "version": "11.7.26",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Auto-updater feed now points directly to the newest NCore installer build.",
+                "Dedicated NCore Marketplace section in the primary app navigation.",
+                "Expanded membership overview with Free, NYPTID Boost, and additional monthly plan tracks."
+            ],
+            "bugFixes": [
+                "Voice call speaking-state updates are throttled to prevent UI freeze spikes.",
+                "Channel sidebar now uses stable desktop layout behavior for server navigation.",
+                "Top-level server route behavior refined to reduce sidebar sync glitches."
+            ]
+        },
+        {
+            "version": "11.7.21",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace checkout now uses Supabase client session auth by default, with refresh-and-retry only when needed.",
+                "Billing flows now open Stripe externally while preserving app session state across retries.",
+                "Update feed advanced to v11.7.21 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed false session-expired errors triggered by stale explicit Authorization headers during marketplace purchases.",
+                "Improved checkout auth error surfacing so repeated JWT failures show backend detail instead of silent logout loops.",
+                "Release stack metadata aligned to v11.7.21."
+            ]
+        },
+        {
+            "version": "11.7.20",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace purchases now launch Stripe checkout externally in desktop builds so NCore stays open in-app.",
+                "Membership checkout and billing portal now use the same external-open checkout behavior.",
+                "Update feed advanced to v11.7.20 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Removed forced billing-session refresh behavior that could drop users back to login during buy attempts.",
+                "Checkout JWT recovery now retries with current in-session auth state without triggering sign-out side effects.",
+                "Release stack metadata aligned to v11.7.20."
+            ]
+        },
+        {
+            "version": "11.7.19",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace and membership checkout flows now preserve signed-in state during auth-recovery failures.",
+                "Billing session refresh now prefers in-session token recovery before asking for manual re-login.",
+                "Update feed advanced to v11.7.19 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed marketplace purchase path that could force sign-out and redirect away from checkout.",
+                "Removed forced logout side effects on JWT retry failures in billing actions.",
+                "Release stack metadata aligned to v11.7.19."
+            ]
+        },
+        {
+            "version": "11.7.18",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Added explicit fallback call routing (`fallback=1`) when calls-table signaling is unavailable.",
+                "Desktop/notification call join paths now preserve fallback mode so both users can still connect.",
+                "Update feed advanced to v11.7.18 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed broken DM call flow when `calls` API lookup/insert returns 400/401.",
+                "Reduced repeated active-call lookup spam by disabling failing calls-table polling and using fallback invite path.",
+                "Release stack metadata aligned to v11.7.18."
+            ]
+        },
+        {
+            "version": "11.7.17",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Direct-call page now exits back to DMs when no active call row exists, instead of remaining in an idle waiting state.",
+                "End-call actions now route away first and run teardown immediately after, improving perceived responsiveness.",
+                "Update feed advanced to v11.7.17 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed call-end flow that could look frozen by leaving users on the Direct Call screen after hangup.",
+                "Prevented stale fallback auto-join from keeping users stuck in a call layout without an active call record.",
+                "Release stack metadata aligned to v11.7.17."
+            ]
+        },
+        {
+            "version": "11.7.16",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Direct-call teardown now force-cleans local media/session state before waiting on RTC leave.",
+                "Call hangup now uses strict teardown timeout bounds so app navigation remains responsive.",
+                "Update feed advanced to v11.7.16 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Mitigated call-end freeze caused by stalled media/client shutdown paths during hangup.",
+                "Added forced local cleanup fallback when teardown or RTC leave exceeds timeout.",
+                "Release stack metadata aligned to v11.7.16."
+            ]
+        },
+        {
+            "version": "11.7.15",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Billing auth now server-validates JWTs before checkout, not only local expiry.",
+                "Marketplace and membership billing flows now auto-refresh, retry once, then cleanly force re-login when session recovery fails.",
+                "Update feed advanced to v11.7.15 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Fixed repeated Invalid JWT checkout failures caused by stale but unexpired local access tokens.",
+                "Added invalid-JWT recovery retry path for both checkout and billing portal actions.",
+                "Release stack metadata aligned to v11.7.15."
+            ]
+        },
+        {
+            "version": "11.7.14",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Billing calls now pass an explicit freshly refreshed bearer token to Supabase edge functions.",
+                "Marketplace and membership purchase actions share the same hardened auth refresh path.",
+                "Update feed advanced to v11.7.14 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Mitigated persistent Invalid JWT checkout failures caused by stale function invocation auth headers.",
+                "Added stronger auth guard coverage for both checkout and billing portal flows.",
+                "Release stack metadata aligned to v11.7.14."
+            ]
+        },
+        {
+            "version": "11.7.13",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "App shell visuals now use a stronger red and gold style treatment across cards and shared controls.",
+                "Warm surface palette was deepened so the UI no longer reads as neutral gray in most layouts.",
+                "Update feed advanced to v11.7.13 with latest installer package."
+            ],
+            "bugFixes": [
+                "Auth-session refresh guard now runs before billing checkout and portal calls to reduce Invalid JWT failures.",
+                "Secondary action surfaces now render with warm branded gradients for visual consistency.",
+                "Release notes and installer metadata aligned to the newest build."
+            ]
+        },
+        {
+            "version": "11.7.12",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace and membership billing actions now pre-refresh auth sessions before calling Stripe edge functions.",
+                "Core app surface palette shifted to warmer red/gold-tinted dark tones across shared surface classes.",
+                "Update feed advanced to v11.7.12 with the newest installer package."
+            ],
+            "bugFixes": [
+                "Reduced Invalid JWT purchase failures caused by expired auth tokens during checkout start.",
+                "Improved checkout error path messaging with clearer session-invalid guidance.",
+                "Release stack metadata aligned with the latest package and web deployment."
+            ]
+        },
+        {
+            "version": "11.7.11",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace cosmetic selection no longer triggers extra store reloads while browsing.",
+                "Compact card-to-preview flow remains stable while switching between cosmetic items.",
+                "Installer and website feed advanced to v11.7.11."
+            ],
+            "bugFixes": [
+                "Fixed marketplace re-fetch loop caused by cosmetic selection state dependencies.",
+                "Improved marketplace responsiveness when previewing and buying cosmetics.",
+                "Release metadata aligned with the newest installer package."
+            ]
+        },
+        {
+            "version": "11.7.10",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Marketplace now uses a compact card layout with a dedicated live cosmetic preview panel.",
+                "Each cosmetic now includes clear effect details and tag labels before checkout.",
+                "Global app accent palette shifted to a red and gold visual direction."
+            ],
+            "bugFixes": [
+                "Checkout flow now surfaces exact Edge Function error text instead of only a generic non-2xx message.",
+                "Marketplace checkout now sends full item metadata to support backend SKU self-heal logic.",
+                "Release feed advanced to v11.7.10 with new installer package."
+            ]
+        },
+        {
+            "version": "11.7.9",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Windows packaging now uses the NCore app identity instead of the old starter package identity.",
+                "Installer now forces NCore desktop/start shortcuts for easier launch and pinning.",
+                "Update feed advanced to v11.7.9 with the new installer output."
+            ],
+            "bugFixes": [
+                "Fixed installer path branding issue that could place NCore under the old starter folder name.",
+                "Improved executable discovery so users can launch NCore directly from created shortcuts.",
+                "Reduced confusion around missing NCore.exe by aligning package metadata with product name."
+            ]
+        },
+        {
+            "version": "11.7.8",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Missed DM/group call invites remain joinable longer with an expanded active-call window.",
+                "Active call cards continue to show live participants with one-click green Join actions.",
+                "Release track advanced to v11.7.8 with auto-synced installer metadata."
+            ],
+            "bugFixes": [
+                "Removed remaining blocking hangup awaits in direct-call page transitions to reduce freeze risk when calls end.",
+                "Call-decline route now exits immediately while hangup teardown runs in the background.",
+                "Realtime end-call listeners now issue non-blocking session teardown."
+            ]
+        },
+        {
+            "version": "11.7.7",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "DM and group DM list now surfaces active-call state with in-place green Join buttons.",
+                "Conversation header now shows an active-call card with participants and one-click join.",
+                "Stripe Boost checkout now supports dynamic subscription pricing without requiring a pre-made Stripe product."
+            ],
+            "bugFixes": [
+                "Additional hangup teardown timeout guards to prevent call-end UI freezing when RTC leave stalls.",
+                "Call restart now reuses an existing ringing/accepted call row instead of creating duplicates.",
+                "Active call metadata now persists video-call intent for correct join routing."
+            ]
+        },
+        {
+            "version": "11.7.6",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "One-time Marketplace gifting checkout added so items can be purchased for other users.",
+                "Marketplace catalog expanded with additional permanent cosmetic packs.",
+                "Desktop runtime now keeps stronger background notification behavior with startup persistence for packaged Windows builds."
+            ],
+            "bugFixes": [
+                "Fixed DM call end-flow freeze by making hangup re-entrant-safe and non-blocking for UI navigation.",
+                "Improved direct call teardown sequencing to prevent duplicate hangup contention.",
+                "Rebuilt NCore icon asset with valid ICO format for Windows installer/taskbar usage."
+            ]
+        },
+        {
+            "version": "11.7.5",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Release pipeline now auto-publishes the newest NSIS installer and latest.yml in one pass.",
+                "Community sidebar loader now auto-heals missing server/category/channel structure for admins.",
+                "NCore Marketplace remains in the main rail between Discover and DMs."
+            ],
+            "bugFixes": [
+                "Fixed mobile channel-sidebar ghost strip next to the server rail when collapsed.",
+                "Hardened community server lookup to tolerate legacy duplicate server rows.",
+                "Improved What's New release stack consistency for improvements and bug-fix sections."
+            ]
+        },
+        {
+            "version": "11.7.4",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Auto-updater feed now points directly to the newest NCore installer build.",
+                "Dedicated NCore Marketplace section in the primary app navigation.",
+                "Membership page expanded to show the full free + premium monthly plan lineup."
+            ],
+            "bugFixes": [
+                "Voice call speaking-state updates are throttled to prevent UI freeze spikes.",
+                "Channel sidebar desktop behavior stabilized for community navigation.",
+                "Server route/sidebar sync improved to reduce panel desync."
+            ]
+        },
+        {
+            "version": "11.7.3",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "RunPod backend probe added at startup to verify connectivity.",
+                "Release pipeline now auto-syncs installer metadata and update feed."
+            ],
+            "bugFixes": [
+                "Realtime DM call invite reliability was improved.",
+                "Screen-share source refresh behavior was hardened."
+            ]
+        },
+        {
+            "version": "11.7.2",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "RunPod backend probe added at startup to verify connectivity.",
+                "Release pipeline now auto-syncs installer metadata and update feed."
+            ],
+            "bugFixes": [
+                "Realtime DM call invite reliability was improved.",
+                "Screen-share source refresh behavior was hardened."
+            ]
+        },
+        {
+            "version": "11.7.1",
+            "date": "2026-03-14",
+            "badge": "Previous",
+            "improvements": [
+                "Desktop installer packaging was aligned with update feed checks."
+            ],
+            "bugFixes": [
+                "Cross-page DM call persistence behavior improved."
+            ]
+        },
+        {
+            "version": "0.0.10",
+            "date": "Legacy release",
+            "badge": "Previous",
+            "improvements": [
+                "Core launch with chat, DMs, voice/video, communities, courses, and XP systems."
+            ],
+            "bugFixes": []
+        }
+    ]
+}
