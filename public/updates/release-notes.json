@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.67",
+            "version": "11.7.68",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Updated NCore brand source image to your provided high-resolution NCore.jpg.",
+                "Regenerated desktop executable, installer, and web icon assets from the new canonical brand file.",
+                "Primary app logo surfaces now consistently load the canonical NCore.jpg path."
+            ],
+            "bugFixes": [
+                "Fixed branding mismatch where fallback assets could render a different logo than the canonical file.",
+                "Fixed stale icon propagation by re-syncing derived PNG/ICO artifacts from the source logo before release.",
+                "Improved release consistency so website and auto-update artifacts publish with aligned branding metadata."
+            ]
+        },
+        {
+            "version": "11.7.67",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Top bar now shows a green update action when an auto-downloaded desktop update is ready.",
                 "Update flow now applies via in-app restart install trigger instead of forcing installer download manually.",
