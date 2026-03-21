@@ -271,10 +271,15 @@ export function DirectCallPage() {
       sessionWasLiveRef.current = true;
       return;
     }
+    // Keep caller on the call route while ringing, even if media/session
+    // briefly drops to idle during signaling retries.
+    if (callState === 'ringing') {
+      return;
+    }
     if (sessionWasLiveRef.current && session.phase === 'idle') {
       navigate(`/app/dm/${conversationId}`);
     }
-  }, [conversationId, navigate, session.phase]);
+  }, [callState, conversationId, navigate, session.phase]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -498,7 +503,9 @@ export function DirectCallPage() {
           liveState.conversationId === conversationId &&
           (liveState.phase === 'active' || liveState.phase === 'connecting');
 
-        if (!hasLiveSessionForConversation && !allowFallbackJoin) {
+        const canUseFallbackJoinFlow = allowFallbackJoin || isOutgoingFallback;
+
+        if (!hasLiveSessionForConversation && !canUseFallbackJoinFlow) {
           setCallId(null);
           setCallState(null);
           setIsCaller(false);
@@ -507,7 +514,7 @@ export function DirectCallPage() {
           return;
         }
 
-        if (!hasLiveSessionForConversation && allowFallbackJoin) {
+        if (!hasLiveSessionForConversation && canUseFallbackJoinFlow) {
           // Explicit fallback route when calls-row signaling is unavailable.
           setCallId(null);
           setCallState('ringing');
