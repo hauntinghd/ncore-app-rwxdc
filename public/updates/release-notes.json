@@ -1,9 +1,29 @@
 {
     "releases": [
         {
-            "version": "11.7.65",
+            "version": "11.7.66",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "DM call signaling now supports both modern and legacy calls-table schemas without breaking outgoing/incoming flow.",
+                "Active call detection now normalizes call state, participants, and expiry so join cards stay accurate across schema variants.",
+                "Call session teardown now updates ended state with modern-first and legacy fallback writes for safer disconnect handling.",
+                "Friends active-call presence now hydrates from compatible call rows so live call badges and quick-join metadata remain reliable.",
+                "Release pipeline now includes schema reconciliation migration to align older deployments with current call signaling expectations."
+            ],
+            "bugFixes": [
+                "Fixed DM call startup failures caused by missing calls.conversation_id on legacy databases.",
+                "Fixed call acceptance/decline updates failing when calls.state column is unavailable.",
+                "Fixed call-ended signaling failures that left stale ringing state on legacy status-based call rows.",
+                "Fixed realtime call-state listeners ignoring legacy status payloads and missing remote end/decline transitions.",
+                "Fixed active call refresh paths that silently dropped rows when only room/status/callee_id fields existed.",
+                "Fixed invite/listing synchronization inconsistencies by resolving room->conversation mapping during calls table subscriptions."
+            ]
+        },
+        {
+            "version": "11.7.65",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Quickdraw command navigation is now fully interactive with role-aware views for Find Contracts, Contract Radar, Listed Contracts, Working Contracts, and Escrow History.",
                 "Buy/Sell Games storefront chips (Store, New & Trending, Top Sellers, Recently Updated, Your Library) now switch sections correctly and update listing order in real time.",
