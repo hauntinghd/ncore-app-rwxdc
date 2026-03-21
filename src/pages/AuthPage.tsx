@@ -147,12 +147,6 @@ function AuthShell({
                   src={appLogoUrl}
                   alt="NCore logo"
                   className="w-full h-full object-cover"
-                  onError={(event) => {
-                    const img = event.currentTarget;
-                    if (img.dataset.logoFallbackDone === '1') return;
-                    img.dataset.logoFallbackDone = '1';
-                    img.src = `${import.meta.env.BASE_URL}ncore-logo.png`;
-                  }}
                 />
               </div>
               <h1 className="text-4xl font-black text-gradient">NCore</h1>

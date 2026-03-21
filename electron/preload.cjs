@@ -2,8 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   getUpdateConfig: () => ipcRenderer.invoke('updates:getConfig'),
+  getUpdateRuntimeState: () => ipcRenderer.invoke('updates:getRuntimeState'),
   setUpdateConfig: (url) => ipcRenderer.invoke('updates:setConfig', { url }),
   downloadLatestUpdate: () => ipcRenderer.invoke('updates:downloadLatest'),
+  installDownloadedUpdate: () => ipcRenderer.invoke('updates:installNow'),
   openExternalUrl: (url) => ipcRenderer.invoke('shell:openExternal', { url }),
   realtimeStart: (accessToken) => ipcRenderer.invoke('realtime:start', accessToken),
   realtimeStop: () => ipcRenderer.invoke('realtime:stop'),
@@ -20,5 +22,10 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     const listener = (_e, payload) => cb(payload);
     ipcRenderer.on('desktop-notification-click', listener);
     return () => ipcRenderer.removeListener('desktop-notification-click', listener);
+  },
+  onUpdateReady: (cb) => {
+    const listener = (_e, payload) => cb(payload);
+    ipcRenderer.on('updates:ready', listener);
+    return () => ipcRenderer.removeListener('updates:ready', listener);
   },
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
-  Search, Settings, User, X, Zap,
+  Download, RefreshCw, Search, Settings, User, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
@@ -35,6 +35,12 @@ interface TopBarProps {
 const RELEASE_SEEN_VERSION_KEY = 'ncore.release.seenVersion';
 const RELEASE_CACHE_KEY = 'ncore.release.cache.v1';
 const RELEASE_CACHE_TTL_MS = 120000;
+const EMPTY_UPDATE_RUNTIME_STATE = {
+  portable: false,
+  ready: false,
+  installing: false,
+  version: '',
+};
 
 function readSeenReleaseVersion(): string {
   if (typeof window === 'undefined') return '';
@@ -103,6 +109,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const [latestReleaseVersion, setLatestReleaseVersion] = useState('');
   const [seenReleaseVersion, setSeenReleaseVersion] = useState(() => readSeenReleaseVersion());
   const [streamerMode, setStreamerMode] = useState(() => getStreamerModeSettings());
+  const [updateRuntimeState, setUpdateRuntimeState] = useState(EMPTY_UPDATE_RUNTIME_STATE);
+  const [installingFromTopbar, setInstallingFromTopbar] = useState(false);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -127,6 +135,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const isOnActiveCallRoute = activeCallConversationId
     ? location.pathname === `/app/dm/${activeCallConversationId}/call`
     : false;
+  const updateInstallInProgress = installingFromTopbar || updateRuntimeState.installing;
+  const showTopbarUpdateButton = !updateRuntimeState.portable && (updateRuntimeState.ready || updateInstallInProgress);
 
   function markReleaseUpdatesRead(version = latestReleaseVersion) {
     const normalized = String(version || '').trim();
@@ -182,6 +192,44 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       silentNotifications: streamerMode.silentNotifications,
     });
   }, [streamerMode.enabled, streamerMode.hideDmPreviews, streamerMode.silentNotifications]);
+
+  useEffect(() => {
+    const desktopBridge = window.desktopBridge;
+    if (!desktopBridge?.getUpdateRuntimeState) return;
+
+    let mounted = true;
+    const applyRuntimeState = (payload?: DesktopUpdateRuntimeState | null) => {
+      if (!mounted || !payload?.ok) return;
+      setUpdateRuntimeState({
+        portable: Boolean(payload.portable),
+        ready: Boolean(payload.ready),
+        installing: Boolean(payload.installing),
+        version: String(payload.version || ''),
+      });
+      if (!payload.installing) {
+        setInstallingFromTopbar(false);
+      }
+    };
+
+    const loadRuntimeState = async () => {
+      try {
+        const state = await desktopBridge.getUpdateRuntimeState();
+        applyRuntimeState(state);
+      } catch {
+        // ignore updater runtime sync failures
+      }
+    };
+
+    void loadRuntimeState();
+    const unsubscribe = desktopBridge.onUpdateReady
+      ? desktopBridge.onUpdateReady((payload) => applyRuntimeState(payload))
+      : undefined;
+
+    return () => {
+      mounted = false;
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasActiveCall || !callSession.startedAt) return;
@@ -474,6 +522,20 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     }, 0);
   }
 
+  async function handleInstallUpdateFromTopbar() {
+    const installDownloadedUpdate = window.desktopBridge?.installDownloadedUpdate;
+    if (!installDownloadedUpdate || updateInstallInProgress || !updateRuntimeState.ready) return;
+    setInstallingFromTopbar(true);
+    try {
+      const result = await installDownloadedUpdate();
+      if (!result?.ok) {
+        setInstallingFromTopbar(false);
+      }
+    } catch {
+      setInstallingFromTopbar(false);
+    }
+  }
+
   return (
     <>
     <div
@@ -528,6 +590,23 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         )}
 
         {actions}
+
+        {showTopbarUpdateButton && (
+          <button
+            type="button"
+            onClick={handleInstallUpdateFromTopbar}
+            disabled={!updateRuntimeState.ready || updateInstallInProgress}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-green-500/40 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-100 transition-colors hover:bg-green-500/25 disabled:cursor-not-allowed disabled:opacity-70"
+            title={updateInstallInProgress ? 'Applying update and restarting NCore...' : 'Apply downloaded update and restart NCore'}
+          >
+            {updateInstallInProgress ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+            <span>
+              {updateInstallInProgress
+                ? 'Updating...'
+                : `Update${updateRuntimeState.version ? ` v${updateRuntimeState.version}` : ' Ready'}`}
+            </span>
+          </button>
+        )}
 
         <div className="relative hidden md:block">
           <Search size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-surface-500" />

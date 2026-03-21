@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.66",
+            "version": "11.7.67",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Top bar now shows a green update action when an auto-downloaded desktop update is ready.",
+                "Update flow now applies via in-app restart install trigger instead of forcing installer download manually.",
+                "Brand logo rendering now uses NCore.jpg consistently across auth, onboarding, landing, and server rail surfaces."
+            ],
+            "bugFixes": [
+                "Fixed updater state gap where renderer had no live visibility into update-downloaded readiness.",
+                "Added desktop bridge IPC for update runtime state and install-now action to reduce stuck update UX.",
+                "Removed stale ncore-logo fallback path that could display mismatched legacy logo artwork."
+            ]
+        },
+        {
+            "version": "11.7.66",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "DM call signaling now supports both modern and legacy calls-table schemas without breaking outgoing/incoming flow.",
                 "Active call detection now normalizes call state, participants, and expiry so join cards stay accurate across schema variants.",

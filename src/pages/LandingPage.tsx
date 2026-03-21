@@ -311,12 +311,6 @@ export function LandingPage() {
               src={appLogoUrl}
               alt="NCore"
               className="h-9 w-9 rounded-xl border border-surface-700 object-cover"
-              onError={(event) => {
-                const img = event.currentTarget;
-                if (img.dataset.logoFallbackDone === '1') return;
-                img.dataset.logoFallbackDone = '1';
-                img.src = `${import.meta.env.BASE_URL}ncore-logo.png`;
-              }}
             />
             <div>
               <div className="text-lg font-black tracking-wide text-gradient">NCore</div>
@@ -613,12 +607,6 @@ export function LandingPage() {
               src={appLogoUrl}
               alt="NCore"
               className="h-7 w-7 rounded-md object-cover"
-              onError={(event) => {
-                const img = event.currentTarget;
-                if (img.dataset.logoFallbackDone === '1') return;
-                img.dataset.logoFallbackDone = '1';
-                img.src = `${import.meta.env.BASE_URL}ncore-logo.png`;
-              }}
             />
             <span>NCore by NYPTID Industries Advanced Technologies</span>
           </div>

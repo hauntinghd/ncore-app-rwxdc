@@ -29,6 +29,32 @@ let isAppQuitting = false;
 let isInstallingUpdate = false;
 let hasShownBackgroundHint = false;
 const PRIMARY_UPDATE_FEED_URL = 'https://ncore.nyptidindustries.com/updates';
+const isPortableBuild = Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
+let isUpdateReady = false;
+let downloadedUpdateVersion = '';
+
+function getUpdateRuntimeState() {
+  return {
+    ok: true,
+    portable: isPortableBuild,
+    ready: isUpdateReady,
+    installing: isInstallingUpdate,
+    version: String(downloadedUpdateVersion || ''),
+  };
+}
+
+function emitUpdateReadyState() {
+  const payload = getUpdateRuntimeState();
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      win.webContents.send('updates:ready', payload);
+    } catch {
+      // ignore renderer event delivery failures
+    }
+  }
+}
 
 // Keep media/playback responsive for realtime calling.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -160,8 +186,10 @@ function closeAllWindows(options = {}) {
 function triggerUpdateInstall(reason = 'auto') {
   if (isInstallingUpdate) return;
   isInstallingUpdate = true;
+  isUpdateReady = false;
   isAppQuitting = true;
   hasShownBackgroundHint = true;
+  emitUpdateReadyState();
   destroyTray();
 
   // Disable window "hide to tray" behavior for this update quit flow.
@@ -562,10 +590,10 @@ ipcMain.handle('settings:setStreamerMode', async (_event, payload) => {
 });
 
 function setupAutoUpdates() {
-  const isPortableBuild = Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
   if (isPortableBuild) {
     // electron-updater does not support true auto-install flow on portable target.
     console.warn('Auto-update disabled for portable build. Use NSIS build for automatic updates.');
+    emitUpdateReadyState();
     return;
   }
 
@@ -582,16 +610,23 @@ function setupAutoUpdates() {
   });
 
   autoUpdater.on('before-quit-for-update', () => {
+    isUpdateReady = false;
     isInstallingUpdate = true;
     isAppQuitting = true;
+    emitUpdateReadyState();
     destroyTray();
   });
 
-  autoUpdater.on('update-downloaded', () => {
-    // Apply update quickly without forcing manual reinstall workflows.
-    setTimeout(() => {
-      triggerUpdateInstall('update-downloaded');
-    }, 1500);
+  autoUpdater.on('update-available', (info) => {
+    isUpdateReady = false;
+    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '');
+    emitUpdateReadyState();
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '') || downloadedUpdateVersion;
+    isUpdateReady = true;
+    emitUpdateReadyState();
   });
 
   // Check on startup and periodically.
@@ -722,6 +757,8 @@ function registerDesktopActions() {
     return { ok: true, url };
   });
 
+  ipcMain.handle('updates:getRuntimeState', async () => getUpdateRuntimeState());
+
   ipcMain.handle('updates:setConfig', async (_event, payload) => {
     try {
       const url = String(payload?.url || '').trim();
@@ -790,6 +827,20 @@ function registerDesktopActions() {
     } catch (error) {
       return { ok: false, message: String(error?.message || error) };
     }
+  });
+
+  ipcMain.handle('updates:installNow', async () => {
+    if (isPortableBuild) {
+      return { ok: false, message: 'Auto-install update is unavailable on portable builds.' };
+    }
+    if (isInstallingUpdate) {
+      return { ok: true, message: 'Update install is already in progress.' };
+    }
+    if (!isUpdateReady) {
+      return { ok: false, message: 'No downloaded update is ready yet.' };
+    }
+    triggerUpdateInstall('renderer-install-now');
+    return { ok: true, message: 'Restarting to apply update...' };
   });
 }
 

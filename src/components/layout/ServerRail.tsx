@@ -44,12 +44,6 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
               src={appLogoUrl}
               alt="NCore"
               className="h-full w-full object-cover"
-              onError={(event) => {
-                const img = event.currentTarget;
-                if (img.dataset.logoFallbackDone === '1') return;
-                img.dataset.logoFallbackDone = '1';
-                img.src = `${import.meta.env.BASE_URL}ncore-logo.png`;
-              }}
             />
           </button>
 
@@ -116,12 +110,6 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
             src={appLogoUrl}
             alt="NCore"
             className="w-full h-full object-cover"
-            onError={(event) => {
-              const img = event.currentTarget;
-              if (img.dataset.logoFallbackDone === '1') return;
-              img.dataset.logoFallbackDone = '1';
-              img.src = `${import.meta.env.BASE_URL}ncore-logo.png`;
-            }}
           />
         </button>
       </Tooltip>
