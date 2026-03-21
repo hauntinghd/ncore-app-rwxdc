@@ -2,12 +2,34 @@ import { supabase } from './supabase';
 
 const AGORA_STATIC_TOKEN = (import.meta.env.VITE_AGORA_TEMP_TOKEN || '').trim();
 const AGORA_TOKEN_FUNCTION = (import.meta.env.VITE_AGORA_TOKEN_FUNCTION || 'agora-token').trim();
-const AGORA_ALLOW_UNAUTH_JOIN = String(import.meta.env.VITE_AGORA_ALLOW_UNAUTH_JOIN || '').toLowerCase() === 'true';
+const AGORA_ALLOW_UNAUTH_JOIN = String(import.meta.env.VITE_AGORA_ALLOW_UNAUTH_JOIN || 'true').toLowerCase() === 'true';
+const AGORA_REQUIRE_TOKEN = String(import.meta.env.VITE_AGORA_REQUIRE_TOKEN || '').toLowerCase() === 'true';
 const AGORA_TOKEN_FALLBACK_FUNCTIONS = ['agora-token-relaxed', 'agora-token-debug'];
 
 function isFunctionsMissingError(message: string): boolean {
   const normalized = message.toLowerCase();
-  return normalized.includes('function not found') || normalized.includes('404') || normalized.includes('failed to fetch');
+  return normalized.includes('function not found')
+    || normalized.includes('404')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('non-2xx')
+    || normalized.includes('network')
+    || normalized.includes('fetch');
+}
+
+function isLikelyTransientFunctionsError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('non-2xx')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('network')
+    || normalized.includes('timeout')
+    || normalized.includes('internal server error')
+    || normalized.includes('service unavailable')
+    || normalized.includes('function not found')
+    || normalized.includes('404')
+    || normalized.includes('500')
+    || normalized.includes('502')
+    || normalized.includes('503')
+    || normalized.includes('504');
 }
 
 export async function resolveAgoraJoinToken(channelName: string, uid: string): Promise<string | null> {
@@ -21,9 +43,17 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
   const errors: string[] = [];
 
   for (const functionName of candidateFunctions) {
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body: { channelName, uid },
-    });
+    let data: any = null;
+    let error: any = null;
+    try {
+      const response = await supabase.functions.invoke(functionName, {
+        body: { channelName, uid },
+      });
+      data = response?.data;
+      error = response?.error;
+    } catch (invokeError) {
+      error = invokeError;
+    }
 
     const resolvedToken =
       typeof data === 'string'
@@ -47,12 +77,19 @@ export async function resolveAgoraJoinToken(channelName: string, uid: string): P
     }
   }
 
-  const requiresToken = !AGORA_ALLOW_UNAUTH_JOIN;
+  const requiresToken = AGORA_REQUIRE_TOKEN || !AGORA_ALLOW_UNAUTH_JOIN;
   if (requiresToken) {
     const reason = errors.join(' | ') || 'Token function returned empty payload';
     throw new Error(
       `Agora token is required but unavailable. Tried ${candidateFunctions.join(', ')}. Reason: ${reason}`.trim(),
     );
+  }
+
+  const reasonBlob = errors.join(' | ').trim();
+  if (reasonBlob && !errors.every((reason) => isLikelyTransientFunctionsError(reason))) {
+    console.warn('Agora token fetch returned non-transient response; proceeding with unauthenticated join fallback.', reasonBlob);
+  } else if (reasonBlob) {
+    console.warn('Agora token fetch unavailable; proceeding with unauthenticated join fallback.', reasonBlob);
   }
 
   for (const reason of errors) {
