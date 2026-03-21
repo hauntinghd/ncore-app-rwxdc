@@ -4,5 +4,6 @@ dist
 supabase
 tools
 *.log
-public/updates/Cordty Nano Setup 11.0.0.exe
-public/updates/Cordty Nano Setup 11.0.0.exe.blockmap
+public/updates/*.exe
+public/updates/*.blockmap
+public/updates/*.apk

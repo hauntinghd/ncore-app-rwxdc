@@ -1,9 +1,26 @@
 {
     "releases": [
         {
-            "version": "11.7.62",
+            "version": "11.7.63",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Marketplace now uses dedicated Quickdraw and Games experiences with role-oriented layouts, command rail navigation, and searchable contract/store grids.",
+                "Quickdraw now includes in-app briefing modals for Terms of Engagement, Tier II Clearance, and Operational Protocols to guide hiring and specialist workflows.",
+                "Games marketplace now uses a storefront-style presentation with featured listing surface, richer metadata cards, and clearer installer access paths.",
+                "Settings rollout expanded with live controls across Chat, Keybinds, Language & Time, Windows Settings, Streamer Mode, Advanced, Activity Privacy, Registered Games, Game Overlay, NCore Boost, Server Boost, Subscriptions, Gift Inventory, and Billing."
+            ],
+            "bugFixes": [
+                "Fixed marketplace runtime failure path when marketplace_service_disputes is not yet present in Supabase schema cache, allowing marketplace/admin surfaces to continue loading.",
+                "Improved DM fallback call behavior by carrying caller intent and adding outgoing ring timeout handling so stalled calls auto-disconnect cleanly.",
+                "Connections tab now uses platform logos instead of emoji markers and supports expanded provider catalog with explicit coming-soon flags where OAuth is not enabled.",
+                "Resolved TypeScript build blockers for release pipeline by stabilizing app-level type checks and cleaning strict compile-path regressions introduced by mixed runtime data typing."
+            ]
+        },
+        {
+            "version": "11.7.62",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Auto-update installer flow now runs a stronger uninstall fallback path when replacing an older NCore build.",
                 "Installer startup now force-cleans lingering Electron helper and crashpad processes before uninstall/update starts.",
