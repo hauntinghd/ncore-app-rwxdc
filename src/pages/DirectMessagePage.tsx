@@ -49,7 +49,7 @@ interface ActiveConversationCall {
   participantNames: string[];
 }
 
-const CALL_JOIN_WINDOW_MS = 30 * 60 * 1000;
+const CALL_JOIN_WINDOW_MS = 3 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen, bio, banner_url, platform_role, rank, xp, is_banned, created_at, updated_at';
 const DM_LIST_PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen';
@@ -757,6 +757,12 @@ export function DirectMessagePage() {
     if (!row) return false;
     const state = String(row.state || '').toLowerCase();
     if (state !== 'ringing' && state !== 'accepted') return false;
+    if (state === 'ringing') {
+      const createdAtMs = Date.parse(String(row.created_at || ''));
+      if (Number.isFinite(createdAtMs) && createdAtMs > 0 && createdAtMs + CALL_JOIN_WINDOW_MS <= Date.now()) {
+        return false;
+      }
+    }
     if (!row.expires_at) return true;
     const expires = new Date(String(row.expires_at));
     if (Number.isNaN(expires.getTime())) return true;

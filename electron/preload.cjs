@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
   realtimeStart: (accessToken) => ipcRenderer.invoke('realtime:start', accessToken),
   realtimeStop: () => ipcRenderer.invoke('realtime:stop'),
   realtimeSetStatus: (status) => ipcRenderer.invoke('realtime:setStatus', { status }),
+  setStreamerModeConfig: (payload) => ipcRenderer.invoke('settings:setStreamerMode', payload || {}),
   listDesktopCaptureSources: () => ipcRenderer.invoke('desktopCapture:listSources'),
   setPreferredDesktopCaptureSource: (sourceId) => ipcRenderer.invoke('desktopCapture:setPreferredSource', { sourceId }),
   onIncomingCall: (cb) => {

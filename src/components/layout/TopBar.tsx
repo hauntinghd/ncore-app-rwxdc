@@ -12,6 +12,7 @@ import { directCallSession, useDirectCallSession } from '../../lib/directCallSes
 import type { Notification } from '../../lib/types';
 import { formatRelativeTime } from '../../lib/utils';
 import { playNotificationSound, startIncomingCallRing, stopIncomingCallRing, type NotificationSoundKind } from '../../lib/notificationSound';
+import { getStreamerModeSettings, sanitizeNotificationBody, sanitizeNotificationTitle } from '../../lib/streamerMode';
 import {
   DEFAULT_UPDATE_FEED_URL,
   compareSemver,
@@ -101,6 +102,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const [releaseUpdates, setReleaseUpdates] = useState<ReleaseLogEntry[]>([]);
   const [latestReleaseVersion, setLatestReleaseVersion] = useState('');
   const [seenReleaseVersion, setSeenReleaseVersion] = useState(() => readSeenReleaseVersion());
+  const [streamerMode, setStreamerMode] = useState(() => getStreamerModeSettings());
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -157,6 +159,28 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
+
+  useEffect(() => {
+    const syncStreamerMode = () => {
+      setStreamerMode(getStreamerModeSettings());
+    };
+    syncStreamerMode();
+    window.addEventListener('storage', syncStreamerMode);
+    window.addEventListener('ncore:rollout-settings-updated', syncStreamerMode as EventListener);
+    return () => {
+      window.removeEventListener('storage', syncStreamerMode);
+      window.removeEventListener('ncore:rollout-settings-updated', syncStreamerMode as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.desktopBridge?.setStreamerModeConfig) return;
+    void window.desktopBridge.setStreamerModeConfig({
+      enabled: streamerMode.enabled,
+      hideDmPreviews: streamerMode.hideDmPreviews,
+      silentNotifications: streamerMode.silentNotifications,
+    });
+  }, [streamerMode.enabled, streamerMode.hideDmPreviews, streamerMode.silentNotifications]);
 
   useEffect(() => {
     if (!hasActiveCall || !callSession.startedAt) return;
@@ -254,7 +278,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         for (const notification of list) {
           if (!seenNotificationIdsRef.current.has(notification.id)) {
             seenNotificationIdsRef.current.add(notification.id);
-            new Notification(notification.title || 'NCore', { body: notification.body || '' });
+            new Notification(
+              sanitizeNotificationTitle(notification.title || 'NCore', notification.type || ''),
+              { body: sanitizeNotificationBody(notification.body || '', notification.type || '') },
+            );
             const soundKind = getNotificationSoundKind(notification);
             if (soundKind === 'call') {
               startIncomingCallRing({ status: profile.status });
@@ -297,8 +324,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
             }
           }
           if (!useMainProcessDesktopNotifications && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            new Notification(incoming.title || 'NCore', {
-              body: incoming.body || '',
+            new Notification(sanitizeNotificationTitle(incoming.title || 'NCore', incoming.type || ''), {
+              body: sanitizeNotificationBody(incoming.body || '', incoming.type || ''),
             });
           }
         },
@@ -330,6 +357,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       stopIncomingCallRing();
       return;
     }
+    if (streamerMode.silentNotifications) {
+      stopIncomingCallRing();
+      return;
+    }
     if (incomingCall) {
       startIncomingCallRing({ status: profile?.status });
       return () => {
@@ -338,7 +369,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     }
     stopIncomingCallRing();
     return;
-  }, [incomingCall?.id, profile?.status, useMainProcessDesktopNotifications]);
+  }, [incomingCall?.id, profile?.status, streamerMode.silentNotifications, useMainProcessDesktopNotifications]);
 
   async function markAllRead() {
     markReleaseUpdatesRead();
@@ -588,8 +619,12 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                     <div className="flex items-start gap-3">
                       {!notification.is_read && <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-nyptid-300" />}
                       <div className={!notification.is_read ? '' : 'ml-5'}>
-                        <div className="text-sm font-medium text-surface-200">{notification.title}</div>
-                        {notification.body && <div className="mt-0.5 text-xs text-surface-400">{notification.body}</div>}
+                        <div className="text-sm font-medium text-surface-200">
+                          {sanitizeNotificationTitle(notification.title || 'NCore', notification.type || '')}
+                        </div>
+                        <div className="mt-0.5 text-xs text-surface-400">
+                          {sanitizeNotificationBody(notification.body || '', notification.type || '')}
+                        </div>
                         <div className="mt-1 text-xs text-surface-600">{formatRelativeTime(notification.created_at)}</div>
                       </div>
                     </div>
@@ -667,9 +702,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           style={noDragStyle}
         >
           <div className="text-sm font-semibold text-surface-100">
-            {incomingCall.title || 'Incoming call'}
+            {sanitizeNotificationTitle(incomingCall.title || 'Incoming call', incomingCall.type || 'incoming_call')}
           </div>
-          {incomingCall.body && <div className="mt-1 text-xs text-surface-400">{incomingCall.body}</div>}
+          <div className="mt-1 text-xs text-surface-400">
+            {sanitizeNotificationBody(incomingCall.body || '', incomingCall.type || 'incoming_call')}
+          </div>
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => handleIncomingCallAction('dismiss')}

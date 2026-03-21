@@ -48,6 +48,7 @@ import {
   resolveUpdateFeedBase,
 } from '../lib/releaseFeed';
 import { promptPwaInstall } from '../lib/pwaRuntime';
+import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
 
 type SectionId =
   | 'my-account'
@@ -411,27 +412,6 @@ const ROLLED_OUT_SECTION_CONTENT: Partial<Record<SectionId, RolloutSection>> = {
         rows: [
           { key: 'streamer_auto_enable_obs', label: 'Auto-enable with OBS', description: 'Automatically enable streamer mode when OBS is detected.' },
           { key: 'streamer_silent_notifs', label: 'Silent Notifications', description: 'Mute notification sounds while streamer mode is active.', defaultEnabled: true },
-        ],
-      },
-    ],
-  },
-  advanced: {
-    title: 'Advanced',
-    subtitle: 'Power-user feature flags and diagnostics controls.',
-    groups: [
-      {
-        title: 'Runtime',
-        rows: [
-          { key: 'adv_devtools', label: 'Enable Dev Diagnostics', description: 'Expose advanced diagnostics panels and transport traces.' },
-          { key: 'adv_realtime_fallback', label: 'Realtime Fallback Mode', description: 'Allow fallback transport when primary signaling fails.', defaultEnabled: true },
-          { key: 'adv_experimental_ui', label: 'Experimental UI Features', description: 'Enable staged UX experiments for this build.' },
-        ],
-      },
-      {
-        title: 'Safety',
-        rows: [
-          { key: 'adv_safe_mode_boot', label: 'Safe Mode on Error', description: 'Reopen app in safe mode after a critical crash.', defaultEnabled: true },
-          { key: 'adv_verbose_logs', label: 'Verbose Client Logs', description: 'Increase local logging detail for support diagnostics.' },
         ],
       },
     ],
@@ -938,7 +918,25 @@ export function SettingsPage() {
   const [releaseLog, setReleaseLog] = useState<ReleaseLogEntry[]>([]);
   const [latestFeedVersion, setLatestFeedVersion] = useState('');
   const [isMobileSettings, setIsMobileSettings] = useState(() => detectMobileSettingsLayout());
-  const [rolloutSettings, setRolloutSettings] = useState<Record<string, boolean>>(() => buildRolloutToggleDefaults());
+  const [rolloutSettings, setRolloutSettings] = useState<Record<string, boolean>>(() => {
+    const defaults = buildRolloutToggleDefaults();
+    if (typeof window === 'undefined') return defaults;
+    try {
+      const raw = window.localStorage.getItem(ROLLOUT_SETTINGS_STORAGE_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== 'object') return defaults;
+      const merged: Record<string, boolean> = { ...defaults };
+      for (const [key, value] of Object.entries(parsed)) {
+        if (Object.prototype.hasOwnProperty.call(merged, key)) {
+          merged[key] = Boolean(value);
+        }
+      }
+      return merged;
+    } catch {
+      return defaults;
+    }
+  });
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
   const comingSoonSection = rolledOutSection ? null : COMING_SOON_SECTION_CONTENT[activeSection];
@@ -992,6 +990,29 @@ export function SettingsPage() {
       window.removeEventListener('orientationchange', update);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(ROLLOUT_SETTINGS_STORAGE_KEY, JSON.stringify(rolloutSettings));
+      window.dispatchEvent(new CustomEvent('ncore:rollout-settings-updated'));
+    } catch {
+      // best-effort local settings persistence
+    }
+  }, [rolloutSettings]);
+
+  useEffect(() => {
+    if (!window.desktopBridge?.setStreamerModeConfig) return;
+    void window.desktopBridge.setStreamerModeConfig({
+      enabled: Boolean(rolloutSettings.streamer_mode_enabled),
+      hideDmPreviews: Boolean(rolloutSettings.streamer_hide_dm_previews),
+      silentNotifications: Boolean(rolloutSettings.streamer_silent_notifs),
+    });
+  }, [
+    rolloutSettings.streamer_mode_enabled,
+    rolloutSettings.streamer_hide_dm_previews,
+    rolloutSettings.streamer_silent_notifs,
+  ]);
 
   useEffect(() => {
     if (!profile) return;
@@ -2912,7 +2933,7 @@ export function SettingsPage() {
                       disabled={checkoutLoadingKey !== null}
                       className="nyptid-btn-secondary text-sm mt-3"
                     >
-                      {checkoutLoadingKey === 'portal' ? 'Opening portal...' : 'Open Billing Portal'}
+                      {checkoutLoadingKey === 'portal' ? 'Opening portal...' : 'Open NCore Building Portal (Stripe)'}
                     </button>
                   </div>
                 )}

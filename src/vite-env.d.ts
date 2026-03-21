@@ -28,6 +28,11 @@ interface Window {
     realtimeStart: (accessToken: string) => Promise<{ ok: boolean; message?: string }>;
     realtimeStop: () => Promise<{ ok: boolean; message?: string }>;
     realtimeSetStatus: (status: string) => Promise<{ ok: boolean; message?: string }>;
+    setStreamerModeConfig: (payload: {
+      enabled: boolean;
+      hideDmPreviews?: boolean;
+      silentNotifications?: boolean;
+    }) => Promise<{ ok: boolean; message?: string }>;
     listDesktopCaptureSources: () => Promise<{ ok: boolean; message?: string; sources?: DesktopCaptureSource[] }>;
     setPreferredDesktopCaptureSource: (sourceId: string) => Promise<{ ok: boolean; message?: string }>;
     onIncomingCall: (cb: (payload: any) => void) => () => void;

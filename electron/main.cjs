@@ -17,6 +17,11 @@ let _realtimeChannel = null;
 let _profileStatusChannel = null;
 let _currentUserId = null;
 let _currentUserStatus = 'online';
+let _streamerModeConfig = {
+  enabled: false,
+  hideDmPreviews: true,
+  silentNotifications: true,
+};
 let _preferredDesktopSourceId = null;
 let mainWindow = null;
 let appTray = null;
@@ -231,7 +236,34 @@ function normalizeStatus(value) {
 }
 
 function shouldSilenceDesktopNotification() {
-  return normalizeStatus(_currentUserStatus) === 'dnd';
+  if (normalizeStatus(_currentUserStatus) === 'dnd') return true;
+  return Boolean(_streamerModeConfig.enabled && _streamerModeConfig.silentNotifications);
+}
+
+function shouldHideDesktopPreview(type) {
+  if (!_streamerModeConfig.enabled || !_streamerModeConfig.hideDmPreviews) return false;
+  const normalizedType = String(type || '').trim().toLowerCase();
+  return normalizedType === 'direct_message'
+    || normalizedType === 'mention'
+    || normalizedType === 'incoming_call';
+}
+
+function buildNotificationPresentation(incoming) {
+  const type = String(incoming?.type || '').trim().toLowerCase();
+  const fallbackTitle = 'NCore';
+  const fallbackBody = '';
+  const title = String(incoming?.title || fallbackTitle);
+  const body = String(incoming?.body || fallbackBody);
+  if (!shouldHideDesktopPreview(type)) {
+    return { title, body, type };
+  }
+  if (type === 'incoming_call') {
+    return { title: 'Incoming call', body: 'Call details hidden in Streamer Mode.', type };
+  }
+  if (type === 'mention') {
+    return { title: 'New mention', body: 'Message preview hidden in Streamer Mode.', type };
+  }
+  return { title: 'New notification', body: 'Message preview hidden in Streamer Mode.', type };
 }
 
 function playIncomingCallDing() {
@@ -294,9 +326,10 @@ function showBackgroundRunningHint() {
 
 function showNativeNotificationForEvent(incoming) {
   if (shouldSilenceDesktopNotification()) return;
-  const title = String(incoming?.title || 'NCore');
-  const body = String(incoming?.body || '');
-  const type = String(incoming?.type || '').trim();
+  const presentation = buildNotificationPresentation(incoming);
+  const title = presentation.title;
+  const body = presentation.body;
+  const type = presentation.type;
 
   const notification = new Notification({
     title,
@@ -516,6 +549,15 @@ ipcMain.handle('realtime:stop', async () => {
 
 ipcMain.handle('realtime:setStatus', async (_event, payload) => {
   _currentUserStatus = normalizeStatus(payload?.status || _currentUserStatus);
+  return { ok: true };
+});
+
+ipcMain.handle('settings:setStreamerMode', async (_event, payload) => {
+  _streamerModeConfig = {
+    enabled: Boolean(payload?.enabled),
+    hideDmPreviews: payload?.hideDmPreviews === undefined ? true : Boolean(payload?.hideDmPreviews),
+    silentNotifications: payload?.silentNotifications === undefined ? true : Boolean(payload?.silentNotifications),
+  };
   return { ok: true };
 });
 

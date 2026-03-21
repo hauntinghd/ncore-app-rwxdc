@@ -6,12 +6,15 @@ import {
   BookOpen,
   Briefcase,
   CheckCircle2,
+  Clock3,
   ExternalLink,
   FileText,
   Gamepad2,
   Gift,
   Info,
+  Plus,
   Search,
+  ShieldCheck,
   ShoppingBag,
   Sparkles,
   Wand2,
@@ -50,6 +53,20 @@ interface CosmeticPreviewMeta {
 type MarketplaceTrack = 'cosmetics' | 'quickdraw' | 'games';
 type QuickdrawRoleView = 'hiring' | 'specialist';
 type QuickdrawBriefingId = 'terms' | 'tier2' | 'protocols' | null;
+
+interface QuickdrawContractDraft {
+  id: string;
+  title: string;
+  description: string;
+  deliverables: string[];
+  budgetUsd: number;
+  durationDays: number;
+  tags: string[];
+  createdAt: string;
+  status: 'draft' | 'queued';
+}
+
+const QUICKDRAW_DRAFTS_STORAGE_PREFIX = 'ncore.marketplace.quickdraw.drafts';
 
 const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: string; subtitle: string; blocks: { title: string; body: string }[] }> = {
   terms: {
@@ -429,6 +446,15 @@ export function MarketplacePage() {
   const [quickdrawBriefingId, setQuickdrawBriefingId] = useState<QuickdrawBriefingId>(null);
   const [quickdrawSearch, setQuickdrawSearch] = useState('');
   const [gamesSearch, setGamesSearch] = useState('');
+  const [showIssueContractModal, setShowIssueContractModal] = useState(false);
+  const [issueContractTitle, setIssueContractTitle] = useState('');
+  const [issueContractDescription, setIssueContractDescription] = useState('');
+  const [issueContractDeliverablesText, setIssueContractDeliverablesText] = useState('');
+  const [issueContractDurationDays, setIssueContractDurationDays] = useState('30');
+  const [issueContractBudgetUsd, setIssueContractBudgetUsd] = useState('10');
+  const [issueContractTagsText, setIssueContractTagsText] = useState('');
+  const [issueContractAcknowledged, setIssueContractAcknowledged] = useState(false);
+  const [quickdrawContractDrafts, setQuickdrawContractDrafts] = useState<QuickdrawContractDraft[]>([]);
 
   const ownedSkus = useMemo(() => new Set(entitlements.ownedSkus || []), [entitlements.ownedSkus]);
   const selectedProduct = useMemo(
@@ -492,6 +518,14 @@ export function MarketplacePage() {
     });
   }, [gameListings, gamesSearch]);
   const featuredGameListing = filteredGameListings[0] || null;
+  const hiringContractDrafts = useMemo(
+    () => quickdrawContractDrafts.filter((draft) => draft.status === 'draft'),
+    [quickdrawContractDrafts],
+  );
+  const queuedContractDrafts = useMemo(
+    () => quickdrawContractDrafts.filter((draft) => draft.status === 'queued'),
+    [quickdrawContractDrafts],
+  );
   const marketplaceTrackMeta: Record<MarketplaceTrack, { label: string; summary: string; count: number; countLabel: string }> = {
     quickdraw: {
       label: 'Quickdraw Services',
@@ -513,6 +547,8 @@ export function MarketplacePage() {
     },
   };
   const activeTrackMeta = marketplaceTrackMeta[activeTrack];
+  const hasMarketplaceErrorBanner = Boolean(billingActionMessage)
+    || /(failed|could not|invalid|missing|error|expired|unable)/i.test(String(quickdrawMessage || ''));
 
   useEffect(() => {
     setActiveTrack(routeTrack);
@@ -554,6 +590,39 @@ export function MarketplacePage() {
     if (!profile?.id) return;
     void reloadMarketplacePanels();
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setQuickdrawContractDrafts([]);
+      return;
+    }
+    const storageKey = `${QUICKDRAW_DRAFTS_STORAGE_PREFIX}.${profile.id}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        setQuickdrawContractDrafts([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as QuickdrawContractDraft[];
+      if (!Array.isArray(parsed)) {
+        setQuickdrawContractDrafts([]);
+        return;
+      }
+      setQuickdrawContractDrafts(parsed.filter((entry) => entry && typeof entry === 'object' && String(entry.title || '').trim().length > 0));
+    } catch {
+      setQuickdrawContractDrafts([]);
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const storageKey = `${QUICKDRAW_DRAFTS_STORAGE_PREFIX}.${profile.id}`;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(quickdrawContractDrafts.slice(0, 40)));
+    } catch {
+      // best-effort local draft cache
+    }
+  }, [profile?.id, quickdrawContractDrafts]);
 
   async function reloadMarketplacePanels() {
     if (!profile?.id) return;
@@ -1076,6 +1145,79 @@ export function MarketplacePage() {
     });
   }
 
+  function resetIssueContractDraftComposer() {
+    setIssueContractTitle('');
+    setIssueContractDescription('');
+    setIssueContractDeliverablesText('');
+    setIssueContractDurationDays('30');
+    setIssueContractBudgetUsd('10');
+    setIssueContractTagsText('');
+    setIssueContractAcknowledged(false);
+  }
+
+  function closeIssueContractModal() {
+    setShowIssueContractModal(false);
+    resetIssueContractDraftComposer();
+  }
+
+  function createQuickdrawContractDraft(status: 'draft' | 'queued') {
+    const title = issueContractTitle.trim();
+    const description = issueContractDescription.trim();
+    if (title.length < 6 || description.length < 20) {
+      setQuickdrawMessage('Contract title and description need more detail before deployment.');
+      return;
+    }
+
+    if (status === 'queued' && !issueContractAcknowledged) {
+      setQuickdrawMessage('Acknowledge the fixed-capital warning before queueing this contract.');
+      return;
+    }
+
+    const budgetUsd = Number(issueContractBudgetUsd || 0);
+    if (!Number.isFinite(budgetUsd) || budgetUsd < 10) {
+      setQuickdrawMessage('Contract value must be at least $10.');
+      return;
+    }
+
+    const durationDays = Number(issueContractDurationDays || 0);
+    if (!Number.isFinite(durationDays) || durationDays < 1) {
+      setQuickdrawMessage('Project duration must be at least 1 day.');
+      return;
+    }
+
+    const deliverables = issueContractDeliverablesText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    const tags = issueContractTagsText
+      .split(/[,\n]/g)
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    const nextDraft: QuickdrawContractDraft = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      title,
+      description,
+      deliverables,
+      budgetUsd,
+      durationDays,
+      tags,
+      createdAt: new Date().toISOString(),
+      status,
+    };
+
+    setQuickdrawContractDrafts((prev) => [nextDraft, ...prev].slice(0, 40));
+    setQuickdrawMessage(
+      status === 'queued'
+        ? 'Contract queued for funding handoff. Stripe escrow wiring is next in backend rollout.'
+        : 'Contract draft saved. You can queue it from Deploy when ready.',
+    );
+    setShowIssueContractModal(false);
+    resetIssueContractDraftComposer();
+  }
+
   return (
     <AppShell showChannelSidebar={false} title="NCore Marketplace">
       <div className={`h-full overflow-y-auto ${isOpsExperience ? 'ncore-marketplace-ops' : ''}`}>
@@ -1129,11 +1271,11 @@ export function MarketplacePage() {
 
           {(billingActionMessage || quickdrawMessage || entitlementsLoading || loadingQuickdraw) && (
             <div className={`rounded-xl border px-3 py-2.5 text-sm flex items-start gap-2 ${
-              (billingActionMessage || quickdrawMessage)
+              hasMarketplaceErrorBanner
                 ? 'border-red-500/40 bg-red-500/10 text-red-200'
                 : 'border-nyptid-300/30 bg-nyptid-300/10 text-nyptid-100'
             }`}>
-              <Info size={15} className={(billingActionMessage || quickdrawMessage) ? 'text-red-300 mt-0.5' : 'text-nyptid-300 mt-0.5'} />
+              <Info size={15} className={hasMarketplaceErrorBanner ? 'text-red-300 mt-0.5' : 'text-nyptid-300 mt-0.5'} />
               <div>
                 {entitlementsLoading || loadingQuickdraw
                   ? 'Refreshing marketplace data...'
@@ -1291,18 +1433,6 @@ export function MarketplacePage() {
                   <div className="space-y-2">
                     <button
                       type="button"
-                      onClick={() => setQuickdrawRoleView('hiring')}
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        quickdrawRoleView === 'hiring'
-                          ? 'border-nyptid-300/45 bg-nyptid-300/10 text-nyptid-100'
-                          : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
-                      }`}
-                    >
-                      <div className="font-semibold">Find Contracts</div>
-                      <div className="text-[11px] text-surface-500 mt-0.5">Hiring view</div>
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setQuickdrawRoleView('specialist')}
                       className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
                         quickdrawRoleView === 'specialist'
@@ -1310,9 +1440,44 @@ export function MarketplacePage() {
                           : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
                       }`}
                     >
-                      <div className="font-semibold">Deploy</div>
+                      <div className="font-semibold">Find Contracts</div>
                       <div className="text-[11px] text-surface-500 mt-0.5">Being hired view</div>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickdrawRoleView('hiring')}
+                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        quickdrawRoleView === 'hiring'
+                          ? 'border-nyptid-300/45 bg-nyptid-300/10 text-nyptid-100'
+                          : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
+                      }`}
+                    >
+                      <div className="font-semibold">Deploy</div>
+                      <div className="text-[11px] text-surface-500 mt-0.5">Hiring view</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-surface-400 mb-2">
+                    {quickdrawRoleView === 'hiring' ? 'Deploy Terminal' : 'Specialist Console'}
+                  </div>
+                  <div className="space-y-1.5">
+                    {(quickdrawRoleView === 'hiring'
+                      ? ['My Contracts', 'Listed Contracts', 'Working Contracts', 'Escrow History']
+                      : ['Active Contracts', 'Contract Radar', 'Escrow History']
+                    ).map((itemLabel, index) => (
+                      <div
+                        key={`${quickdrawRoleView}-${itemLabel}`}
+                        className={`rounded-lg border px-3 py-2 text-sm ${
+                          index === 0
+                            ? 'border-nyptid-300/35 bg-nyptid-300/10 text-nyptid-100'
+                            : 'border-surface-700 bg-surface-900/60 text-surface-300'
+                        }`}
+                      >
+                        {itemLabel}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -1350,13 +1515,25 @@ export function MarketplacePage() {
                           : 'Manage your specialist profile, listings, and active contract flow.'}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => { void reloadMarketplacePanels(); }}
-                      className="nyptid-btn-secondary text-xs px-3 py-2"
-                    >
-                      Refresh
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {quickdrawRoleView === 'hiring' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowIssueContractModal(true)}
+                          className="nyptid-btn-primary text-xs px-3 py-2"
+                        >
+                          <Plus size={13} />
+                          Issue New Contract
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { void reloadMarketplacePanels(); }}
+                        className="nyptid-btn-secondary text-xs px-3 py-2"
+                      >
+                        Refresh
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
                     <Search size={14} className="text-surface-500" />
@@ -1367,6 +1544,22 @@ export function MarketplacePage() {
                       className="w-full bg-transparent border-0 outline-none text-sm text-surface-200 placeholder:text-surface-600"
                     />
                   </div>
+                  {quickdrawRoleView === 'hiring' && (
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Contracts Tracked</div>
+                        <div className="mt-1 text-xl font-black text-surface-100">{hiringContractDrafts.length + queuedContractDrafts.length}</div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Drafted Contracts</div>
+                        <div className="mt-1 text-xl font-black text-surface-100">{hiringContractDrafts.length}</div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Queued for Funding</div>
+                        <div className="mt-1 text-xl font-black text-surface-100">{queuedContractDrafts.length}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -1418,6 +1611,51 @@ export function MarketplacePage() {
                     <div className="nyptid-card p-4 text-sm text-surface-500">No approved Quickdraw listings found for this filter.</div>
                   )}
                 </div>
+
+                {quickdrawRoleView === 'hiring' && (
+                  <div className="nyptid-card p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <div className="font-bold text-surface-100">Deploy Queue</div>
+                        <div className="text-xs text-surface-500">Draft and staged contracts before escrow funding starts.</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowIssueContractModal(true)}
+                        className="nyptid-btn-secondary text-xs px-3 py-2"
+                      >
+                        <Plus size={13} />
+                        New Draft
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {quickdrawContractDrafts.slice(0, 6).map((draft) => (
+                        <div key={draft.id} className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-surface-100 truncate">{draft.title}</div>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              draft.status === 'queued'
+                                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                                : 'border-surface-600 bg-surface-800 text-surface-300'
+                            }`}>
+                              {draft.status === 'queued' ? 'QUEUED' : 'DRAFT'}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[11px] text-surface-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="inline-flex items-center gap-1"><Wallet size={11} />${draft.budgetUsd.toLocaleString()} funded cap</span>
+                            <span className="inline-flex items-center gap-1"><Clock3 size={11} />{draft.durationDays} days</span>
+                            <span>{new Date(draft.createdAt).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {quickdrawContractDrafts.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-surface-700 bg-surface-900/50 px-3 py-4 text-sm text-surface-500">
+                          No contract drafts yet. Click <span className="text-surface-300 font-semibold">Issue New Contract</span> to open the deploy composer.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                   <div className="nyptid-card p-4">
@@ -1682,10 +1920,24 @@ export function MarketplacePage() {
             <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
               <div className="space-y-5">
                 <div className="nyptid-card p-5 overflow-hidden">
-                  <div className="text-xs font-bold uppercase tracking-wider text-surface-500">InCore Marketplace - Games</div>
-                  <div className="mt-1 text-2xl font-black text-surface-100">Download-ready game storefront</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-surface-500">NCore Marketplace - Games</div>
+                  <div className="mt-1 text-2xl font-black text-surface-100">Storefront + library delivery</div>
                   <div className="text-sm text-surface-400 mt-2 max-w-3xl">
-                    Discover approved game listings, purchase securely, and download installers directly from your order history.
+                    Steam-style browsing surface with featured capsules, publisher cards, and direct installer delivery from purchase history.
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {['Store', 'New & Trending', 'Top Sellers', 'Recently Updated', 'Your Library'].map((chip, index) => (
+                      <span
+                        key={chip}
+                        className={`px-2.5 py-1 rounded-full text-[11px] border ${
+                          index === 0
+                            ? 'border-nyptid-300/40 bg-nyptid-300/15 text-nyptid-100'
+                            : 'border-surface-700 bg-surface-900/70 text-surface-300'
+                        }`}
+                      >
+                        {chip}
+                      </span>
+                    ))}
                   </div>
                   <div className="mt-4 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
                     <Search size={14} className="text-surface-500" />
@@ -1700,7 +1952,7 @@ export function MarketplacePage() {
                   {featuredGameListing && (
                     <div className="mt-4 rounded-xl border border-surface-700 bg-surface-900/70 overflow-hidden">
                       <div
-                        className="h-36 bg-cover bg-center"
+                        className="h-48 bg-cover bg-center"
                         style={{
                           backgroundImage: featuredGameListing.cover_url
                             ? `linear-gradient(140deg, rgba(4,10,22,0.55), rgba(4,10,22,0.85)), url(${featuredGameListing.cover_url})`
@@ -1720,6 +1972,22 @@ export function MarketplacePage() {
                           </span>
                           <span className="ml-auto text-xl font-black text-surface-100">{formatUsdFromCents(featuredGameListing.price_cents)}</span>
                         </div>
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void startMarketplaceCheckout(
+                                'marketplace_game_purchase',
+                                { gameListingId: featuredGameListing.id },
+                                `game-buy:${featuredGameListing.id}`,
+                              );
+                            }}
+                            disabled={checkoutLoadingKey !== null}
+                            className="nyptid-btn-primary text-xs px-3 py-2"
+                          >
+                            {checkoutLoadingKey === `game-buy:${featuredGameListing.id}` ? 'Opening...' : 'Play Now'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1730,10 +1998,10 @@ export function MarketplacePage() {
                     const loadingKey = `game-buy:${game.id}`;
                     const sellerLabel = game.seller_profile?.display_name || game.seller_profile?.username || 'Game publisher';
                     return (
-                      <div key={game.id} className="nyptid-card p-4">
+                      <div key={game.id} className="nyptid-card p-4 hover:border-nyptid-300/40 transition-colors">
                         <div className="flex flex-wrap items-start gap-4">
                           <div
-                            className="h-24 w-40 rounded-lg border border-surface-700 bg-surface-900/70 bg-cover bg-center flex-shrink-0"
+                            className="h-24 w-44 rounded-lg border border-surface-700 bg-surface-900/70 bg-cover bg-center flex-shrink-0"
                             style={{ backgroundImage: game.cover_url ? `url(${game.cover_url})` : undefined }}
                           />
                           <div className="min-w-0 flex-1">
@@ -1742,7 +2010,7 @@ export function MarketplacePage() {
                             <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
                               <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{sellerLabel}</span>
                               <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{game.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}</span>
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">Slug: {game.slug}</span>
+                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">Store slug: {game.slug}</span>
                             </div>
                           </div>
                           <div className="text-right min-w-[180px]">
@@ -1942,6 +2210,115 @@ export function MarketplacePage() {
               </div>
             </div>
           )}
+
+          <Modal
+            isOpen={showIssueContractModal}
+            onClose={closeIssueContractModal}
+            title="Issue a New Contract"
+            size="xl"
+            className="max-w-3xl"
+          >
+            <div className="space-y-4">
+              <div className="text-sm text-surface-400">
+                Deploy capital and hire cleared specialists with escrow-backed execution.
+              </div>
+
+              <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3 space-y-3">
+                <div className="text-xs font-bold uppercase tracking-wide text-surface-500">Contract Details</div>
+                <input
+                  type="text"
+                  value={issueContractTitle}
+                  onChange={(event) => setIssueContractTitle(event.target.value)}
+                  className="nyptid-input text-sm"
+                  placeholder="e.g. Launch campaign funnel + ad creative sprint"
+                />
+                <textarea
+                  value={issueContractDescription}
+                  onChange={(event) => setIssueContractDescription(event.target.value)}
+                  className="nyptid-input text-sm resize-none"
+                  rows={4}
+                  placeholder="Describe scope, constraints, acceptance criteria, and expected execution quality."
+                />
+              </div>
+
+              <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3 space-y-3">
+                <div className="text-xs font-bold uppercase tracking-wide text-surface-500">Deliverables + Timeline</div>
+                <textarea
+                  value={issueContractDeliverablesText}
+                  onChange={(event) => setIssueContractDeliverablesText(event.target.value)}
+                  className="nyptid-input text-sm resize-none"
+                  rows={3}
+                  placeholder={`One deliverable per line\nLanding page copy\nAd creative pack\nReporting dashboard`}
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={issueContractDurationDays}
+                    onChange={(event) => setIssueContractDurationDays(event.target.value)}
+                    className="nyptid-input text-sm"
+                    placeholder="Duration (days)"
+                  />
+                  <input
+                    type="number"
+                    min={10}
+                    step={5}
+                    value={issueContractBudgetUsd}
+                    onChange={(event) => setIssueContractBudgetUsd(event.target.value)}
+                    className="nyptid-input text-sm"
+                    placeholder="Contract value (USD)"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={issueContractTagsText}
+                  onChange={(event) => setIssueContractTagsText(event.target.value)}
+                  className="nyptid-input text-sm"
+                  placeholder="Tags (comma separated): Copywriting, Automation, SEO"
+                />
+              </div>
+
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-300">Warning: Fixed Capital Only</div>
+                <div className="mt-1 text-sm text-amber-100/90 leading-relaxed">
+                  Contracts must be funded in guaranteed capital via escrow. Unpaid partnerships and commission-only structures are not valid for Quickdraw deployment.
+                </div>
+                <label className="mt-3 inline-flex items-start gap-2 text-sm text-surface-200">
+                  <input
+                    type="checkbox"
+                    checked={issueContractAcknowledged}
+                    onChange={(event) => setIssueContractAcknowledged(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-surface-500 bg-surface-900 text-nyptid-300"
+                  />
+                  <span>I acknowledge this contract must be funded with escrow-backed capital.</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <button type="button" onClick={closeIssueContractModal} className="nyptid-btn-secondary text-sm px-3 py-2">
+                  Cancel
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => createQuickdrawContractDraft('draft')}
+                    className="nyptid-btn-secondary text-sm px-3 py-2"
+                  >
+                    Save Draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => createQuickdrawContractDraft('queued')}
+                    className="nyptid-btn-primary text-sm px-3 py-2"
+                  >
+                    <ShieldCheck size={14} />
+                    Queue Funding
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Modal>
 
           <Modal
             isOpen={quickdrawBriefingId !== null}

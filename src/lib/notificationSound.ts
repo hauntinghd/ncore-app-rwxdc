@@ -1,3 +1,5 @@
+import { getStreamerModeSettings } from './streamerMode';
+
 type NotificationSoundKind = 'call' | 'message' | 'ping';
 
 interface SoundPlaybackOptions {
@@ -26,6 +28,8 @@ function normalizeStatus(value: unknown): string {
 function canPlay(options?: SoundPlaybackOptions): boolean {
   if (typeof window === 'undefined') return false;
   if (options?.force) return true;
+  const streamerMode = getStreamerModeSettings();
+  if (streamerMode.enabled && streamerMode.silentNotifications) return false;
   return normalizeStatus(options?.status) !== 'dnd';
 }
 

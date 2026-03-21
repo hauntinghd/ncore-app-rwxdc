@@ -11,6 +11,7 @@ import type { Profile } from '../lib/types';
 
 const AGORA_APP_ID = import.meta.env.VITE_AGORA_APP_ID || '';
 const OUTGOING_RING_TIMEOUT_MS = 3 * 60 * 1000;
+const BANDWIDTH_IDLE_DISCONNECT_MS = 2 * 60 * 1000;
 
 interface CallParticipantProfile {
   id: string;
@@ -222,7 +223,7 @@ export function DirectCallPage() {
     const timeoutId = window.setTimeout(() => {
       navigate(`/app/dm/${conversationId}`, { replace: true });
       window.setTimeout(() => {
-        void directCallSession.hangup({ signalEnded: false });
+        void directCallSession.hangup({ signalEnded: true });
       }, 0);
     }, OUTGOING_RING_TIMEOUT_MS);
 
@@ -230,6 +231,24 @@ export function DirectCallPage() {
       window.clearTimeout(timeoutId);
     };
   }, [callState, conversationId, isCaller, navigate, remoteParticipantUids.length]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    if (callState !== 'accepted') return;
+    if (session.phase !== 'active') return;
+    if (remoteParticipantUids.length > 0) return;
+
+    const timeoutId = window.setTimeout(() => {
+      navigate(`/app/dm/${conversationId}`, { replace: true });
+      window.setTimeout(() => {
+        void directCallSession.hangup({ signalEnded: true });
+      }, 0);
+    }, BANDWIDTH_IDLE_DISCONNECT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [callState, conversationId, navigate, remoteParticipantUids.length, session.phase]);
 
   useEffect(() => {
     if (!conversationId || !hasValidConversationId) {
@@ -557,7 +576,11 @@ export function DirectCallPage() {
   }
 
   async function handleHangup() {
-    const canEndForEveryone = profile?.platform_role === 'owner';
+    const canEndForEveryone = Boolean(
+      profile?.platform_role === 'owner'
+      || callState === 'ringing'
+      || remoteParticipantUids.length === 0,
+    );
     if (conversationId) {
       navigate(`/app/dm/${conversationId}`, { replace: true });
     } else {
