@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktopBridge', {
+  authStorageGetItem: (key) => ipcRenderer.invoke('authStorage:getItem', { key }),
+  authStorageSetItem: (key, value) => ipcRenderer.invoke('authStorage:setItem', { key, value }),
+  authStorageRemoveItem: (key) => ipcRenderer.invoke('authStorage:removeItem', { key }),
   getUpdateConfig: () => ipcRenderer.invoke('updates:getConfig'),
   getUpdateRuntimeState: () => ipcRenderer.invoke('updates:getRuntimeState'),
   setUpdateConfig: (url) => ipcRenderer.invoke('updates:setConfig', { url }),

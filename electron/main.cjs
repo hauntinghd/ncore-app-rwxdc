@@ -657,6 +657,10 @@ function getUpdateStatePath() {
   return path.join(app.getPath('userData'), 'update-state.json');
 }
 
+function getAuthStoragePath() {
+  return path.join(app.getPath('userData'), 'auth-storage.json');
+}
+
 function readUpdateState() {
   try {
     const statePath = getUpdateStatePath();
@@ -677,6 +681,29 @@ function writeUpdateState(nextState) {
     fs.writeFileSync(statePath, JSON.stringify(merged, null, 2), 'utf8');
   } catch (error) {
     console.warn('Failed to persist update-state.json:', error?.message || error);
+  }
+}
+
+function readAuthStorageState() {
+  try {
+    const statePath = getAuthStoragePath();
+    if (!fs.existsSync(statePath)) return {};
+    const raw = fs.readFileSync(statePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAuthStorageState(nextState) {
+  try {
+    const statePath = getAuthStoragePath();
+    const current = readAuthStorageState();
+    const merged = { ...current, ...(nextState || {}) };
+    fs.writeFileSync(statePath, JSON.stringify(merged, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('Failed to persist auth-storage.json:', error?.message || error);
   }
 }
 
@@ -708,6 +735,47 @@ function normalizeUpdateFeedUrl(rawUrl) {
 }
 
 function registerDesktopActions() {
+  ipcMain.handle('authStorage:getItem', async (_event, payload) => {
+    try {
+      const key = String(payload?.key || '').trim();
+      if (!key) return { ok: false, message: 'Storage key is required.' };
+      const storage = readAuthStorageState();
+      const value = Object.prototype.hasOwnProperty.call(storage, key)
+        ? String(storage[key] ?? '')
+        : null;
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, value: null, message: String(error?.message || error) };
+    }
+  });
+
+  ipcMain.handle('authStorage:setItem', async (_event, payload) => {
+    try {
+      const key = String(payload?.key || '').trim();
+      if (!key) return { ok: false, message: 'Storage key is required.' };
+      const value = String(payload?.value ?? '');
+      writeAuthStorageState({ [key]: value });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error) };
+    }
+  });
+
+  ipcMain.handle('authStorage:removeItem', async (_event, payload) => {
+    try {
+      const key = String(payload?.key || '').trim();
+      if (!key) return { ok: false, message: 'Storage key is required.' };
+      const current = readAuthStorageState();
+      if (Object.prototype.hasOwnProperty.call(current, key)) {
+        delete current[key];
+        fs.writeFileSync(getAuthStoragePath(), JSON.stringify(current, null, 2), 'utf8');
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error) };
+    }
+  });
+
   ipcMain.handle('shell:openExternal', async (_event, payload) => {
     try {
       const rawUrl = String(payload?.url || '').trim();

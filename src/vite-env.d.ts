@@ -28,8 +28,17 @@ interface DesktopUpdateRuntimeState {
   message?: string;
 }
 
+interface DesktopAuthStorageResult {
+  ok: boolean;
+  value?: string | null;
+  message?: string;
+}
+
 interface Window {
   desktopBridge?: {
+    authStorageGetItem: (key: string) => Promise<DesktopAuthStorageResult>;
+    authStorageSetItem: (key: string, value: string) => Promise<{ ok: boolean; message?: string }>;
+    authStorageRemoveItem: (key: string) => Promise<{ ok: boolean; message?: string }>;
     getUpdateConfig: () => Promise<{ ok: boolean; url?: string; message?: string }>;
     getUpdateRuntimeState: () => Promise<DesktopUpdateRuntimeState>;
     setUpdateConfig: (url: string) => Promise<{ ok: boolean; message?: string }>;

@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.77",
+            "version": "11.7.78",
             "date": "2026-03-22",
             "badge": "Current Build",
+            "improvements": [
+                "Desktop auth now persists in Electron userData storage so session continuity survives app updates and relaunches.",
+                "Supabase auth storage now migrates legacy localStorage session values into persistent desktop storage automatically.",
+                "Tier II requirements and level unlock visibility remain in Quickdraw with explicit requirement states and unlock progression."
+            ],
+            "bugFixes": [
+                "Fixed unwanted re-login prompts caused by transient refresh/verification failures when token was still valid.",
+                "Auth preflight now forces re-login only for definitive invalid or revoked token conditions.",
+                "Session verification now tolerates temporary network failures without dropping authenticated desktop users."
+            ]
+        },
+        {
+            "version": "11.7.77",
+            "date": "2026-03-22",
+            "badge": "Previous",
             "improvements": [
                 "Added global growth capability contracts with trust tier + unlock source so account actions are governed consistently across app surfaces.",
                 "Added referral/invite unlock architecture with activation tracking and anti-abuse constraints to support controlled growth campaigns.",
