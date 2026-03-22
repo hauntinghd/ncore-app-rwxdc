@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.75",
+            "version": "11.7.76",
             "date": "2026-03-22",
             "badge": "Current Build",
+            "improvements": [
+                "Voice & Video settings now include a dedicated Save Voice & Video action so device changes apply intentionally in one click.",
+                "Applying Voice & Video now immediately rebinds microphone/speaker routing on active call sessions without requiring app restart.",
+                "Mic device switching flow now preserves mute state while rebuilding local audio track for smoother in-call transitions."
+            ],
+            "bugFixes": [
+                "Fixed settings behavior where microphone selection changes could appear saved but not be applied to the live call track.",
+                "Fixed stale-call-track cases that prevented newly selected input devices from being picked up until rejoin.",
+                "Improved Voice & Video error surfacing when selected device permissions fail during apply."
+            ]
+        },
+        {
+            "version": "11.7.75",
+            "date": "2026-03-22",
+            "badge": "Previous",
             "improvements": [
                 "Direct call runtime now prioritizes active speaker and screen-share streams for better multi-party call stability when 3+ participants are connected.",
                 "Group call layout now uses an adaptive spotlight plus gallery view to improve visibility and reduce visual crowding on desktop and mobile.",
