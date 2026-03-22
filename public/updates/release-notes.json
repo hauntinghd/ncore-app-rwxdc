@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.73",
+            "version": "11.7.74",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Fullscreen in DM calls now uses a dedicated pop-out overlay layer so expanding remote video always works regardless of layout clipping.",
+                "Right-click on remote participants now opens a Discord-style context panel with direct User Volume control.",
+                "Call overlays are now rendered via portal at document root for reliable z-order and pointer behavior."
+            ],
+            "bugFixes": [
+                "Fixed remote fullscreen button no-op path by replacing fragile inline fullscreen behavior with a stable app-level fullscreen overlay.",
+                "Fixed right-click volume controls being blocked/clipped by AppShell overflow containers.",
+                "Fixed inconsistent context-menu interaction on Agora video surfaces by using capture-phase right-click handling."
+            ]
+        },
+        {
+            "version": "11.7.73",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Direct-call remote tiles now support right-click audio control with a dedicated participant/screen-share context menu.",
                 "Screen-share streams now have a clearer dedicated mute/unmute action separate from per-user volume slider adjustments.",

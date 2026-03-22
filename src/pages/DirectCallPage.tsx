@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Maximize2, Mic, MicOff, Minimize2, MonitorUp, PhoneOff, Video, VideoOff, Volume2, VolumeX, Waves } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -152,7 +153,6 @@ export function DirectCallPage() {
   const [screenSources, setScreenSources] = useState<ScreenSourceOption[]>([]);
   const [screenSourceId, setScreenSourceId] = useState('');
   const [loadingScreenSources, setLoadingScreenSources] = useState(false);
-  const [fullscreenUid, setFullscreenUid] = useState<string | null>(null);
   const [fullscreenFallbackUid, setFullscreenFallbackUid] = useState<string | null>(null);
   const [remoteVolumesByUid, setRemoteVolumesByUid] = useState<Record<string, number>>({});
   const [remoteVolumeContextMenu, setRemoteVolumeContextMenu] = useState<RemoteVolumeContextMenuState | null>(null);
@@ -264,27 +264,6 @@ export function DirectCallPage() {
       window.removeEventListener('resize', close);
     };
   }, [remoteVolumeContextMenu]);
-
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      const fullElement = document.fullscreenElement;
-      if (!fullElement) {
-        setFullscreenUid(null);
-        setFullscreenFallbackUid(null);
-        return;
-      }
-      const matched = Object.entries(remoteTileRefs.current).find(([, node]) => node === fullElement);
-      setFullscreenUid(matched ? matched[0] : null);
-      setFullscreenFallbackUid(null);
-    };
-
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    document.addEventListener('webkitfullscreenchange' as any, onFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange' as any, onFullscreenChange);
-    };
-  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -610,45 +589,10 @@ export function DirectCallPage() {
   }
 
   async function toggleParticipantFullscreen(uid: string) {
-    const target = remoteTileRefs.current[uid];
-    if (!target) return;
     if (fullscreenFallbackUid === uid) {
       setFullscreenFallbackUid(null);
       return;
     }
-    const activeFullscreenElement = document.fullscreenElement || (document as any).webkitFullscreenElement;
-    if (activeFullscreenElement === target) {
-      const exitFullscreen = document.exitFullscreen || ((document as any).webkitExitFullscreen?.bind(document));
-      if (exitFullscreen) {
-        try {
-          const maybePromise = exitFullscreen.call(document);
-          if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-            await maybePromise;
-          }
-        } catch {
-          // Ignore fullscreen exit errors and continue fallback handling.
-        }
-      }
-      return;
-    }
-    const requestFullscreen = target.requestFullscreen || ((target as any).webkitRequestFullscreen?.bind(target));
-    if (requestFullscreen) {
-      try {
-        const maybePromise = requestFullscreen.call(target);
-        if (maybePromise && typeof (maybePromise as Promise<unknown>).then === 'function') {
-          await maybePromise;
-        }
-        const fullElement = document.fullscreenElement || (document as any).webkitFullscreenElement;
-        if (fullElement === target) {
-          setFullscreenUid(uid);
-          setFullscreenFallbackUid(null);
-          return;
-        }
-      } catch {
-        // Continue to CSS fallback when native fullscreen fails.
-      }
-    }
-    setFullscreenUid(null);
     setFullscreenFallbackUid(uid);
   }
 
@@ -659,6 +603,7 @@ export function DirectCallPage() {
 
   function openRemoteVolumeContextMenu(event: ReactMouseEvent<HTMLDivElement>, uid: string) {
     event.preventDefault();
+    event.stopPropagation();
     setRemoteVolumeContextMenu({
       uid,
       x: event.clientX,
@@ -784,12 +729,6 @@ export function DirectCallPage() {
   return (
     <AppShell showChannelSidebar={false} title="Direct Call">
       <div className="h-full flex flex-col bg-surface-950 relative">
-        {fullscreenFallbackUid && (
-          <div
-            className="fixed inset-0 z-[75] bg-black/80"
-            onClick={() => setFullscreenFallbackUid(null)}
-          />
-        )}
         {callState === 'ringing' && (
           <div className="absolute left-1/2 -translate-x-1/2 top-6 z-40">
             {isCaller ? (
@@ -857,22 +796,23 @@ export function DirectCallPage() {
                   const isScreenShareStream = uid.includes('::screen');
                   const remoteVolume = remoteVolumesByUid[uid] ?? 100;
                   const isRemoteMuted = remoteVolume <= 0;
+                  const isPoppedOut = fullscreenFallbackUid === uid;
                   return (
                     <div
                       key={uid}
                       ref={(node) => setRemoteTileRef(uid, node)}
-                      onContextMenu={(event) => openRemoteVolumeContextMenu(event, uid)}
+                      onContextMenuCapture={(event) => openRemoteVolumeContextMenu(event, uid)}
                       title="Right-click for volume controls"
-                      className={`relative rounded-2xl border bg-surface-900 overflow-hidden h-[42vh] flex items-center justify-center ${isSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'} ${fullscreenFallbackUid === uid ? 'fixed inset-4 z-[80] !h-[calc(100vh-2rem)] !w-[calc(100vw-2rem)]' : ''}`}
+                      className={`relative rounded-2xl border bg-surface-900 overflow-hidden h-[42vh] flex items-center justify-center ${isSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}
                     >
                       <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded-full bg-black/55 px-2 py-1">
                         <button
                           type="button"
                           onClick={() => void toggleParticipantFullscreen(uid)}
                           className="text-white/90 hover:text-white transition-colors"
-                          title={fullscreenUid === uid ? 'Exit fullscreen' : 'Fullscreen'}
+                          title={isPoppedOut ? 'Exit fullscreen' : 'Fullscreen'}
                         >
-                          {fullscreenUid === uid ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                          {isPoppedOut ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                         </button>
                         <button
                           type="button"
@@ -886,12 +826,17 @@ export function DirectCallPage() {
                         </button>
                       </div>
 
-                      {hasVideo ? (
+                      {hasVideo && !isPoppedOut ? (
                         <div className="w-full h-full">
                           <RemoteVideoMount uid={uid} />
                           <div className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
                             {participantName}
                           </div>
+                        </div>
+                      ) : hasVideo && isPoppedOut ? (
+                        <div className="text-center">
+                          <p className="text-surface-300 text-sm font-medium">Popped out to fullscreen view</p>
+                          <p className="text-surface-500 text-xs mt-1">Press the fullscreen button again to return.</p>
                         </div>
                       ) : (
                         <div className="text-center">
@@ -915,21 +860,73 @@ export function DirectCallPage() {
           )}
         </div>
 
-        {remoteVolumeContextMenu && (() => {
-          const menuWidth = 250;
-          const menuHeight = 142;
-          const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : remoteVolumeContextMenu.x + menuWidth + 8;
-          const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : remoteVolumeContextMenu.y + menuHeight + 8;
+        {fullscreenFallbackUid && typeof document !== 'undefined' && createPortal((() => {
+          const uid = fullscreenFallbackUid;
+          const hasVideo = remoteVideoUids.includes(uid);
+          const participantName = getParticipantName(uid);
+          const remoteVolume = remoteVolumesByUid[uid] ?? 100;
+          const isRemoteMuted = remoteVolume <= 0;
+          return (
+            <div className="fixed inset-0 z-[130] bg-black/90 p-4 sm:p-6">
+              <div
+                className="relative h-full w-full rounded-2xl border border-surface-700 bg-surface-950 overflow-hidden"
+                onContextMenuCapture={(event) => openRemoteVolumeContextMenu(event as any, uid)}
+              >
+                <div className="absolute top-3 right-3 z-20 flex items-center gap-2 rounded-full bg-black/60 px-2 py-1">
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenFallbackUid(null)}
+                    className="text-white/90 hover:text-white transition-colors"
+                    title="Exit fullscreen"
+                  >
+                    <Minimize2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleRemoteMute(uid)}
+                    className="text-white/90 hover:text-white transition-colors"
+                    title={isRemoteMuted ? 'Unmute audio' : 'Mute audio'}
+                  >
+                    {isRemoteMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                  </button>
+                </div>
+                {hasVideo ? (
+                  <div className="w-full h-full">
+                    <RemoteVideoMount uid={uid} />
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-24 h-24 rounded-full bg-surface-800 mx-auto mb-3 flex items-center justify-center text-surface-300 text-2xl font-bold">
+                        {participantName.slice(0, 1).toUpperCase()}
+                      </div>
+                      <p className="text-surface-300">{participantName}</p>
+                      <p className="text-surface-500 text-sm mt-1">Audio connected</p>
+                    </div>
+                  </div>
+                )}
+                <div className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-1 text-sm text-white">
+                  {participantName}
+                </div>
+              </div>
+            </div>
+          );
+        })(), document.body)}
+
+        {remoteVolumeContextMenu && typeof document !== 'undefined' && createPortal((() => {
+          const menuWidth = 260;
+          const menuHeight = 420;
+          const viewportWidth = window.innerWidth;
+          const viewportHeight = window.innerHeight;
           const left = Math.max(8, Math.min(remoteVolumeContextMenu.x, viewportWidth - menuWidth - 8));
           const top = Math.max(8, Math.min(remoteVolumeContextMenu.y, viewportHeight - menuHeight - 8));
           const uid = remoteVolumeContextMenu.uid;
           const remoteVolume = remoteVolumesByUid[uid] ?? 100;
           const isRemoteMuted = remoteVolume <= 0;
-          const isScreenShareStream = uid.includes('::screen');
           return (
-            <div className="fixed inset-0 z-[120]">
+            <div className="fixed inset-0 z-[140]">
               <div
-                className="absolute w-[250px] rounded-xl border border-surface-700 bg-surface-900/95 backdrop-blur px-3 py-3 shadow-2xl"
+                className="absolute w-[260px] rounded-xl border border-surface-600 bg-surface-800 px-3 py-2 shadow-2xl"
                 style={{ left, top }}
                 onClick={(event) => event.stopPropagation()}
                 onContextMenu={(event) => {
@@ -937,35 +934,41 @@ export function DirectCallPage() {
                   event.stopPropagation();
                 }}
               >
-                <div className="text-xs uppercase tracking-wide text-surface-400">
-                  {isScreenShareStream ? 'Screen Share Audio' : 'Participant Audio'}
+                <button className="w-full text-left px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm">Profile</button>
+                <button className="w-full text-left px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm">Mention</button>
+                <button className="w-full text-left px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm">Message</button>
+                <button className="w-full text-left px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm">Start a Call</button>
+                <div className="my-2 border-t border-surface-600" />
+                <div className="px-2">
+                  <div className="text-xs text-surface-400 mb-2">User Volume</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={remoteVolume}
+                      onChange={(event) => handleRemoteVolumeChange(uid, Number(event.target.value))}
+                      className="flex-1 accent-nyptid-300"
+                      title={`Volume ${remoteVolume}%`}
+                    />
+                    <span className="w-8 text-right text-xs text-surface-300">{remoteVolume}</span>
+                  </div>
                 </div>
-                <div className="mt-1 text-sm font-semibold text-surface-100 truncate">{getParticipantName(uid)}</div>
+                <div className="my-2 border-t border-surface-600" />
                 <button
                   type="button"
                   onClick={() => toggleRemoteMute(uid)}
-                  className="mt-3 w-full h-8 rounded-lg text-xs font-semibold bg-surface-800 text-surface-100 hover:bg-surface-700 transition-colors"
+                  className="w-full flex items-center justify-between px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm"
                 >
-                  {isRemoteMuted ? 'Unmute Audio' : 'Mute Audio'}
+                  <span>Mute</span>
+                  <span className={`h-4 w-4 rounded border ${isRemoteMuted ? 'border-nyptid-300 bg-nyptid-300/20' : 'border-surface-500 bg-transparent'}`} />
                 </button>
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-surface-400">{isRemoteMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={remoteVolume}
-                    onChange={(event) => handleRemoteVolumeChange(uid, Number(event.target.value))}
-                    className="flex-1 accent-nyptid-300"
-                    title={`Volume ${remoteVolume}%`}
-                  />
-                  <span className="w-8 text-right text-xs text-surface-300">{remoteVolume}</span>
-                </div>
+                <button className="w-full text-left px-2 py-2 rounded-md text-surface-200 hover:bg-surface-700/80 text-sm">Pop Out User</button>
               </div>
             </div>
           );
-        })()}
+        })(), document.body)}
 
         <div className="border-t border-surface-800 bg-surface-900 py-4">
           <div className="flex items-center justify-center gap-3 flex-wrap px-3">
