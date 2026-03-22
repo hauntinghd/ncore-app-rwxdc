@@ -72,6 +72,21 @@ interface QuickdrawContractDraft {
 
 const QUICKDRAW_DRAFTS_STORAGE_PREFIX = 'ncore.marketplace.quickdraw.drafts';
 
+interface LevelUnlockTier {
+  level: number;
+  title: string;
+  unlock: string;
+}
+
+const LEVEL_UNLOCK_TRACK: LevelUnlockTier[] = [
+  { level: 5, title: 'Status Presets', unlock: 'Custom status presets unlock for faster presence switching.' },
+  { level: 10, title: 'Message Cap Boost', unlock: '+10% message length cap for longer structured messages.' },
+  { level: 20, title: 'Upload Cap Boost', unlock: '+10% file upload cap for larger transfer workflows.' },
+  { level: 35, title: '1080p120 Share', unlock: 'High-fidelity 1080p120 screen share unlock.' },
+  { level: 50, title: 'Group DM Expansion', unlock: '+5 Group DM slots for larger private rooms.' },
+  { level: 70, title: 'NCore Labs', unlock: 'Experimental NCore Labs features become available.' },
+];
+
 const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: string; subtitle: string; blocks: { title: string; body: string }[] }> = {
   terms: {
     title: 'Terms of Engagement',
@@ -96,16 +111,16 @@ const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: s
     subtitle: 'Operational requirement for specialist publishing access',
     blocks: [
       {
-        title: '1. Verified Proof',
-        body: 'Submit niche, portfolio/proof URL, and verified earnings. Clearance is required before publishing listings or bidding in restricted tracks.',
+        title: '1. Required Submission',
+        body: 'Provide primary niche, short specialist bio, proof URL, and at least $1,000 in verified earnings before moderation review starts.',
       },
       {
-        title: '2. Quality Standard',
-        body: 'Moderation checks profile quality, delivery consistency, and prior dispute outcomes before granting Tier II specialist access.',
+        title: '2. Moderation Standard',
+        body: 'Moderation verifies profile quality, portfolio validity, dispute behavior, and delivery consistency before approval.',
       },
       {
-        title: '3. Access Gate',
-        body: 'Without approved Tier II, users can browse and hire but cannot publish specialist listings in Quickdraw.',
+        title: '3. Unlock Outcome',
+        body: 'Approved Tier II unlocks specialist listing publish + restricted contract bidding. Without approval you can browse/hire only.',
       },
     ],
   },
@@ -617,11 +632,51 @@ export function MarketplacePage() {
   const hasTierIiClearance = hasApprovedClearance && (clearanceLevel === 'level_ii' || clearanceLevel === 'level_iii');
   const hasProofSubmitted = Boolean(String(sellerProfile?.proof_url || sellerProofUrl || '').trim());
   const hasMinimumVerifiedEarnings = Number(sellerProfile?.verified_earnings_cents || 0) >= 100000;
+  const progression = entitlements.progression;
+  const nextRequiredLevel = progression.nextRequiredLevel;
+  const nextRequiredEffectiveXp = progression.nextRequiredEffectiveXp;
+  const xpToNextLevel = nextRequiredEffectiveXp == null
+    ? 0
+    : Math.max(nextRequiredEffectiveXp - progression.effectiveXp, 0);
+  const levelProgressPercent = nextRequiredEffectiveXp == null
+    ? 100
+    : Math.max(Math.min((progression.effectiveXp / Math.max(nextRequiredEffectiveXp, 1)) * 100, 100), 0);
+  const unlockedTierSet = useMemo(
+    () => new Set((progression.unlockedTiers || []).map((tier) => Number(tier))),
+    [progression.unlockedTiers],
+  );
+  const levelUnlockRows = useMemo(
+    () => LEVEL_UNLOCK_TRACK.map((tier) => ({
+      ...tier,
+      unlocked: progression.level >= tier.level || unlockedTierSet.has(tier.level),
+    })),
+    [progression.level, unlockedTierSet],
+  );
   const tierIiChecklist = [
-    { key: 'profile', label: 'Submit niche + specialist bio', done: Boolean(String(sellerNiche || sellerProfile?.primary_niche || '').trim()) },
-    { key: 'proof', label: 'Attach proof URL (portfolio/payments)', done: hasProofSubmitted },
-    { key: 'earnings', label: 'Show at least $1,000 verified earnings', done: hasMinimumVerifiedEarnings },
-    { key: 'approval', label: 'Receive approved Tier II clearance', done: hasTierIiClearance },
+    {
+      key: 'profile',
+      label: 'Primary niche + specialist bio',
+      detail: 'Fill out your operating niche and profile summary.',
+      done: Boolean(String(sellerNiche || sellerProfile?.primary_niche || '').trim()),
+    },
+    {
+      key: 'proof',
+      label: 'Proof URL is required',
+      detail: 'Portfolio, case-study, or payment proof link must be valid.',
+      done: hasProofSubmitted,
+    },
+    {
+      key: 'earnings',
+      label: '$1,000 verified earnings minimum',
+      detail: 'Minimum verified earnings threshold for Tier II review.',
+      done: hasMinimumVerifiedEarnings,
+    },
+    {
+      key: 'approval',
+      label: 'Moderator approval',
+      detail: 'Tier II is unlocked only after moderation marks status approved.',
+      done: hasTierIiClearance,
+    },
   ];
   const hiringContractDrafts = useMemo(
     () => quickdrawContractDrafts.filter((draft) => draft.status === 'draft'),
@@ -2052,14 +2107,34 @@ export function MarketplacePage() {
                         <div>Quickdraw enabled: <span className="font-semibold text-surface-100">{sellerProfile?.quickdraw_enabled ? 'Yes' : 'Not yet'}</span></div>
                       </div>
                       <div className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <div className="text-surface-400">NCore level progression</div>
+                          <div className="font-semibold text-surface-100">Lv {progression.level}</div>
+                        </div>
+                        <div className="mt-2 h-1.5 rounded-full bg-surface-800 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-nyptid-500 to-nyptid-300 transition-all"
+                            style={{ width: `${Math.round(levelProgressPercent)}%` }}
+                          />
+                        </div>
+                        <div className="mt-1.5 text-[11px] text-surface-400">
+                          {nextRequiredLevel == null
+                            ? 'All defined level unlock tiers completed.'
+                            : `${xpToNextLevel.toLocaleString()} effective XP to Lv ${nextRequiredLevel}`}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2.5">
                         <div className="text-xs font-bold uppercase tracking-wide text-nyptid-200">Tier II Requirements</div>
                         <div className="mt-2 space-y-1.5 text-xs text-surface-300">
                           {tierIiChecklist.map((item) => (
                             <div key={item.key} className="flex items-start gap-2">
                               <span className={`mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border ${item.done ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300' : 'border-surface-600 text-surface-500'}`}>
-                                {item.done ? '✓' : '•'}
+                                {item.done ? <CheckCircle2 size={11} /> : <Clock3 size={11} />}
                               </span>
-                              <span>{item.label}</span>
+                              <span>
+                                <span className="text-surface-200">{item.label}</span>
+                                <span className="block mt-0.5 text-surface-500">{item.detail}</span>
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -2663,12 +2738,72 @@ export function MarketplacePage() {
             {quickdrawBriefingId && (
               <div className="space-y-4">
                 <div className="text-sm text-surface-400">{QUICKDRAW_BRIEFINGS[quickdrawBriefingId].subtitle}</div>
-                {QUICKDRAW_BRIEFINGS[quickdrawBriefingId].blocks.map((block) => (
-                  <div key={block.title} className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
-                    <div className="text-sm font-semibold text-surface-100">{block.title}</div>
-                    <div className="text-sm text-surface-300 mt-1 leading-relaxed">{block.body}</div>
-                  </div>
-                ))}
+                {quickdrawBriefingId === 'tier2' ? (
+                  <>
+                    <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3">
+                      <div className="text-xs font-bold uppercase tracking-wide text-nyptid-200">Required for Tier II Approval</div>
+                      <div className="mt-2 space-y-2 text-xs text-surface-300">
+                        {tierIiChecklist.map((item) => (
+                          <div key={item.key} className="rounded-md border border-surface-700 bg-surface-900/70 px-2.5 py-2">
+                            <div className="flex items-start gap-2">
+                              <span className={`mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border ${item.done ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300' : 'border-surface-600 text-surface-500'}`}>
+                                {item.done ? <CheckCircle2 size={11} /> : <Clock3 size={11} />}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="text-surface-100 font-medium">{item.label}</span>
+                                <span className="block mt-0.5 text-surface-500">{item.detail}</span>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 border-t border-surface-700 pt-2 text-[11px] text-surface-400">
+                        Approval unlocks specialist publishing, restricted contract bidding, and higher-trust Quickdraw actions.
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-bold uppercase tracking-wide text-nyptid-200">NCore Level Progress</div>
+                        <div className="text-xs font-semibold text-surface-100">Lv {progression.level}</div>
+                      </div>
+                      <div className="mt-2 h-1.5 rounded-full bg-surface-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-nyptid-500 to-nyptid-300 transition-all"
+                          style={{ width: `${Math.round(levelProgressPercent)}%` }}
+                        />
+                      </div>
+                      <div className="mt-1.5 text-xs text-surface-300">
+                        Effective XP: {progression.effectiveXp.toLocaleString()}
+                        {nextRequiredLevel == null
+                          ? ' - all unlock tiers completed.'
+                          : ` - ${xpToNextLevel.toLocaleString()} XP to Lv ${nextRequiredLevel}`}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3">
+                      <div className="text-xs font-bold uppercase tracking-wide text-nyptid-200">What Each Level Unlocks</div>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {levelUnlockRows.map((tier) => (
+                          <div
+                            key={tier.level}
+                            className={`rounded-md border px-2.5 py-2 text-xs ${tier.unlocked ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-surface-700 bg-surface-900/70 text-surface-300'}`}
+                          >
+                            <div className="font-semibold">Lv {tier.level} - {tier.title}</div>
+                            <div className="mt-0.5 text-[11px] opacity-90">{tier.unlock}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  QUICKDRAW_BRIEFINGS[quickdrawBriefingId].blocks.map((block) => (
+                    <div key={block.title} className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                      <div className="text-sm font-semibold text-surface-100">{block.title}</div>
+                      <div className="text-sm text-surface-300 mt-1 leading-relaxed">{block.body}</div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </Modal>
