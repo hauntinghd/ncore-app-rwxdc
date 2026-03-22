@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.72",
+            "version": "11.7.73",
             "date": "2026-03-21",
             "badge": "Current Build",
+            "improvements": [
+                "Direct-call remote tiles now support right-click audio control with a dedicated participant/screen-share context menu.",
+                "Screen-share streams now have a clearer dedicated mute/unmute action separate from per-user volume slider adjustments.",
+                "Fullscreen controls on call tiles now use hardened enter/exit handling across Electron/webkit fullscreen API variants."
+            ],
+            "bugFixes": [
+                "Fixed remote tile fullscreen arrow controls failing on runtimes where fullscreen APIs return non-promise values.",
+                "Fixed inconsistent fullscreen icon state by verifying actual fullscreen element before marking tile fullscreen-active.",
+                "Fixed overloaded in-tile volume UI by moving fine-grained volume to right-click context controls and keeping mute actions focused."
+            ]
+        },
+        {
+            "version": "11.7.72",
+            "date": "2026-03-21",
+            "badge": "Previous",
             "improvements": [
                 "Agora token fetch now retries bearer strategies (session then anon) for each edge function to survive stale-session auth failures.",
                 "Token invocation flow now records per-attempt diagnostics by function and auth mode for clearer production triage.",
