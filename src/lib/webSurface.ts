@@ -3,7 +3,7 @@ export type WebSurface = 'marketing' | 'app' | 'marketplace';
 const PRODUCTION_HOSTS: Record<WebSurface, string> = {
   marketing: 'ncore.nyptidindustries.com',
   app: 'app.ncore.nyptidindustries.com',
-  marketplace: 'ncoremarket.nyptidindustries.com',
+  marketplace: 'ncoremarketplace.nyptidindustries.com',
 };
 
 function isLocalHost(hostname: string) {
@@ -30,7 +30,13 @@ export function detectWebSurface(isElectron = false): WebSurface {
 
   const host = window.location.hostname.toLowerCase();
   if (isLocalHost(host)) return 'marketing';
-  if (host.includes('ncoremarket.') || host.startsWith('ncoremarket-') || host.startsWith('market.ncore')) {
+  if (
+    host.includes('ncoremarketplace.') ||
+    host.startsWith('ncoremarketplace-') ||
+    host.includes('ncoremarket.') ||
+    host.startsWith('ncoremarket-') ||
+    host.startsWith('market.ncore')
+  ) {
     return 'marketplace';
   }
   if (host.startsWith('app.') || host.startsWith('webapp.')) {

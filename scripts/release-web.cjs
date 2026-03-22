@@ -3,7 +3,11 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..');
-const ncoreDomain = 'ncore.nyptidindustries.com';
+const aliasDomains = [
+  'ncore.nyptidindustries.com',
+  'app.ncore.nyptidindustries.com',
+  'ncoremarketplace.nyptidindustries.com',
+];
 
 function run(command, options = {}) {
   const capture = Boolean(options.capture);
@@ -55,8 +59,10 @@ function main() {
     throw new Error('Could not determine Vercel deployment URL from CLI output.');
   }
 
-  run(`npx vercel alias set ${deploymentUrl} ${ncoreDomain}`);
-  console.log(`[release-web] Aliased ${deploymentUrl} -> https://${ncoreDomain}`);
+  for (const domain of aliasDomains) {
+    run(`npx vercel alias set ${deploymentUrl} ${domain}`);
+    console.log(`[release-web] Aliased ${deploymentUrl} -> https://${domain}`);
+  }
 }
 
 try {
