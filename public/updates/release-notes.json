@@ -1,9 +1,24 @@
 {
     "releases": [
         {
+            "version": "11.7.75",
+            "date": "2026-03-22",
+            "badge": "Current Build",
+            "improvements": [
+                "Direct call runtime now prioritizes active speaker and screen-share streams for better multi-party call stability when 3+ participants are connected.",
+                "Group call layout now uses an adaptive spotlight plus gallery view to improve visibility and reduce visual crowding on desktop and mobile.",
+                "Mobile app shell now includes safer bottom insets, cleaner drawer behavior, and improved touch-first navigation flow."
+            ],
+            "bugFixes": [
+                "Fixed microphone startup edge cases by auto-falling back from stale saved input devices to the system default device.",
+                "Fixed silent-local-mic scenarios caused by invalid or zero saved input volume by normalizing to a valid capture value.",
+                "Reduced call quality regressions in larger calls by applying adaptive remote stream optimization and fallback behavior."
+            ]
+        },
+        {
             "version": "11.7.74",
             "date": "2026-03-21",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "Fullscreen in DM calls now uses a dedicated pop-out overlay layer so expanding remote video always works regardless of layout clipping.",
                 "Right-click on remote participants now opens a Discord-style context panel with direct User Volume control.",
