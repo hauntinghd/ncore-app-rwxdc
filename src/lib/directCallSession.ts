@@ -815,6 +815,109 @@ class DirectCallSessionStore {
     }
   }
 
+  async applyCallSettings(nextSettingsInput?: CallSettings) {
+    const nextSettings = await this.resolveCallAudioSettings(nextSettingsInput || loadCallSettings());
+    saveCallSettings(nextSettings);
+
+    const outputVolume = Math.max(0, Math.min(200, Math.round(Number(nextSettings.outputVolume) || 100)));
+    for (const [uid, remoteTrack] of this.remoteAudioTracks.entries()) {
+      const configuredVolume = this.remoteAudioVolumes.get(uid);
+      const nextVolume = typeof configuredVolume === 'number' ? configuredVolume : outputVolume;
+      this.remoteAudioVolumes.set(uid, nextVolume);
+      if (typeof remoteTrack.setVolume === 'function') {
+        remoteTrack.setVolume(nextVolume);
+      }
+      if (nextSettings.outputDeviceId && nextSettings.outputDeviceId !== 'default' && typeof remoteTrack.setPlaybackDevice === 'function') {
+        try {
+          await remoteTrack.setPlaybackDevice(nextSettings.outputDeviceId);
+        } catch {
+          // Some runtimes don't allow output routing changes.
+        }
+      }
+    }
+
+    if (!this.client || this.state.phase !== 'active') {
+      this.setState({
+        mediaError: '',
+        mediaErrorDetail: '',
+      });
+      return;
+    }
+
+    const previousTrack = this.audioTrack;
+    const wasMuted = this.state.isMuted;
+    let rebuiltTrack: ILocalAudioTrack | null = null;
+
+    try {
+      rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
+      if (typeof rebuiltTrack.setVolume === 'function') {
+        rebuiltTrack.setVolume(nextSettings.inputVolume);
+      }
+      const rebuiltTrackAny = rebuiltTrack as any;
+      if (nextSettings.inputDeviceId && nextSettings.inputDeviceId !== 'default' && typeof rebuiltTrackAny.setDevice === 'function') {
+        try {
+          await rebuiltTrackAny.setDevice(nextSettings.inputDeviceId);
+        } catch {
+          // If explicit selection fails, continue on default mic binding.
+        }
+      }
+      if (wasMuted) {
+        await rebuiltTrack.setEnabled(false);
+      }
+    } catch (error) {
+      this.setState({
+        mediaError: 'Could not apply microphone settings. Check selected device and permissions.',
+        mediaErrorDetail: formatRtcError(error),
+      });
+      return;
+    }
+
+    try {
+      if (previousTrack) {
+        try {
+          await this.client.unpublish(previousTrack);
+        } catch {
+          // noop
+        }
+      }
+      await this.client.publish(rebuiltTrack);
+      this.audioTrack = rebuiltTrack;
+      if (previousTrack) {
+        try {
+          previousTrack.stop();
+          previousTrack.close();
+        } catch {
+          // noop
+        }
+      }
+      this.setState({
+        mediaError: '',
+        mediaErrorDetail: '',
+      });
+    } catch (error) {
+      try {
+        rebuiltTrack.stop();
+        rebuiltTrack.close();
+      } catch {
+        // noop
+      }
+      if (previousTrack) {
+        this.audioTrack = previousTrack;
+        try {
+          await this.client.publish(previousTrack);
+        } catch {
+          // noop
+        }
+      } else {
+        this.audioTrack = null;
+      }
+      this.setState({
+        mediaError: 'Could not apply microphone settings right now.',
+        mediaErrorDetail: formatRtcError(error),
+      });
+    }
+  }
+
   async toggleVideo() {
     if (!this.client || this.state.phase !== 'active') return;
 

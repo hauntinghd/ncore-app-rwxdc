@@ -32,6 +32,7 @@ import { resolveBillingReturnUrl } from '../lib/billingUrl';
 import type { UserStatus, ServerProfile, AccountStandingEvent } from '../lib/types';
 import { formatFileSize, getRankInfo } from '../lib/utils';
 import { enumerateCallDevices, loadCallSettings, saveCallSettings, type MediaDeviceOption } from '../lib/callSettings';
+import { directCallSession } from '../lib/directCallSession';
 import {
   applyReleaseBadges,
   DEFAULT_UPDATE_FEED_URL,
@@ -932,6 +933,7 @@ export function SettingsPage() {
   const [audioInputs, setAudioInputs] = useState<MediaDeviceOption[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceOption[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceOption[]>([]);
+  const [applyingVoiceSettings, setApplyingVoiceSettings] = useState(false);
 
   const [privacySettings, setPrivacySettings] = useState({
     showOnlineStatus: true,
@@ -1483,6 +1485,25 @@ export function SettingsPage() {
     }
   }
 
+  function flashSavedNotice() {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  }
+
+  async function handleApplyVoiceVideoSettings() {
+    setError('');
+    setApplyingVoiceSettings(true);
+    try {
+      saveCallSettings(callSettings);
+      await directCallSession.applyCallSettings(callSettings);
+      flashSavedNotice();
+    } catch (err: unknown) {
+      setError(String((err as Error)?.message || err));
+    } finally {
+      setApplyingVoiceSettings(false);
+    }
+  }
+
   async function handleStartBoostCheckout() {
     setBillingActionMessage('');
     setCheckoutLoadingKey('boost');
@@ -1752,7 +1773,6 @@ export function SettingsPage() {
     ? 0
     : Math.max(nextRequiredEffectiveXp - progression.effectiveXp, 0);
   const canUpgradeToBoost = !entitlements.isBoost;
-
   if (!profile) return null;
 
   return (
@@ -2403,6 +2423,17 @@ export function SettingsPage() {
                         />
                       </SettingRow>
                     </div>
+                  </div>
+
+                  <div className="border-t border-surface-700 pt-4 mt-4 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleApplyVoiceVideoSettings()}
+                      disabled={applyingVoiceSettings}
+                      className="nyptid-btn-primary px-6"
+                    >
+                      {applyingVoiceSettings ? 'Applying...' : <><Save size={16} /> Save Voice & Video</>}
+                    </button>
                   </div>
                 </div>
               </div>
