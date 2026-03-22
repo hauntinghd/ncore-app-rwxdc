@@ -27,14 +27,15 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
     : location.pathname.startsWith('/app/settings');
 
   if (mobile) {
-    const mobileIconBase = 'h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-300 flex items-center justify-center transition-colors';
+    const mobileIconBase = 'group flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-surface-700 bg-surface-900 px-2 text-surface-300 transition-colors';
     const mobileIconActive = 'border-nyptid-300/70 bg-nyptid-300 text-surface-950';
+    const mobileLabelBase = 'text-[10px] font-semibold tracking-wide';
     return (
-      <div className="h-16 border-t border-surface-800 bg-surface-950/95 backdrop-blur px-2 py-2">
-        <div className="flex h-full items-center gap-2 overflow-x-auto no-scrollbar">
+      <div className="border-t border-surface-800 bg-surface-950/95 backdrop-blur px-2 pt-2 pb-2">
+        <div className="grid grid-cols-6 gap-1.5">
           <button
             onClick={() => navigate('/app')}
-            className={`h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl border transition-colors ${
+            className={`group flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border transition-colors ${
               location.pathname === '/app'
                 ? 'border-nyptid-300/70 ring-1 ring-nyptid-300/60'
                 : 'border-surface-700'
@@ -43,58 +44,67 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
             <img
               src={appLogoUrl}
               alt="NCore"
-              className="h-full w-full object-cover"
+              className="h-7 w-7 rounded-md object-cover"
             />
+            <span className={mobileLabelBase}>Home</span>
           </button>
 
           <button onClick={() => navigate('/app/discover')} className={`${mobileIconBase} ${isDiscover ? mobileIconActive : ''}`}>
             <Compass size={18} />
+            <span className={mobileLabelBase}>Discover</span>
           </button>
           <button onClick={() => navigate('/app/marketplace')} className={`${mobileIconBase} ${isMarketplace ? mobileIconActive : ''}`}>
             <ShoppingBag size={17} />
+            <span className={mobileLabelBase}>Market</span>
           </button>
           <button onClick={() => navigate('/app/friends')} className={`${mobileIconBase} ${isFriends ? mobileIconActive : ''}`}>
             <UserPlus size={17} />
+            <span className={mobileLabelBase}>Friends</span>
           </button>
           <button onClick={() => navigate('/app/dm')} className={`${mobileIconBase} ${isDMs ? mobileIconActive : ''}`}>
             <MessageSquare size={18} />
+            <span className={mobileLabelBase}>DMs</span>
           </button>
-
-          {communities.map((community) => (
-            <button
-              key={community.id}
-              onClick={() => navigate(`/app/community/${community.id}`)}
-              className={`${mobileIconBase} p-0 ${activeCommunityId === community.id ? mobileIconActive : ''}`}
-              title={community.name}
-            >
-              {community.icon_url ? (
-                <img src={community.icon_url} alt={community.name} className="h-full w-full rounded-[inherit] object-cover" />
-              ) : (
-                <span className="text-xs font-bold">{community.name.slice(0, 2).toUpperCase()}</span>
-              )}
-            </button>
-          ))}
-
-          <button
-            onClick={onCreateCommunity}
-            className={`${mobileIconBase} text-green-300 hover:border-green-400/40 hover:text-green-200`}
-          >
-            <Plus size={18} />
-          </button>
-
-          {profile?.platform_role === 'owner' && (
-            <button
-              onClick={() => navigate('/app/admin')}
-              className={`${mobileIconBase} ${location.pathname.startsWith('/app/admin') ? mobileIconActive : ''}`}
-            >
-              <Crown size={17} />
-            </button>
-          )}
-
           <button onClick={() => navigate(settingsTarget)} className={`${mobileIconBase} ${isSettingsActive ? mobileIconActive : ''}`}>
             <Settings size={17} />
+            <span className={mobileLabelBase}>More</span>
           </button>
         </div>
+
+        {(communities.length > 0 || profile?.platform_role === 'owner') && (
+          <div className="mt-2 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+            {communities.map((community) => (
+              <button
+                key={community.id}
+                onClick={() => navigate(`/app/community/${community.id}`)}
+                className={`h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-200 flex items-center justify-center overflow-hidden ${activeCommunityId === community.id ? 'ring-2 ring-nyptid-300 border-nyptid-300/70' : ''}`}
+                title={community.name}
+              >
+                {community.icon_url ? (
+                  <img src={community.icon_url} alt={community.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-[11px] font-bold">{community.name.slice(0, 2).toUpperCase()}</span>
+                )}
+              </button>
+            ))}
+
+            <button
+              onClick={onCreateCommunity}
+              className="h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-green-300 hover:border-green-400/40 hover:text-green-200 flex items-center justify-center"
+            >
+              <Plus size={18} />
+            </button>
+
+            {profile?.platform_role === 'owner' && (
+              <button
+                onClick={() => navigate('/app/admin')}
+                className={`h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-300 flex items-center justify-center ${location.pathname.startsWith('/app/admin') ? 'border-nyptid-300/70 bg-nyptid-300 text-surface-950' : ''}`}
+              >
+                <Crown size={17} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }

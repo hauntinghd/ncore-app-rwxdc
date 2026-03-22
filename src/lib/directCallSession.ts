@@ -8,7 +8,7 @@ import type {
   IRemoteVideoTrack,
   ScreenVideoTrackInitConfig,
 } from 'agora-rtc-sdk-ng';
-import { loadCallSettings, saveCallSettings } from './callSettings';
+import { loadCallSettings, saveCallSettings, type CallSettings } from './callSettings';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
 import {
@@ -218,6 +218,7 @@ class DirectCallSessionStore {
   private hangupInFlight: Promise<void> | null = null;
   private activeSpeakerFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingActiveSpeakerUids: string[] | null = null;
+  private remoteOptimizationTimer: ReturnType<typeof setTimeout> | null = null;
 
   private sameUidArray(a: string[], b: string[]): boolean {
     if (a.length !== b.length) return false;
@@ -354,6 +355,7 @@ class DirectCallSessionStore {
     this.activeSpeakerFlushTimer = null;
     if (this.sameUidArray(next, this.state.activeSpeakerUids)) return;
     this.setState({ activeSpeakerUids: next });
+    this.queueRemoteVideoOptimization();
   }
 
   private queueActiveSpeakerUids(next: string[]) {
@@ -362,6 +364,67 @@ class DirectCallSessionStore {
     this.activeSpeakerFlushTimer = setTimeout(() => {
       this.flushActiveSpeakerUids();
     }, 160);
+  }
+
+  private async configureRtcOptimizations(client: IAgoraRTCClient) {
+    const clientAny = client as any;
+    try {
+      if (typeof clientAny.enableDualStream === 'function') {
+        await clientAny.enableDualStream();
+      }
+    } catch {
+      // Optional optimization only.
+    }
+    try {
+      if (typeof clientAny.setStreamFallbackOption === 'function') {
+        // 2 => fallback to audio-only when network quality drops.
+        clientAny.setStreamFallbackOption(2);
+      }
+    } catch {
+      // Optional optimization only.
+    }
+  }
+
+  private queueRemoteVideoOptimization() {
+    if (this.remoteOptimizationTimer) return;
+    this.remoteOptimizationTimer = setTimeout(() => {
+      this.remoteOptimizationTimer = null;
+      void this.applyRemoteVideoOptimization();
+    }, 140);
+  }
+
+  private async applyRemoteVideoOptimization() {
+    if (!this.client) return;
+    const remoteVideoUids = Array.from(this.remoteVideoTracks.keys());
+    if (remoteVideoUids.length === 0) return;
+
+    const clientAny = this.client as any;
+    if (typeof clientAny.setRemoteVideoStreamType !== 'function') return;
+
+    const isGroupCall = this.state.remoteParticipantUids.length >= 3;
+    const activeSpeakers = this.state.activeSpeakerUids
+      .filter((uid) => remoteVideoUids.includes(uid))
+      .filter((uid) => !uid.includes('::screen'));
+    const screenShareUids = remoteVideoUids.filter((uid) => uid.includes('::screen'));
+    const primarySpeaker = activeSpeakers[0]
+      || remoteVideoUids.find((uid) => !uid.includes('::screen'))
+      || remoteVideoUids[0];
+    const secondarySpeaker = activeSpeakers.find((uid) => uid !== primarySpeaker);
+
+    const highPriority = new Set<string>(screenShareUids);
+    if (primarySpeaker) highPriority.add(primarySpeaker);
+    if (secondarySpeaker) highPriority.add(secondarySpeaker);
+
+    await Promise.all(
+      remoteVideoUids.map(async (uid) => {
+        const streamType = !isGroupCall || highPriority.has(uid) ? 0 : 1;
+        try {
+          await clientAny.setRemoteVideoStreamType(uid, streamType);
+        } catch {
+          // Some environments/plans don't expose this API.
+        }
+      }),
+    );
   }
 
   private bindTokenRenewalHandlers(
@@ -416,6 +479,8 @@ class DirectCallSessionStore {
       });
     }
 
+    this.queueRemoteVideoOptimization();
+
     if (this.remoteVideoContainer && remoteVideoUids.length > 0) {
       this.attachRemoteVideoForUid(remoteVideoUids[0], this.remoteVideoContainer);
     }
@@ -425,6 +490,10 @@ class DirectCallSessionStore {
     if (this.activeSpeakerFlushTimer) {
       clearTimeout(this.activeSpeakerFlushTimer);
       this.activeSpeakerFlushTimer = null;
+    }
+    if (this.remoteOptimizationTimer) {
+      clearTimeout(this.remoteOptimizationTimer);
+      this.remoteOptimizationTimer = null;
     }
     this.pendingActiveSpeakerUids = null;
     this.remoteVideoTracks.forEach((track) => {
@@ -595,7 +664,7 @@ class DirectCallSessionStore {
       mediaErrorDetail: '',
     });
 
-    const callSettings = loadCallSettings();
+    const callSettings = await this.resolveCallAudioSettings();
     this.watchCallState(callId);
     this.watchConversationControl(conversationId);
     try {
@@ -603,6 +672,7 @@ class DirectCallSessionStore {
       this.client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
       this.localUid = userId;
       this.registerClientEvents(this.client);
+      await this.configureRtcOptimizations(this.client);
 
       const channelName = `dm-${conversationId}`;
       const token = await resolveAgoraJoinToken(channelName, userId);
@@ -612,7 +682,7 @@ class DirectCallSessionStore {
       const tracksToPublish: Array<ILocalAudioTrack | ILocalVideoTrack> = [];
 
       try {
-        this.audioTrack = await this.createLocalAudioTrack();
+        this.audioTrack = await this.createLocalAudioTrack(callSettings);
         if (typeof this.audioTrack.setVolume === 'function') {
           this.audioTrack.setVolume(callSettings.inputVolume);
         }
@@ -698,6 +768,7 @@ class DirectCallSessionStore {
 
     const nextSettings = {
       ...current,
+      inputVolume: this.normalizeInputVolume(current.inputVolume),
       noiseSuppression: enabled,
     };
     // Store user preference immediately, even if we cannot hot-swap the track.
@@ -723,7 +794,7 @@ class DirectCallSessionStore {
     }
 
     try {
-      const rebuiltTrack = await this.createLocalAudioTrack();
+      const rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
       this.audioTrack = rebuiltTrack;
       if (typeof rebuiltTrack.setVolume === 'function') {
         rebuiltTrack.setVolume(nextSettings.inputVolume);
@@ -1239,6 +1310,8 @@ class DirectCallSessionStore {
           user.videoTrack.play(this.remoteVideoContainer);
         }
       }
+
+      this.queueRemoteVideoOptimization();
     });
 
     client.on('user-unpublished', (user: IAgoraRTCRemoteUser, mediaType: 'audio' | 'video') => {
@@ -1271,8 +1344,49 @@ class DirectCallSessionStore {
     });
   }
 
-  private async createLocalAudioTrack(): Promise<ILocalAudioTrack> {
-    const callSettings = loadCallSettings();
+  private normalizeInputVolume(inputVolume: number): number {
+    const numeric = Number(inputVolume);
+    if (!Number.isFinite(numeric)) return 100;
+    if (numeric <= 0) return 100;
+    return Math.max(1, Math.min(100, Math.round(numeric)));
+  }
+
+  private async resolveCallAudioSettings(base?: CallSettings): Promise<CallSettings> {
+    const source = base || loadCallSettings();
+    const next: CallSettings = {
+      ...source,
+      inputVolume: this.normalizeInputVolume(source.inputVolume),
+      inputDeviceId: String(source.inputDeviceId || 'default').trim() || 'default',
+    };
+
+    let changed = (
+      next.inputVolume !== source.inputVolume
+      || next.inputDeviceId !== source.inputDeviceId
+    );
+
+    if (next.inputDeviceId !== 'default') {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const hasSavedInput = devices.some((device) => (
+          device.kind === 'audioinput' && device.deviceId === next.inputDeviceId
+        ));
+        if (!hasSavedInput) {
+          next.inputDeviceId = 'default';
+          changed = true;
+        }
+      } catch {
+        // If device enumeration fails, keep current best-effort settings.
+      }
+    }
+
+    if (changed) {
+      saveCallSettings(next);
+    }
+    return next;
+  }
+
+  private async createLocalAudioTrack(preferredSettings?: CallSettings): Promise<ILocalAudioTrack> {
+    const callSettings = await this.resolveCallAudioSettings(preferredSettings);
     const errors: string[] = [];
     const AgoraRTC = await getAgoraModule();
 

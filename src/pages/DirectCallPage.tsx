@@ -177,12 +177,29 @@ export function DirectCallPage() {
   const localSpeakerUid = String(user?.id || profile?.id || '');
   const isLocalSpeaking = localSpeakerUid ? activeSpeakerUids.includes(localSpeakerUid) : false;
   const hasValidConversationId = isUuid(conversationId);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 767px)').matches;
+  });
 
   useEffect(() => {
     sessionWasLiveRef.current = false;
     setCallStartedAtMs(null);
     setFullscreenFallbackUid(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsMobileViewport(media.matches);
+    onChange();
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', onChange);
+      return () => media.removeEventListener('change', onChange);
+    }
+    media.addListener(onChange);
+    return () => media.removeListener(onChange);
+  }, []);
 
   useEffect(() => {
     if (conversationId && !hasValidConversationId) {
@@ -724,6 +741,104 @@ export function DirectCallPage() {
     return `Participant ${normalizedUid.slice(0, 6)}`;
   }, [participantProfilesByUid]);
 
+  const prioritizedRemoteUid = useMemo(() => {
+    if (remoteTiles.length === 0) return null;
+    const screenShareUid = remoteTiles.find((uid) => uid.includes('::screen'));
+    if (screenShareUid) return screenShareUid;
+    const activeRemoteSpeakerUid = activeSpeakerUids.find((uid) => remoteTiles.includes(uid));
+    if (activeRemoteSpeakerUid) return activeRemoteSpeakerUid;
+    return remoteTiles[0];
+  }, [activeSpeakerUids, remoteTiles]);
+
+  const hasGroupLayout = remoteTiles.length >= 3;
+  const galleryRemoteUids = hasGroupLayout && prioritizedRemoteUid
+    ? remoteTiles.filter((uid) => uid !== prioritizedRemoteUid)
+    : remoteTiles;
+  const standardTileHeightClass = 'h-[32vh] sm:h-[34vh] lg:h-[42vh]';
+  const compactTileHeightClass = 'h-[22vh] sm:h-[24vh] lg:h-[28vh]';
+  const spotlightHeightClass = isMobileViewport ? 'h-[36vh]' : 'h-[46vh]';
+  const localDisplayLabel = profile?.display_name || profile?.username || 'You';
+  const localDisplayInitial = localDisplayLabel.slice(0, 1).toUpperCase();
+
+  const renderLocalTile = (compact = false) => (
+    <div className={`rounded-2xl border bg-surface-900 overflow-hidden ${compact ? compactTileHeightClass : standardTileHeightClass} flex items-center justify-center ${isLocalSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}>
+      {(isVideoOn || isScreenSharing) ? (
+        <div ref={bindLocalVideo} className="w-full h-full" />
+      ) : (
+        <div className="text-center">
+          <div className="w-20 h-20 rounded-full bg-surface-800 mx-auto mb-3 flex items-center justify-center text-surface-300 text-xl font-bold">
+            {localDisplayInitial}
+          </div>
+          <p className="text-surface-400">{localDisplayLabel === 'You' ? 'You' : localDisplayLabel}</p>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderRemoteTile = (uid: string, compact = false, heightClassOverride?: string) => {
+    const hasVideo = remoteVideoUids.includes(uid);
+    const participantName = getParticipantName(uid);
+    const isSpeaking = activeSpeakerUids.includes(uid);
+    const isScreenShareStream = uid.includes('::screen');
+    const remoteVolume = remoteVolumesByUid[uid] ?? 100;
+    const isRemoteMuted = remoteVolume <= 0;
+    const isPoppedOut = fullscreenFallbackUid === uid;
+    const heightClass = heightClassOverride || (compact ? compactTileHeightClass : standardTileHeightClass);
+
+    return (
+      <div
+        key={uid}
+        ref={(node) => setRemoteTileRef(uid, node)}
+        onContextMenuCapture={(event) => openRemoteVolumeContextMenu(event, uid)}
+        title="Right-click for volume controls"
+        className={`relative rounded-2xl border bg-surface-900 overflow-hidden ${heightClass} flex items-center justify-center ${isSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}
+      >
+        <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded-full bg-black/55 px-2 py-1">
+          <button
+            type="button"
+            onClick={() => void toggleParticipantFullscreen(uid)}
+            className="text-white/90 hover:text-white transition-colors"
+            title={isPoppedOut ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isPoppedOut ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleRemoteMute(uid)}
+            className={`text-white/90 hover:text-white transition-colors ${isScreenShareStream ? 'px-1.5 py-0.5 rounded-md bg-black/35' : ''}`}
+            title={isScreenShareStream
+              ? (isRemoteMuted ? 'Unmute screen share audio' : 'Mute screen share audio')
+              : (isRemoteMuted ? 'Unmute participant audio' : 'Mute participant audio')}
+          >
+            {isRemoteMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+          </button>
+        </div>
+
+        {hasVideo && !isPoppedOut ? (
+          <div className="w-full h-full">
+            <RemoteVideoMount uid={uid} />
+            <div className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
+              {participantName}
+            </div>
+          </div>
+        ) : hasVideo && isPoppedOut ? (
+          <div className="text-center">
+            <p className="text-surface-300 text-sm font-medium">Popped out to fullscreen view</p>
+            <p className="text-surface-500 text-xs mt-1">Press the fullscreen button again to return.</p>
+          </div>
+        ) : (
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-full bg-surface-800 mx-auto mb-2 flex items-center justify-center text-surface-300 text-lg font-bold">
+              {participantName.slice(0, 1).toUpperCase()}
+            </div>
+            <p className="text-surface-400 text-sm">{participantName}</p>
+            <p className="text-surface-600 text-xs mt-1">Audio connected</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (!profile) return null;
 
   return (
@@ -745,7 +860,7 @@ export function DirectCallPage() {
           </div>
         )}
 
-        <div className="flex-1 flex items-center justify-center p-6">
+        <div className="flex-1 flex items-center justify-center p-3 sm:p-6">
           {isConnecting ? (
             <div className="text-center">
               <div className="w-12 h-12 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -768,89 +883,34 @@ export function DirectCallPage() {
                   )}
                 </div>
               )}
-              <div className={`grid gap-3 ${remoteTiles.length > 1 ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                <div className={`rounded-2xl border bg-surface-900 overflow-hidden h-[42vh] flex items-center justify-center ${isLocalSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}>
-                  {(isVideoOn || isScreenSharing) ? (
-                    <div ref={bindLocalVideo} className="w-full h-full" />
-                  ) : (
-                    <div className="text-center">
-                      <div className="w-20 h-20 rounded-full bg-surface-800 mx-auto mb-3 flex items-center justify-center text-surface-300 text-xl font-bold">
-                        {(profile.display_name || profile.username || 'U').slice(0, 1).toUpperCase()}
-                      </div>
-                      <p className="text-surface-400">You</p>
-                    </div>
-                  )}
-                </div>
-
-                {remoteTiles.length === 0 ? (
-                  <div className="rounded-2xl border border-surface-700 bg-surface-900 overflow-hidden h-[42vh] flex items-center justify-center">
+              {remoteTiles.length === 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {renderLocalTile(false)}
+                  <div className={`rounded-2xl border border-surface-700 bg-surface-900 overflow-hidden ${standardTileHeightClass} flex items-center justify-center`}>
                     <div className="text-center px-4">
                       <p className="text-surface-300 font-medium">Waiting for participants...</p>
                       <p className="text-surface-500 text-sm mt-1">They can join audio/camera from the same DM call route.</p>
                     </div>
                   </div>
-                ) : remoteTiles.map((uid) => {
-                  const hasVideo = remoteVideoUids.includes(uid);
-                  const participantName = getParticipantName(uid);
-                  const isSpeaking = activeSpeakerUids.includes(uid);
-                  const isScreenShareStream = uid.includes('::screen');
-                  const remoteVolume = remoteVolumesByUid[uid] ?? 100;
-                  const isRemoteMuted = remoteVolume <= 0;
-                  const isPoppedOut = fullscreenFallbackUid === uid;
-                  return (
-                    <div
-                      key={uid}
-                      ref={(node) => setRemoteTileRef(uid, node)}
-                      onContextMenuCapture={(event) => openRemoteVolumeContextMenu(event, uid)}
-                      title="Right-click for volume controls"
-                      className={`relative rounded-2xl border bg-surface-900 overflow-hidden h-[42vh] flex items-center justify-center ${isSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}
-                    >
-                      <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded-full bg-black/55 px-2 py-1">
-                        <button
-                          type="button"
-                          onClick={() => void toggleParticipantFullscreen(uid)}
-                          className="text-white/90 hover:text-white transition-colors"
-                          title={isPoppedOut ? 'Exit fullscreen' : 'Fullscreen'}
-                        >
-                          {isPoppedOut ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleRemoteMute(uid)}
-                          className={`text-white/90 hover:text-white transition-colors ${isScreenShareStream ? 'px-1.5 py-0.5 rounded-md bg-black/35' : ''}`}
-                          title={isScreenShareStream
-                            ? (isRemoteMuted ? 'Unmute screen share audio' : 'Mute screen share audio')
-                            : (isRemoteMuted ? 'Unmute participant audio' : 'Mute participant audio')}
-                        >
-                          {isRemoteMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                        </button>
-                      </div>
-
-                      {hasVideo && !isPoppedOut ? (
-                        <div className="w-full h-full">
-                          <RemoteVideoMount uid={uid} />
-                          <div className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
-                            {participantName}
-                          </div>
-                        </div>
-                      ) : hasVideo && isPoppedOut ? (
-                        <div className="text-center">
-                          <p className="text-surface-300 text-sm font-medium">Popped out to fullscreen view</p>
-                          <p className="text-surface-500 text-xs mt-1">Press the fullscreen button again to return.</p>
-                        </div>
-                      ) : (
-                        <div className="text-center">
-                          <div className="w-16 h-16 rounded-full bg-surface-800 mx-auto mb-2 flex items-center justify-center text-surface-300 text-lg font-bold">
-                            {participantName.slice(0, 1).toUpperCase()}
-                          </div>
-                          <p className="text-surface-400 text-sm">{participantName}</p>
-                          <p className="text-surface-600 text-xs mt-1">Audio connected</p>
-                        </div>
-                      )}
+                </div>
+              ) : hasGroupLayout && prioritizedRemoteUid ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+                    {renderRemoteTile(prioritizedRemoteUid, false, spotlightHeightClass)}
+                    {renderLocalTile(true)}
+                  </div>
+                  {galleryRemoteUids.length > 0 && (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {galleryRemoteUids.map((uid) => renderRemoteTile(uid, true))}
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                </div>
+              ) : (
+                <div className={`grid gap-3 ${remoteTiles.length > 1 ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                  {renderLocalTile(false)}
+                  {remoteTiles.map((uid) => renderRemoteTile(uid, false))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center">

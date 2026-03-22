@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ServerRail } from './ServerRail';
 import { ChannelSidebar } from './ChannelSidebar';
 import { TopBar } from './TopBar';
@@ -60,6 +60,7 @@ export function AppShell({
 }: AppShellProps) {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
@@ -520,6 +521,23 @@ export function AppShell({
     }
   }, [isMobileRail]);
 
+  useEffect(() => {
+    if (!showChannelSidebar) return;
+    if (isDesktopSidebar) return;
+    if (typeof document === 'undefined') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = sidebarOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isDesktopSidebar, showChannelSidebar, sidebarOpen]);
+
+  useEffect(() => {
+    if (showChannelSidebar && !isDesktopSidebar) {
+      setSidebarOpen(false);
+    }
+  }, [isDesktopSidebar, location.pathname, showChannelSidebar]);
+
   async function handleAddCategory() {
     if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return;
     const requestedName = window.prompt('Category name', 'NEW CATEGORY');
@@ -809,7 +827,7 @@ export function AppShell({
   }
 
   return (
-    <div className={`flex h-[100dvh] overflow-hidden bg-surface-950 ${isMobileRail ? 'pb-16' : ''}`}>
+    <div className={`flex h-[100dvh] overflow-hidden bg-surface-950 ${isMobileRail ? 'pb-[calc(4.25rem+env(safe-area-inset-bottom))]' : ''}`}>
       {!isMobileRail && (
         <ServerRail
           communities={communities}
@@ -843,7 +861,7 @@ export function AppShell({
             className={`fixed inset-0 z-20 bg-black/50 transition-opacity duration-300 ${sidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
             onClick={() => setSidebarOpen(false)}
           />
-          <div className={`fixed top-0 ${isMobileRail ? 'left-0' : 'left-[72px]'} z-30 h-full w-60 overflow-hidden ${sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+          <div className={`fixed top-0 ${isMobileRail ? 'left-0' : 'left-[72px]'} z-30 h-full w-[min(88vw,22rem)] overflow-hidden ${sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
             <div className={`h-full transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
               <ChannelSidebar
                 community={activeCommunity || undefined}
@@ -893,7 +911,7 @@ export function AppShell({
       </div>
 
       {isMobileRail && (
-        <div className="fixed inset-x-0 bottom-0 z-40">
+        <div className="fixed inset-x-0 bottom-0 z-40 pb-[env(safe-area-inset-bottom)]">
           <ServerRail
             communities={communities}
             activeCommunityId={activeCommunityId}
