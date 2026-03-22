@@ -1,9 +1,32 @@
 {
     "releases": [
         {
-            "version": "11.7.76",
+            "version": "11.7.77",
             "date": "2026-03-22",
             "badge": "Current Build",
+            "improvements": [
+                "Added global growth capability contracts with trust tier + unlock source so account actions are governed consistently across app surfaces.",
+                "Added referral/invite unlock architecture with activation tracking and anti-abuse constraints to support controlled growth campaigns.",
+                "Shipped Voice & Video pre-call diagnostics with permission checks, selected-device validation, microphone level meter, speaker tone test, and live camera preview.",
+                "Expanded Admin overview with 30-day revenue and reliability operations cards including Boost MRR, marketplace GMV/fees, checkout conversion, call connect success, and drop-rate visibility.",
+                "Added source-channel attribution flow through checkout/session metadata so Reddit and campaign traffic can be measured from checkout start to paid completion.",
+                "Improved call trust signals with clearer connection state reporting and recovery actions for retrying join and reselecting devices.",
+                "Added capability-aware lock messaging in marketplace, calls, and server creation so blocked actions now explain exactly what unlock is required."
+            ],
+            "bugFixes": [
+                "Applied a live hotfix to remove the 'frosty' account from auth/profile records and free the username for reuse.",
+                "Applied capability fallback defaults so non-target users are not unintentionally blocked by growth gate rollout rules.",
+                "Fixed migration deployment failure caused by BOM encoding in a prior marketplace migration file.",
+                "Added webhook-side operator metric updates for checkout paid/failed outcomes to avoid analytics gaps when client telemetry is unavailable.",
+                "Added webhook fallback inserts for growth events and operator metrics so billing processing remains resilient under partial rollout conditions.",
+                "Hardened checkout event paths with normalized source-channel handling to prevent malformed attribution data.",
+                "Improved device-health refresh behavior to react to media device changes and avoid stale selected-device status in settings."
+            ]
+        },
+        {
+            "version": "11.7.76",
+            "date": "2026-03-22",
+            "badge": "Previous",
             "improvements": [
                 "Voice & Video settings now include a dedicated Save Voice & Video action so device changes apply intentionally in one click.",
                 "Applying Voice & Video now immediately rebinds microphone/speaker routing on active call sessions without requiring app restart.",
