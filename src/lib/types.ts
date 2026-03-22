@@ -238,6 +238,102 @@ export interface UserEntitlements {
   purchaseEntitlements?: Record<string, Json>;
 }
 
+export type GrowthTrustTier = 'limited' | 'member' | 'trusted' | 'operator' | string;
+
+export interface UserGrowthCapabilityRow {
+  user_id: string;
+  trust_tier: GrowthTrustTier;
+  can_create_server: boolean;
+  can_start_high_volume_calls: boolean;
+  can_use_marketplace: boolean;
+  unlock_source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GrowthCapabilityContract {
+  trust_tier: GrowthTrustTier;
+  capabilities: {
+    can_create_server: boolean;
+    can_start_high_volume_calls: boolean;
+    can_use_marketplace: boolean;
+  };
+  unlock_source: string;
+  updated_at?: string | null;
+}
+
+export interface GrowthInviteCode {
+  id: string;
+  inviter_user_id: string;
+  code: string;
+  source_channel: string;
+  grant_trust_tier: GrowthTrustTier;
+  grant_can_create_server: boolean;
+  grant_can_start_high_volume_calls: boolean;
+  grant_can_use_marketplace: boolean;
+  max_uses: number;
+  use_count: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GrowthReferral {
+  id: string;
+  code_id: string;
+  inviter_user_id: string;
+  invitee_user_id: string;
+  source_channel: string;
+  activation_criteria: Json;
+  activated_at: string | null;
+  activation_event: string | null;
+  reward_eligible: boolean;
+  reward_granted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GrowthEventRow {
+  id: string;
+  user_id: string | null;
+  event_name: string;
+  event_version: number;
+  event_source: string;
+  source_channel: string;
+  session_id: string | null;
+  payload: Json;
+  created_at: string;
+}
+
+export interface OperatorDailyMetric {
+  metric_date: string;
+  source_channel: string;
+  checkout_started_count: number;
+  checkout_paid_count: number;
+  checkout_failed_count: number;
+  boost_mrr_cents: number;
+  marketplace_gmv_cents: number;
+  marketplace_fee_cents: number;
+  call_attempts_count: number;
+  call_connected_count: number;
+  call_drop_count: number;
+  updated_at: string;
+}
+
+export interface OperatorRevenue30d {
+  source_channel: string;
+  checkout_started_count: number;
+  checkout_paid_count: number;
+  checkout_failed_count: number;
+  boost_mrr_cents: number;
+  marketplace_gmv_cents: number;
+  marketplace_fee_cents: number;
+  call_attempts_count: number;
+  call_connected_count: number;
+  call_drop_count: number;
+  last_updated_at: string;
+}
+
 export interface Community {
   id: string;
   name: string;
@@ -542,6 +638,11 @@ export type Database = {
   public: {
     Tables: {
       profiles: { Row: Profile; Insert: Omit<Profile, 'created_at' | 'updated_at'>; Update: Partial<Profile> };
+      user_growth_capabilities: { Row: UserGrowthCapabilityRow; Insert: Omit<UserGrowthCapabilityRow, 'created_at' | 'updated_at'>; Update: Partial<UserGrowthCapabilityRow> };
+      growth_invite_codes: { Row: GrowthInviteCode; Insert: Omit<GrowthInviteCode, 'id' | 'created_at' | 'updated_at' | 'use_count'>; Update: Partial<GrowthInviteCode> };
+      growth_referrals: { Row: GrowthReferral; Insert: Omit<GrowthReferral, 'id' | 'created_at' | 'updated_at'>; Update: Partial<GrowthReferral> };
+      growth_events: { Row: GrowthEventRow; Insert: Omit<GrowthEventRow, 'id' | 'created_at'>; Update: Partial<GrowthEventRow> };
+      operator_daily_metrics: { Row: OperatorDailyMetric; Insert: Omit<OperatorDailyMetric, 'updated_at'>; Update: Partial<OperatorDailyMetric> };
       billing_subscriptions: { Row: BillingSubscription; Insert: Omit<BillingSubscription, 'id' | 'created_at' | 'updated_at'>; Update: Partial<BillingSubscription> };
       store_products: { Row: StoreProduct; Insert: Omit<StoreProduct, 'created_at' | 'updated_at'>; Update: Partial<StoreProduct> };
       user_purchases: { Row: UserPurchase; Insert: Omit<UserPurchase, 'id' | 'created_at' | 'updated_at'>; Update: Partial<UserPurchase> };

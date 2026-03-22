@@ -4,6 +4,7 @@ import { Maximize2, Mic, MicOff, Minimize2, MonitorUp, PhoneOff, Video, VideoOff
 import { createPortal } from 'react-dom';
 import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../contexts/AuthContext';
+import { trackGrowthEvent } from '../lib/growthEvents';
 import { supabase } from '../lib/supabase';
 import { directCallSession, ScreenShareQuality, useDirectCallSession } from '../lib/directCallSession';
 import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
@@ -160,6 +161,8 @@ export function DirectCallPage() {
   const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previousRemoteVolumeRef = useRef<Record<string, number>>({});
   const sessionWasLiveRef = useRef(false);
+  const callConnectedTrackedRef = useRef(false);
+  const callDroppedTrackedRef = useRef(false);
 
   const isThisConversationSession = session.conversationId === (conversationId || null);
   const isConnecting = loadingAccess || (isThisConversationSession && session.isConnecting);
@@ -184,6 +187,8 @@ export function DirectCallPage() {
 
   useEffect(() => {
     sessionWasLiveRef.current = false;
+    callConnectedTrackedRef.current = false;
+    callDroppedTrackedRef.current = false;
     setCallStartedAtMs(null);
     setFullscreenFallbackUid(null);
   }, [conversationId]);
@@ -295,6 +300,13 @@ export function DirectCallPage() {
 
   useEffect(() => {
     if (!conversationId) return;
+    if (callState === 'accepted' && session.phase === 'active' && !callConnectedTrackedRef.current) {
+      callConnectedTrackedRef.current = true;
+      void trackGrowthEvent('call_connected', {
+        conversation_id: conversationId,
+        remote_participant_count: remoteParticipantUids.length,
+      }, { userId: profile?.id || null });
+    }
     if (session.phase === 'connecting' || session.phase === 'active') {
       sessionWasLiveRef.current = true;
       return;
@@ -305,9 +317,16 @@ export function DirectCallPage() {
       return;
     }
     if (sessionWasLiveRef.current && session.phase === 'idle') {
+      if (!callDroppedTrackedRef.current) {
+        callDroppedTrackedRef.current = true;
+        void trackGrowthEvent('call_dropped', {
+          conversation_id: conversationId,
+          previous_state: callState || 'unknown',
+        }, { userId: profile?.id || null });
+      }
       navigate(`/app/dm/${conversationId}`);
     }
-  }, [callState, conversationId, navigate, session.phase]);
+  }, [callState, conversationId, navigate, profile?.id, remoteParticipantUids.length, session.phase]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -881,6 +900,22 @@ export function DirectCallPage() {
                   {mediaErrorDetail && (
                     <div className="mt-1 text-xs text-red-200/80 break-all">{mediaErrorDetail}</div>
                   )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="nyptid-btn-secondary px-2.5 py-1 text-xs"
+                    >
+                      Retry Join
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/app/settings?section=voice-video')}
+                      className="nyptid-btn-secondary px-2.5 py-1 text-xs"
+                    >
+                      Re-select Devices
+                    </button>
+                  </div>
                 </div>
               )}
               {remoteTiles.length === 0 ? (

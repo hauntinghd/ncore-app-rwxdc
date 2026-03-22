@@ -24,6 +24,117 @@ function extractPlanCodeFromSubscription(subscription: Stripe.Subscription): str
   return String(subscription.metadata?.plan_code || 'boost_monthly');
 }
 
+function normalizeSourceChannel(value: unknown): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]/g, '')
+    .slice(0, 64);
+  return normalized || 'organic';
+}
+
+function asPositiveInteger(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round(parsed);
+}
+
+async function safeUpsertOperatorDailyMetrics(
+  serviceClient: ReturnType<typeof createClient>,
+  params: {
+    sourceChannel: string;
+    checkoutPaidDelta?: number;
+    checkoutFailedDelta?: number;
+    boostMrrCentsDelta?: number;
+    marketplaceGmvCentsDelta?: number;
+    marketplaceFeeCentsDelta?: number;
+  },
+) {
+  const sourceChannel = normalizeSourceChannel(params.sourceChannel);
+  const payload = {
+    p_source_channel: sourceChannel,
+    p_delta_checkout_paid: asPositiveInteger(params.checkoutPaidDelta || 0),
+    p_delta_checkout_failed: asPositiveInteger(params.checkoutFailedDelta || 0),
+    p_delta_boost_mrr_cents: Math.max(0, Math.round(Number(params.boostMrrCentsDelta || 0))),
+    p_delta_marketplace_gmv_cents: Math.max(0, Math.round(Number(params.marketplaceGmvCentsDelta || 0))),
+    p_delta_marketplace_fee_cents: Math.max(0, Math.round(Number(params.marketplaceFeeCentsDelta || 0))),
+  };
+
+  try {
+    const { error } = await serviceClient.rpc('upsert_operator_daily_metrics', payload);
+    if (!error) return;
+  } catch {
+    // Continue to fallback.
+  }
+
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: existing } = await serviceClient
+      .from('operator_daily_metrics')
+      .select('checkout_started_count, checkout_paid_count, checkout_failed_count, boost_mrr_cents, marketplace_gmv_cents, marketplace_fee_cents, call_attempts_count, call_connected_count, call_drop_count')
+      .eq('metric_date', today)
+      .eq('source_channel', sourceChannel)
+      .maybeSingle();
+
+    await serviceClient.from('operator_daily_metrics').upsert({
+      metric_date: today,
+      source_channel: sourceChannel,
+      checkout_started_count: Number(existing?.checkout_started_count || 0),
+      checkout_paid_count: Number(existing?.checkout_paid_count || 0) + payload.p_delta_checkout_paid,
+      checkout_failed_count: Number(existing?.checkout_failed_count || 0) + payload.p_delta_checkout_failed,
+      boost_mrr_cents: Number(existing?.boost_mrr_cents || 0) + payload.p_delta_boost_mrr_cents,
+      marketplace_gmv_cents: Number(existing?.marketplace_gmv_cents || 0) + payload.p_delta_marketplace_gmv_cents,
+      marketplace_fee_cents: Number(existing?.marketplace_fee_cents || 0) + payload.p_delta_marketplace_fee_cents,
+      call_attempts_count: Number(existing?.call_attempts_count || 0),
+      call_connected_count: Number(existing?.call_connected_count || 0),
+      call_drop_count: Number(existing?.call_drop_count || 0),
+    } as never, {
+      onConflict: 'metric_date,source_channel',
+    });
+  } catch {
+    // Best-effort metrics only; webhook must not fail on analytics updates.
+  }
+}
+
+async function safeTrackGrowthEvent(
+  serviceClient: ReturnType<typeof createClient>,
+  params: {
+    userId?: string | null;
+    eventName: string;
+    sourceChannel: string;
+    payload: Record<string, unknown>;
+  },
+) {
+  const sourceChannel = normalizeSourceChannel(params.sourceChannel);
+  const eventName = String(params.eventName || '').trim().toLowerCase() || 'unknown';
+  const payload = params.payload || {};
+
+  try {
+    const { error } = await serviceClient.rpc('track_growth_event', {
+      p_event_name: eventName,
+      p_payload: payload,
+      p_source_channel: sourceChannel,
+      p_event_source: 'billing_webhook',
+      p_user_id: params.userId || null,
+    });
+    if (!error) return;
+  } catch {
+    // Continue to fallback insert.
+  }
+
+  try {
+    await serviceClient.from('growth_events').insert({
+      user_id: params.userId || null,
+      event_name: eventName,
+      event_source: 'billing_webhook',
+      source_channel: sourceChannel,
+      payload,
+    } as never);
+  } catch {
+    // Best-effort event tracking only.
+  }
+}
+
 async function resolveUserIdFromStripeCustomer(
   serviceClient: ReturnType<typeof createClient>,
   stripeCustomerId: string | null | undefined,
@@ -110,6 +221,7 @@ Deno.serve(async (req) => {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
       const marketplaceMode = String(session.metadata?.marketplace_mode || '').trim();
+      const sourceChannel = normalizeSourceChannel(session.metadata?.source_channel);
       const serviceListingId = String(session.metadata?.service_listing_id || '').trim();
       const gameListingId = String(session.metadata?.game_listing_id || '').trim();
       const targetUserIdFromMetadata =
@@ -132,6 +244,10 @@ Deno.serve(async (req) => {
         && resolvedUserId
         && String(giftFromUserId) !== String(resolvedUserId),
       );
+      const sessionAmountCents = asPositiveInteger(session.amount_total || 0);
+      let metricsBoostMrrCents = 0;
+      let metricsMarketplaceGmvCents = 0;
+      let metricsMarketplaceFeeCents = 0;
 
       if (resolvedUserId) {
         affectedUsers.add(resolvedUserId);
@@ -154,6 +270,7 @@ Deno.serve(async (req) => {
             status: 'pending_review',
           } as never)
           .eq('id', serviceListingId);
+        metricsMarketplaceFeeCents += sessionAmountCents;
       }
 
       if (marketplaceMode === 'service_order') {
@@ -179,6 +296,8 @@ Deno.serve(async (req) => {
           const feeBps = Number(orderRow.platform_fee_bps || 400);
           const feeCents = Math.floor((amountCents * feeBps) / 10000);
           const sellerNet = Math.max(amountCents - feeCents, 0);
+          metricsMarketplaceGmvCents += Math.max(amountCents, 0);
+          metricsMarketplaceFeeCents += Math.max(feeCents, 0);
 
           affectedUsers.add(sellerId);
           if (buyerId) affectedUsers.add(buyerId);
@@ -219,6 +338,7 @@ Deno.serve(async (req) => {
             status: 'pending_review',
           } as never)
           .eq('id', gameListingId);
+        metricsMarketplaceFeeCents += sessionAmountCents;
       }
 
       if (marketplaceMode === 'game_purchase') {
@@ -246,6 +366,8 @@ Deno.serve(async (req) => {
           const feeBps = Number(gameOrderRow.platform_fee_bps || 400);
           const feeCents = Math.floor((amountCents * feeBps) / 10000);
           const sellerNet = Math.max(amountCents - feeCents, 0);
+          metricsMarketplaceGmvCents += Math.max(amountCents, 0);
+          metricsMarketplaceFeeCents += Math.max(feeCents, 0);
 
           affectedUsers.add(sellerId);
           if (buyerId) affectedUsers.add(buyerId);
@@ -293,20 +415,80 @@ Deno.serve(async (req) => {
       if (resolvedUserId && session.mode === 'subscription' && typeof session.subscription === 'string') {
         const subscription = await stripe.subscriptions.retrieve(session.subscription);
         await upsertSubscriptionFromStripe(serviceClient, resolvedUserId, subscription);
+        metricsBoostMrrCents += sessionAmountCents;
       }
+
+      const trackingUserId = resolvedUserId || billingCustomerOwnerUserId || null;
+      await safeTrackGrowthEvent(serviceClient, {
+        userId: trackingUserId,
+        eventName: 'checkout_paid',
+        sourceChannel,
+        payload: {
+          mode: session.mode || null,
+          marketplace_mode: marketplaceMode || null,
+          amount_cents: sessionAmountCents,
+          currency: String(session.currency || 'usd').toLowerCase(),
+          checkout_session_id: session.id,
+        },
+      });
+      await safeUpsertOperatorDailyMetrics(serviceClient, {
+        sourceChannel,
+        checkoutPaidDelta: 1,
+        boostMrrCentsDelta: metricsBoostMrrCents,
+        marketplaceGmvCentsDelta: metricsMarketplaceGmvCents,
+        marketplaceFeeCentsDelta: metricsMarketplaceFeeCents,
+      });
     }
 
     if (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') {
       const invoice = event.data.object as Stripe.Invoice;
       const stripeCustomerId = typeof invoice.customer === 'string' ? invoice.customer : null;
       const userId = await resolveUserIdFromStripeCustomer(serviceClient, stripeCustomerId);
+      let sourceChannel = normalizeSourceChannel(invoice.metadata?.source_channel);
       if (userId) {
         affectedUsers.add(userId);
       }
 
       if (userId && typeof invoice.subscription === 'string') {
         const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+        sourceChannel = normalizeSourceChannel(subscription.metadata?.source_channel || sourceChannel);
         await upsertSubscriptionFromStripe(serviceClient, userId, subscription);
+
+        if (event.type === 'invoice.payment_failed') {
+          await safeTrackGrowthEvent(serviceClient, {
+            userId,
+            eventName: 'checkout_failed',
+            sourceChannel,
+            payload: {
+              mode: 'subscription_invoice',
+              reason: 'invoice_payment_failed',
+              invoice_id: invoice.id,
+              subscription_id: subscription.id,
+              amount_due_cents: asPositiveInteger(invoice.amount_due || 0),
+            },
+          });
+          await safeUpsertOperatorDailyMetrics(serviceClient, {
+            sourceChannel,
+            checkoutFailedDelta: 1,
+          });
+        } else if (event.type === 'invoice.paid' && String(invoice.billing_reason || '') === 'subscription_cycle') {
+          await safeTrackGrowthEvent(serviceClient, {
+            userId,
+            eventName: 'checkout_paid',
+            sourceChannel,
+            payload: {
+              mode: 'subscription_renewal',
+              invoice_id: invoice.id,
+              subscription_id: subscription.id,
+              amount_paid_cents: asPositiveInteger(invoice.amount_paid || 0),
+            },
+          });
+          await safeUpsertOperatorDailyMetrics(serviceClient, {
+            sourceChannel,
+            checkoutPaidDelta: 1,
+            boostMrrCentsDelta: asPositiveInteger(invoice.amount_paid || 0),
+          });
+        }
       }
     }
 

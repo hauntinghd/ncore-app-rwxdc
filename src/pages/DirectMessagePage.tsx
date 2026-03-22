@@ -21,6 +21,8 @@ import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
+import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
+import { trackGrowthEvent } from '../lib/growthEvents';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { supabase } from '../lib/supabase';
 import {
@@ -69,6 +71,7 @@ function isUuid(value: unknown): boolean {
 export function DirectMessagePage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { profile } = useAuth();
+  const { capabilities } = useGrowthCapabilities();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
   const maxUploadBytes = entitlements.uploadBytesCap;
@@ -1777,6 +1780,24 @@ export function DirectMessagePage() {
         return;
       }
 
+      const recipientCount = resolvedMembers.length;
+      void trackGrowthEvent('call_start_attempted', {
+        conversation_id: targetConversationId,
+        recipient_count: recipientCount,
+        video,
+      }, { userId: profile.id });
+
+      if (recipientCount > 2 && !capabilities.canStartHighVolumeCalls) {
+        const reason = getCapabilityLockReason('can_start_high_volume_calls');
+        setErrorMessage(reason);
+        void trackGrowthEvent('capability_gate_blocked', {
+          gate: 'can_start_high_volume_calls',
+          action: 'start_call',
+          recipient_count: recipientCount,
+        }, { userId: profile.id });
+        return;
+      }
+
       let shouldUseFallbackJoin = callsSignalingUnavailableRef.current;
       let existingCall: any = null;
       if (!callsSignalingUnavailableRef.current) {
@@ -1938,6 +1959,10 @@ export function DirectMessagePage() {
       navigate(buildCallRoute(targetConversationId, video, shouldUseFallbackJoin, true));
     } catch (error) {
       setErrorMessage('Unable to start call right now.');
+      void trackGrowthEvent('call_start_failed', {
+        conversation_id: targetConversationId,
+        error: String((error as Error)?.message || error),
+      }, { userId: profile.id });
       console.error('startCall error:', error);
     }
   }

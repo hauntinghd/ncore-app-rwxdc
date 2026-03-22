@@ -49,6 +49,15 @@ function sanitizeSku(value: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+function normalizeSourceChannel(value: unknown): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-]/g, '')
+    .slice(0, 64);
+  return normalized || 'organic';
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -107,6 +116,12 @@ Deno.serve(async (req) => {
     const mode = String(body?.mode || '').trim();
     const requestedSku = String(body?.sku || body?.marketItem?.sku || '').trim();
     const sku = sanitizeSku(requestedSku);
+    const sourceChannel = normalizeSourceChannel(
+      body?.sourceChannel
+      || body?.source_channel
+      || body?.utm_source
+      || body?.campaign,
+    );
     const requestedGiftToUserId = String(body?.giftToUserId || '').trim();
     const requestedGiftToUsername = sanitizeSku(String(body?.giftToUsername || body?.giftTo || '').replace(/^@+/, '').trim());
     const redirectBase = inferRedirectBase(req);
@@ -196,9 +211,17 @@ Deno.serve(async (req) => {
         success_url: successUrl,
         cancel_url: cancelUrl,
         allow_promotion_codes: true,
+        subscription_data: {
+          metadata: {
+            user_id: user.id,
+            plan_code: 'boost_monthly',
+            source_channel: sourceChannel,
+          },
+        },
         metadata: {
           user_id: user.id,
           plan_code: 'boost_monthly',
+          source_channel: sourceChannel,
         },
       });
 
@@ -259,6 +282,7 @@ Deno.serve(async (req) => {
           marketplace_mode: 'service_listing_fee',
           user_id: String(user.id),
           service_listing_id: String((listing as any).id),
+          source_channel: sourceChannel,
         },
       });
 
@@ -328,6 +352,7 @@ Deno.serve(async (req) => {
           seller_user_id: String((listing as any).seller_id),
           service_listing_id: String((listing as any).id),
           platform_fee_bps: String(servicePlatformFeeBps),
+          source_channel: sourceChannel,
         },
       });
 
@@ -400,6 +425,7 @@ Deno.serve(async (req) => {
           marketplace_mode: 'game_listing_fee',
           user_id: String(user.id),
           game_listing_id: String((gameListing as any).id),
+          source_channel: sourceChannel,
         },
       });
 
@@ -469,6 +495,7 @@ Deno.serve(async (req) => {
           seller_user_id: String((gameListing as any).seller_id),
           game_listing_id: String((gameListing as any).id),
           platform_fee_bps: String(platformFeeBps),
+          source_channel: sourceChannel,
         },
       });
 
@@ -652,6 +679,7 @@ Deno.serve(async (req) => {
         target_user_id: targetUserId,
         purchaser_user_id: String(user.id),
         sku,
+        source_channel: sourceChannel,
         ...(giftFromUserId ? {
           gift_from_user_id: giftFromUserId,
           gift_to_username: giftRecipientUsername,

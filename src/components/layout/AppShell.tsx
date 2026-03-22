@@ -6,6 +6,8 @@ import { TopBar } from './TopBar';
 import { PersistentVoiceBar } from './PersistentVoiceBar';
 import { Modal } from '../ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
+import { trackGrowthEvent } from '../../lib/growthEvents';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
@@ -59,6 +61,7 @@ export function AppShell({
   activeCommunityId, activeChannelId, showChannelSidebar = true,
 }: AppShellProps) {
   const { profile } = useAuth();
+  const { capabilities } = useGrowthCapabilities();
   const navigate = useNavigate();
   const location = useLocation();
   const [communities, setCommunities] = useState<Community[]>([]);
@@ -774,9 +777,22 @@ export function AppShell({
 
   async function handleCreateCommunity() {
     if (!profile || !newCommunity.name.trim()) return;
+    if (!capabilities.canCreateServer) {
+      const reason = getCapabilityLockReason('can_create_server');
+      setCreateError(reason);
+      void trackGrowthEvent('capability_gate_blocked', {
+        gate: 'can_create_server',
+        action: 'create_community',
+      }, { userId: profile.id });
+      return;
+    }
 
     setCreating(true);
     setCreateError('');
+    void trackGrowthEvent('server_create_started', {
+      template_id: normalizeTemplateId(newCommunity.templateId),
+      visibility: newCommunity.visibility,
+    }, { userId: profile.id });
     const templateId = normalizeTemplateId(newCommunity.templateId);
     const slug = generateSlug(newCommunity.name);
     const { data: community, error } = await supabase
@@ -794,6 +810,9 @@ export function AppShell({
 
     if (error || !community) {
       setCreateError(error?.message || 'Failed to create community. Please try again.');
+      void trackGrowthEvent('server_create_failed', {
+        reason: error?.message || 'insert_failed',
+      }, { userId: profile.id });
       setCreating(false);
       return;
     }
@@ -823,6 +842,10 @@ export function AppShell({
     setShowCreateCommunity(false);
     setNewCommunity(DEFAULT_FORM);
     setCommunities((prev) => [...prev, { ...community, is_member: true, member_role: 'owner' }]);
+    void trackGrowthEvent('server_create_succeeded', {
+      community_id: community.id,
+      visibility: community.visibility || newCommunity.visibility,
+    }, { userId: profile.id });
     navigate(`/app/community/${community.id}`);
   }
 

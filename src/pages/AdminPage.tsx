@@ -15,6 +15,7 @@ import type {
   Profile,
   Community,
   PlatformBan,
+  OperatorRevenue30d,
   MarketplaceSellerProfile,
   MarketplaceServiceListing,
   MarketplaceGameListing,
@@ -53,6 +54,12 @@ function formatUsdFromCents(value: number | null | undefined): string {
   return `$${(Math.max(0, Number(value || 0)) / 100).toFixed(2)}`;
 }
 
+function formatPercent(numerator: number, denominator: number): string {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return '0.0%';
+  const pct = (numerator / denominator) * 100;
+  return `${Math.max(0, pct).toFixed(1)}%`;
+}
+
 function isMissingDisputesTableError(error: unknown): boolean {
   const code = String((error as any)?.code || '').toUpperCase();
   const message = String((error as any)?.message || '').toLowerCase();
@@ -89,6 +96,8 @@ export function AdminPage() {
   const [serviceDisputes, setServiceDisputes] = useState<MarketplaceServiceDispute[]>([]);
   const [serviceOrdersById, setServiceOrdersById] = useState<Record<string, MarketplaceServiceOrder>>({});
   const [marketplaceProfileMap, setMarketplaceProfileMap] = useState<Record<string, Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>>>({});
+  const [operatorRevenueRows, setOperatorRevenueRows] = useState<OperatorRevenue30d[]>([]);
+  const [operatorCheckoutFailureReasons, setOperatorCheckoutFailureReasons] = useState<Array<{ reason: string; count: number }>>([]);
 
   useEffect(() => {
     if (currentProfile?.platform_role !== 'owner' && currentProfile?.platform_role !== 'admin') {
@@ -131,11 +140,19 @@ export function AdminPage() {
 
   async function loadData() {
     setLoading(true);
-    const [usersRes, commRes, bansRes, msgsRes] = await Promise.all([
+    const sinceIso = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)).toISOString();
+    const [usersRes, commRes, bansRes, msgsRes, operatorRevenueRes, checkoutFailuresRes] = await Promise.all([
       supabase.from('profiles').select('*').order('created_at', { ascending: false }),
       supabase.from('communities').select('*').order('member_count', { ascending: false }),
       supabase.from('platform_bans').select('*, user:profiles!platform_bans_user_id_fkey(*), banner:profiles!platform_bans_banned_by_fkey(*)'),
       supabase.from('messages').select('id', { count: 'exact' }),
+      (supabase as any).from('operator_revenue_30d').select('*').order('marketplace_gmv_cents', { ascending: false }),
+      (supabase as any)
+        .from('growth_events')
+        .select('event_name, payload')
+        .in('event_name', ['checkout_failed', 'marketplace_checkout_failed', 'boost_checkout_failed'])
+        .gte('created_at', sinceIso)
+        .limit(4000),
     ]);
     const visibleUsers = ((usersRes.data || []) as Profile[]).filter(
       (user) => (user.username || '').toLowerCase() !== 'omatic657',
@@ -143,6 +160,28 @@ export function AdminPage() {
     setUsers(visibleUsers);
     if (commRes.data) setCommunities(commRes.data as Community[]);
     if (bansRes.data) setBans(bansRes.data as PlatformBan[]);
+    if (!operatorRevenueRes.error) {
+      setOperatorRevenueRows(((operatorRevenueRes.data || []) as OperatorRevenue30d[]));
+    } else {
+      setOperatorRevenueRows([]);
+    }
+
+    if (!checkoutFailuresRes.error) {
+      const reasonCounts = new Map<string, number>();
+      for (const row of (checkoutFailuresRes.data || []) as Array<{ payload?: Record<string, unknown> }>) {
+        const reason = String(row?.payload?.reason || 'unknown').trim() || 'unknown';
+        reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+      }
+      setOperatorCheckoutFailureReasons(
+        Array.from(reasonCounts.entries())
+          .map(([reason, count]) => ({ reason, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 6),
+      );
+    } else {
+      setOperatorCheckoutFailureReasons([]);
+    }
+
     setStats({
       users: visibleUsers.length,
       communities: commRes.data?.length || 0,
@@ -428,6 +467,47 @@ export function AdminPage() {
     return profile.display_name || profile.username || `@${String(userId).slice(0, 8)}`;
   }
 
+  const operatorTotals = operatorRevenueRows.reduce((acc, row) => {
+    acc.checkoutStarted += Number(row.checkout_started_count || 0);
+    acc.checkoutPaid += Number(row.checkout_paid_count || 0);
+    acc.checkoutFailed += Number(row.checkout_failed_count || 0);
+    acc.boostMrrCents += Number(row.boost_mrr_cents || 0);
+    acc.marketplaceGmvCents += Number(row.marketplace_gmv_cents || 0);
+    acc.marketplaceFeeCents += Number(row.marketplace_fee_cents || 0);
+    acc.callAttempts += Number(row.call_attempts_count || 0);
+    acc.callConnected += Number(row.call_connected_count || 0);
+    acc.callDrops += Number(row.call_drop_count || 0);
+    return acc;
+  }, {
+    checkoutStarted: 0,
+    checkoutPaid: 0,
+    checkoutFailed: 0,
+    boostMrrCents: 0,
+    marketplaceGmvCents: 0,
+    marketplaceFeeCents: 0,
+    callAttempts: 0,
+    callConnected: 0,
+    callDrops: 0,
+  });
+
+  const checkoutConversion = formatPercent(operatorTotals.checkoutPaid, Math.max(1, operatorTotals.checkoutStarted));
+  const callConnectSuccess = formatPercent(operatorTotals.callConnected, Math.max(1, operatorTotals.callAttempts));
+  const callDropRate = formatPercent(operatorTotals.callDrops, Math.max(1, operatorTotals.callConnected));
+
+  const checkoutConversionNumeric = operatorTotals.checkoutStarted > 0
+    ? (operatorTotals.checkoutPaid / operatorTotals.checkoutStarted) * 100
+    : 100;
+  const callConnectNumeric = operatorTotals.callAttempts > 0
+    ? (operatorTotals.callConnected / operatorTotals.callAttempts) * 100
+    : 100;
+  const callDropNumeric = operatorTotals.callConnected > 0
+    ? (operatorTotals.callDrops / operatorTotals.callConnected) * 100
+    : 0;
+
+  const checkoutSloHealthy = checkoutConversionNumeric >= 92;
+  const callConnectSloHealthy = callConnectNumeric >= 97;
+  const callDropSloHealthy = callDropNumeric <= 3;
+
   if (!currentProfile || (currentProfile.platform_role !== 'owner' && currentProfile.platform_role !== 'admin')) {
     return null;
   }
@@ -511,6 +591,98 @@ export function AdminPage() {
                       <div className="text-sm text-surface-500 mt-1">{stat.label}</div>
                     </div>
                   ))}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                  <div className="nyptid-card p-5 xl:col-span-2">
+                    <div className="text-xs font-bold uppercase tracking-wider text-surface-500 mb-3">Revenue + Funnel (30d)</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Boost MRR</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{formatUsdFromCents(operatorTotals.boostMrrCents)}</div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Marketplace GMV</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{formatUsdFromCents(operatorTotals.marketplaceGmvCents)}</div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Fees Captured</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{formatUsdFromCents(operatorTotals.marketplaceFeeCents)}</div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Checkout Conversion</div>
+                        <div className={`mt-1 text-lg font-black ${checkoutSloHealthy ? 'text-green-300' : 'text-red-300'}`}>{checkoutConversion}</div>
+                        <div className="text-[11px] text-surface-500 mt-1">
+                          {operatorTotals.checkoutPaid}/{operatorTotals.checkoutStarted} paid
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Call Connect Success</div>
+                        <div className={`mt-1 text-lg font-black ${callConnectSloHealthy ? 'text-green-300' : 'text-red-300'}`}>{callConnectSuccess}</div>
+                        <div className="text-[11px] text-surface-500 mt-1">
+                          {operatorTotals.callConnected}/{operatorTotals.callAttempts} connected
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-surface-500">Call Drop Rate</div>
+                        <div className={`mt-1 text-lg font-black ${callDropSloHealthy ? 'text-green-300' : 'text-red-300'}`}>{callDropRate}</div>
+                        <div className="text-[11px] text-surface-500 mt-1">
+                          {operatorTotals.callDrops}/{operatorTotals.callConnected} dropped
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="nyptid-card p-5">
+                    <div className="text-xs font-bold uppercase tracking-wider text-surface-500 mb-3">Failed Checkout Reasons</div>
+                    <div className="space-y-2">
+                      {operatorCheckoutFailureReasons.length === 0 && (
+                        <div className="text-xs text-surface-500">No failed-checkout events recorded in the last 30 days.</div>
+                      )}
+                      {operatorCheckoutFailureReasons.map((entry) => (
+                        <div key={entry.reason} className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
+                          <div className="text-xs text-surface-200 truncate">{entry.reason}</div>
+                          <div className="text-[11px] text-surface-500 mt-0.5">{entry.count} events</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-5">
+                  <div className="text-xs font-bold uppercase tracking-wider text-surface-500 mb-3">Attribution by Source Channel (30d)</div>
+                  {operatorRevenueRows.length === 0 ? (
+                    <div className="text-xs text-surface-500">No attribution rows yet. Launch events will populate this table.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="text-surface-500 border-b border-surface-700">
+                            <th className="text-left py-2 pr-3 font-semibold">Source</th>
+                            <th className="text-left py-2 pr-3 font-semibold">Boost MRR</th>
+                            <th className="text-left py-2 pr-3 font-semibold">GMV</th>
+                            <th className="text-left py-2 pr-3 font-semibold">Fees</th>
+                            <th className="text-left py-2 pr-3 font-semibold">Checkout CVR</th>
+                            <th className="text-left py-2 pr-3 font-semibold">Call Connect</th>
+                            <th className="text-left py-2 pr-0 font-semibold">Drop Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {operatorRevenueRows.map((row) => (
+                            <tr key={row.source_channel} className="border-b border-surface-800/70 text-surface-300">
+                              <td className="py-2 pr-3">{row.source_channel}</td>
+                              <td className="py-2 pr-3">{formatUsdFromCents(row.boost_mrr_cents)}</td>
+                              <td className="py-2 pr-3">{formatUsdFromCents(row.marketplace_gmv_cents)}</td>
+                              <td className="py-2 pr-3">{formatUsdFromCents(row.marketplace_fee_cents)}</td>
+                              <td className="py-2 pr-3">{formatPercent(Number(row.checkout_paid_count || 0), Math.max(1, Number(row.checkout_started_count || 0)))}</td>
+                              <td className="py-2 pr-3">{formatPercent(Number(row.call_connected_count || 0), Math.max(1, Number(row.call_attempts_count || 0)))}</td>
+                              <td className="py-2 pr-0">{formatPercent(Number(row.call_drop_count || 0), Math.max(1, Number(row.call_connected_count || 0)))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-6">

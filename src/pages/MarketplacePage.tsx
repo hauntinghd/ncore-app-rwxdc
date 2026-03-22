@@ -23,6 +23,8 @@ import {
 import { AppShell } from '../components/layout/AppShell';
 import { Modal } from '../components/ui/Modal';
 import { useEntitlements } from '../lib/entitlements';
+import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
+import { resolveGrowthSourceChannel, trackGrowthEvent } from '../lib/growthEvents';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { supabase } from '../lib/supabase';
 import { resolveBillingReturnUrl } from '../lib/billingUrl';
@@ -406,6 +408,8 @@ export function MarketplacePage() {
   const routeTrack = useMemo(() => getTrackFromPath(location.pathname), [location.pathname]);
   const isOpsExperience = routeTrack === 'quickdraw' || routeTrack === 'games';
   const { profile } = useAuth();
+  const { capabilities } = useGrowthCapabilities();
+  const growthSourceChannel = resolveGrowthSourceChannel();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
   const [activeTrack, setActiveTrack] = useState<MarketplaceTrack>(routeTrack);
   const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
@@ -459,6 +463,8 @@ export function MarketplacePage() {
   const [issueContractTagsText, setIssueContractTagsText] = useState('');
   const [issueContractAcknowledged, setIssueContractAcknowledged] = useState(false);
   const [quickdrawContractDrafts, setQuickdrawContractDrafts] = useState<QuickdrawContractDraft[]>([]);
+  const marketplaceLocked = !capabilities.canUseMarketplace;
+  const marketplaceLockReason = getCapabilityLockReason('can_use_marketplace');
 
   const ownedSkus = useMemo(() => new Set(entitlements.ownedSkus || []), [entitlements.ownedSkus]);
   const selectedProduct = useMemo(
@@ -606,6 +612,17 @@ export function MarketplacePage() {
     return roleOrders.filter((order) => !['funded', 'in_progress', 'delivered'].includes(String(order.status || '').toLowerCase()));
   }, [myServiceOrdersAsBuyer, myServiceOrdersAsSeller, quickdrawRoleView]);
   const featuredGameListing = filteredGameListings[0] || null;
+  const hasApprovedClearance = String(sellerProfile?.clearance_status || '').toLowerCase() === 'approved';
+  const clearanceLevel = String(sellerProfile?.clearance_level || '').toLowerCase();
+  const hasTierIiClearance = hasApprovedClearance && (clearanceLevel === 'level_ii' || clearanceLevel === 'level_iii');
+  const hasProofSubmitted = Boolean(String(sellerProfile?.proof_url || sellerProofUrl || '').trim());
+  const hasMinimumVerifiedEarnings = Number(sellerProfile?.verified_earnings_cents || 0) >= 100000;
+  const tierIiChecklist = [
+    { key: 'profile', label: 'Submit niche + specialist bio', done: Boolean(String(sellerNiche || sellerProfile?.primary_niche || '').trim()) },
+    { key: 'proof', label: 'Attach proof URL (portfolio/payments)', done: hasProofSubmitted },
+    { key: 'earnings', label: 'Show at least $1,000 verified earnings', done: hasMinimumVerifiedEarnings },
+    { key: 'approval', label: 'Receive approved Tier II clearance', done: hasTierIiClearance },
+  ];
   const hiringContractDrafts = useMemo(
     () => quickdrawContractDrafts.filter((draft) => draft.status === 'draft'),
     [quickdrawContractDrafts],
@@ -718,6 +735,13 @@ export function MarketplacePage() {
       // best-effort local draft cache
     }
   }, [profile?.id, quickdrawContractDrafts]);
+
+  useEffect(() => {
+    void trackGrowthEvent('marketplace_viewed', {
+      track: activeTrack,
+      limited_mode_locked: marketplaceLocked,
+    }, { userId: profile?.id || null });
+  }, [activeTrack, marketplaceLocked, profile?.id]);
 
   async function reloadMarketplacePanels() {
     if (!profile?.id) return;
@@ -939,15 +963,32 @@ export function MarketplacePage() {
     payload: Record<string, unknown>,
     loadingKey: string,
   ) {
+    if (marketplaceLocked) {
+      setQuickdrawMessage(marketplaceLockReason);
+      void trackGrowthEvent('capability_gate_blocked', {
+        gate: 'can_use_marketplace',
+        action: mode,
+      }, { userId: profile?.id || null });
+      return;
+    }
+
     setQuickdrawMessage('');
     setCheckoutLoadingKey(loadingKey);
     const successUrl = resolveBillingReturnUrl('/app/marketplace');
     const cancelUrl = resolveBillingReturnUrl('/app/marketplace');
 
     try {
+      void trackGrowthEvent('marketplace_checkout_started', {
+        mode,
+        loading_key: loadingKey,
+      }, { userId: profile?.id || null });
       const authState = await ensureFreshAuthSession(120, { verifyOnServer: true });
       if (!authState.ok || !authState.accessToken) {
         setQuickdrawMessage(authState.message || 'Session expired. Please sign in again.');
+        void trackGrowthEvent('marketplace_checkout_failed', {
+          mode,
+          reason: authState.message || 'session_expired',
+        }, { userId: profile?.id || null });
         return;
       }
 
@@ -956,6 +997,7 @@ export function MarketplacePage() {
         ...payload,
         successUrl,
         cancelUrl,
+        sourceChannel: growthSourceChannel,
       });
 
       if (firstTry.error && isInvalidJwtMessage(firstTry.error)) {
@@ -969,23 +1011,39 @@ export function MarketplacePage() {
           ...payload,
           successUrl,
           cancelUrl,
+          sourceChannel: growthSourceChannel,
         });
       }
 
       if (firstTry.error) {
         setQuickdrawMessage(firstTry.error);
+        void trackGrowthEvent('marketplace_checkout_failed', {
+          mode,
+          reason: firstTry.error,
+        }, { userId: profile?.id || null });
         return;
       }
 
       const checkoutUrl = String(firstTry.data?.checkoutUrl || '').trim();
       if (!checkoutUrl) {
         setQuickdrawMessage('Stripe checkout URL was not returned.');
+        void trackGrowthEvent('marketplace_checkout_failed', {
+          mode,
+          reason: 'checkout_url_missing',
+        }, { userId: profile?.id || null });
         return;
       }
 
+      void trackGrowthEvent('marketplace_checkout_session_created', {
+        mode,
+      }, { userId: profile?.id || null });
       await openCheckoutUrl(checkoutUrl);
     } catch (error: unknown) {
       setQuickdrawMessage(String((error as Error)?.message || error));
+      void trackGrowthEvent('marketplace_checkout_failed', {
+        mode,
+        reason: String((error as Error)?.message || error),
+      }, { userId: profile?.id || null });
     } finally {
       setCheckoutLoadingKey(null);
     }
@@ -1014,7 +1072,19 @@ export function MarketplacePage() {
   }
 
   async function createServiceListing() {
+    if (marketplaceLocked) {
+      setQuickdrawMessage(marketplaceLockReason);
+      void trackGrowthEvent('capability_gate_blocked', {
+        gate: 'can_use_marketplace',
+        action: 'create_service_listing',
+      }, { userId: profile?.id || null });
+      return;
+    }
     setQuickdrawMessage('');
+    void trackGrowthEvent('marketplace_publish_started', {
+      track: 'quickdraw_services',
+      category_slug: newServiceCategorySlug.trim(),
+    }, { userId: profile?.id || null });
     if (!newServiceCategorySlug.trim() || !newServiceTitle.trim()) {
       setQuickdrawMessage('Category and title are required.');
       return;
@@ -1031,6 +1101,10 @@ export function MarketplacePage() {
     });
     if (error) {
       setQuickdrawMessage(error.message || 'Could not create service listing.');
+      void trackGrowthEvent('marketplace_publish_failed', {
+        track: 'quickdraw_services',
+        reason: error.message || 'create_service_listing_failed',
+      }, { userId: profile?.id || null });
       return;
     }
 
@@ -1047,7 +1121,19 @@ export function MarketplacePage() {
   }
 
   async function createGameListing() {
+    if (marketplaceLocked) {
+      setQuickdrawMessage(marketplaceLockReason);
+      void trackGrowthEvent('capability_gate_blocked', {
+        gate: 'can_use_marketplace',
+        action: 'create_game_listing',
+      }, { userId: profile?.id || null });
+      return;
+    }
     setQuickdrawMessage('');
+    void trackGrowthEvent('marketplace_publish_started', {
+      track: 'games',
+      slug: newGameSlug.trim(),
+    }, { userId: profile?.id || null });
     if (!newGameTitle.trim() || !newGameSlug.trim()) {
       setQuickdrawMessage('Game title and slug are required.');
       return;
@@ -1065,6 +1151,10 @@ export function MarketplacePage() {
     });
     if (error) {
       setQuickdrawMessage(error.message || 'Could not create game listing.');
+      void trackGrowthEvent('marketplace_publish_failed', {
+        track: 'games',
+        reason: error.message || 'create_game_listing_failed',
+      }, { userId: profile?.id || null });
       return;
     }
     const listingId = String(data || '').trim();
@@ -1142,6 +1232,15 @@ export function MarketplacePage() {
   }
 
   async function startCheckout(params: { sku: string; giftToUsername?: string; marketItem?: StoreProduct | null }) {
+    if (marketplaceLocked) {
+      setBillingActionMessage(marketplaceLockReason);
+      void trackGrowthEvent('capability_gate_blocked', {
+        gate: 'can_use_marketplace',
+        action: 'store_checkout',
+      }, { userId: profile?.id || null });
+      return;
+    }
+
     const { sku, giftToUsername, marketItem } = params;
     setBillingActionMessage('');
     setCheckoutLoadingKey(giftToUsername ? `gift:${sku}` : `sku:${sku}`);
@@ -1155,6 +1254,7 @@ export function MarketplacePage() {
     const requestBody = {
       mode: 'one_time_purchase',
       sku,
+      sourceChannel: growthSourceChannel,
       ...(giftToUsername ? { giftToUsername } : {}),
       ...(marketItem
         ? {
@@ -1175,15 +1275,30 @@ export function MarketplacePage() {
     };
 
     try {
+      void trackGrowthEvent('checkout_started', {
+        checkout_mode: 'one_time_purchase',
+        sku,
+        gifted: Boolean(giftToUsername),
+      }, { userId: profile?.id || null });
       const authState = await ensureFreshAuthSession(120, { verifyOnServer: true });
       if (!authState.ok || !authState.accessToken) {
         handleSessionExpired(authState.message);
+        void trackGrowthEvent('checkout_failed', {
+          checkout_mode: 'one_time_purchase',
+          sku,
+          reason: authState.message || 'session_missing',
+        }, { userId: profile?.id || null });
         return;
       }
 
       let firstTry = await invokeCheckoutWithToken(authState.accessToken, requestBody);
       if (firstTry.error && !isInvalidJwtMessage(firstTry.error)) {
         setBillingActionMessage(firstTry.error);
+        void trackGrowthEvent('checkout_failed', {
+          checkout_mode: 'one_time_purchase',
+          sku,
+          reason: firstTry.error,
+        }, { userId: profile?.id || null });
         return;
       }
 
@@ -1199,27 +1314,56 @@ export function MarketplacePage() {
       if (firstTry.error) {
         if (isInvalidJwtMessage(firstTry.error) || firstTry.status === 401) {
           handleSessionExpired(`Checkout auth failed: ${firstTry.error}`);
+          void trackGrowthEvent('checkout_failed', {
+            checkout_mode: 'one_time_purchase',
+            sku,
+            reason: firstTry.error,
+          }, { userId: profile?.id || null });
           return;
         }
         setBillingActionMessage(firstTry.error);
+        void trackGrowthEvent('checkout_failed', {
+          checkout_mode: 'one_time_purchase',
+          sku,
+          reason: firstTry.error,
+        }, { userId: profile?.id || null });
         return;
       }
 
       const payload = firstTry.data as { checkoutUrl?: string; error?: string };
       if (payload?.error) {
         setBillingActionMessage(payload.error);
+        void trackGrowthEvent('checkout_failed', {
+          checkout_mode: 'one_time_purchase',
+          sku,
+          reason: payload.error,
+        }, { userId: profile?.id || null });
         return;
       }
 
       const checkoutUrl = String(payload?.checkoutUrl || '').trim();
       if (!checkoutUrl) {
         setBillingActionMessage('Stripe checkout URL was not returned for this purchase.');
+        void trackGrowthEvent('checkout_failed', {
+          checkout_mode: 'one_time_purchase',
+          sku,
+          reason: 'checkout_url_missing',
+        }, { userId: profile?.id || null });
         return;
       }
 
+      void trackGrowthEvent('marketplace_checkout_session_created', {
+        checkout_mode: 'one_time_purchase',
+        sku,
+      }, { userId: profile?.id || null });
       await openCheckoutUrl(checkoutUrl);
     } catch (err: unknown) {
       setBillingActionMessage(String((err as Error)?.message || err));
+      void trackGrowthEvent('checkout_failed', {
+        checkout_mode: 'one_time_purchase',
+        sku,
+        reason: String((err as Error)?.message || err),
+      }, { userId: profile?.id || null });
     } finally {
       setCheckoutLoadingKey(null);
     }
@@ -1364,7 +1508,7 @@ export function MarketplacePage() {
             </div>
           </div>
 
-          {(billingActionMessage || quickdrawMessage || entitlementsLoading || loadingQuickdraw) && (
+          {(billingActionMessage || quickdrawMessage || entitlementsLoading || loadingQuickdraw || marketplaceLocked) && (
             <div className={`rounded-xl border px-3 py-2.5 text-sm flex items-start gap-2 ${
               hasMarketplaceErrorBanner
                 ? 'border-red-500/40 bg-red-500/10 text-red-200'
@@ -1374,7 +1518,7 @@ export function MarketplacePage() {
               <div>
                 {entitlementsLoading || loadingQuickdraw
                   ? 'Refreshing marketplace data...'
-                  : (billingActionMessage || quickdrawMessage)}
+                  : (billingActionMessage || quickdrawMessage || (marketplaceLocked ? marketplaceLockReason : ''))}
               </div>
             </div>
           )}
@@ -1437,7 +1581,7 @@ export function MarketplacePage() {
                         <button
                           type="button"
                           onClick={() => handleBuyStoreProduct(product)}
-                          disabled={checkoutLoadingKey !== null}
+                          disabled={checkoutLoadingKey !== null || marketplaceLocked}
                           className="nyptid-btn-primary text-xs px-3 py-2"
                         >
                           {loadingForProduct ? 'Opening...' : 'Buy'}
@@ -1447,7 +1591,7 @@ export function MarketplacePage() {
                       <button
                         type="button"
                         onClick={() => handleGiftStoreProduct(product)}
-                        disabled={checkoutLoadingKey !== null}
+                        disabled={checkoutLoadingKey !== null || marketplaceLocked}
                         className="nyptid-btn-secondary text-xs px-3 py-2"
                       >
                         <Gift size={12} />
@@ -1707,7 +1851,7 @@ export function MarketplacePage() {
                                     loadingKey,
                                   );
                                 }}
-                                disabled={checkoutLoadingKey !== null}
+                                disabled={checkoutLoadingKey !== null || marketplaceLocked}
                                 className="nyptid-btn-primary text-xs px-3 py-2"
                               >
                                 {checkoutLoadingKey === loadingKey ? 'Opening...' : (quickdrawRoleView === 'hiring' ? 'Hire' : 'Bid')}
@@ -1907,6 +2051,23 @@ export function MarketplacePage() {
                         <div>Level: <span className="font-semibold text-surface-100">{sellerProfile?.clearance_level || 'none'}</span></div>
                         <div>Quickdraw enabled: <span className="font-semibold text-surface-100">{sellerProfile?.quickdraw_enabled ? 'Yes' : 'Not yet'}</span></div>
                       </div>
+                      <div className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2.5">
+                        <div className="text-xs font-bold uppercase tracking-wide text-nyptid-200">Tier II Requirements</div>
+                        <div className="mt-2 space-y-1.5 text-xs text-surface-300">
+                          {tierIiChecklist.map((item) => (
+                            <div key={item.key} className="flex items-start gap-2">
+                              <span className={`mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border ${item.done ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300' : 'border-surface-600 text-surface-500'}`}>
+                                {item.done ? '✓' : '•'}
+                              </span>
+                              <span>{item.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2 border-t border-surface-700 pt-2 text-[11px] text-surface-400">
+                          Unlocks after approval:
+                          <span className="block mt-1">Publish specialist listings, bid on restricted contracts, and access higher-trust Quickdraw flows.</span>
+                        </div>
+                      </div>
                       <input
                         type="text"
                         value={sellerNiche}
@@ -2001,14 +2162,16 @@ export function MarketplacePage() {
                           type="button"
                           onClick={() => { void createServiceListing(); }}
                           className="nyptid-btn-primary w-full text-sm"
-                          disabled={!sellerProfile || sellerProfile.clearance_status !== 'approved' || !['level_ii', 'level_iii'].includes(String(sellerProfile.clearance_level))}
+                          disabled={marketplaceLocked || !sellerProfile || sellerProfile.clearance_status !== 'approved' || !['level_ii', 'level_iii'].includes(String(sellerProfile.clearance_level))}
                         >
                           Create Listing + Pay Vetting Fee
                         </button>
-                        {(!sellerProfile || sellerProfile.clearance_status !== 'approved' || !['level_ii', 'level_iii'].includes(String(sellerProfile.clearance_level))) && (
+                        {(marketplaceLocked || !sellerProfile || sellerProfile.clearance_status !== 'approved' || !['level_ii', 'level_iii'].includes(String(sellerProfile.clearance_level))) && (
                           <div className="text-[11px] text-amber-300/90 flex items-start gap-1.5">
                             <AlertTriangle size={12} className="mt-0.5" />
-                            Level II approved clearance is required before publishing service listings.
+                            {marketplaceLocked
+                              ? marketplaceLockReason
+                              : 'Level II approved clearance is required before publishing service listings.'}
                           </div>
                         )}
                       </div>
@@ -2035,7 +2198,7 @@ export function MarketplacePage() {
                                           feeKey,
                                         );
                                       }}
-                                      disabled={checkoutLoadingKey !== null}
+                                      disabled={checkoutLoadingKey !== null || marketplaceLocked}
                                       className="nyptid-btn-secondary text-xs px-2 py-1"
                                     >
                                       {checkoutLoadingKey === feeKey ? 'Opening...' : 'Pay Fee'}
@@ -2147,7 +2310,7 @@ export function MarketplacePage() {
                                 `game-buy:${featuredGameListing.id}`,
                               );
                             }}
-                            disabled={checkoutLoadingKey !== null}
+                            disabled={checkoutLoadingKey !== null || marketplaceLocked}
                             className="nyptid-btn-primary text-xs px-3 py-2"
                           >
                             {checkoutLoadingKey === `game-buy:${featuredGameListing.id}` ? 'Opening...' : 'Play Now'}
@@ -2191,7 +2354,7 @@ export function MarketplacePage() {
                                     loadingKey,
                                   );
                                 }}
-                                disabled={checkoutLoadingKey !== null}
+                                disabled={checkoutLoadingKey !== null || marketplaceLocked}
                                 className="nyptid-btn-primary text-xs px-3 py-2"
                               >
                                 {checkoutLoadingKey === loadingKey ? 'Opening...' : 'Buy Game'}
@@ -2291,14 +2454,16 @@ export function MarketplacePage() {
                     type="button"
                     onClick={() => { void createGameListing(); }}
                     className="nyptid-btn-primary w-full text-sm"
-                    disabled={!sellerProfile || sellerProfile.clearance_status !== 'approved' || !sellerProfile.can_publish_games}
+                    disabled={marketplaceLocked || !sellerProfile || sellerProfile.clearance_status !== 'approved' || !sellerProfile.can_publish_games}
                   >
                     Create Game Listing + Pay $100 Fee
                   </button>
-                  {(!sellerProfile || sellerProfile.clearance_status !== 'approved' || !sellerProfile.can_publish_games) && (
+                  {(marketplaceLocked || !sellerProfile || sellerProfile.clearance_status !== 'approved' || !sellerProfile.can_publish_games) && (
                     <div className="text-[11px] text-amber-300/90 flex items-start gap-1.5">
                       <AlertTriangle size={12} className="mt-0.5" />
-                      Game publishing requires approved clearance and game publishing access.
+                      {marketplaceLocked
+                        ? marketplaceLockReason
+                        : 'Game publishing requires approved clearance and game publishing access.'}
                     </div>
                   )}
                 </div>
@@ -2327,7 +2492,7 @@ export function MarketplacePage() {
                                     feeKey,
                                   );
                                 }}
-                                disabled={checkoutLoadingKey !== null}
+                                disabled={checkoutLoadingKey !== null || marketplaceLocked}
                                 className="nyptid-btn-secondary text-xs px-2 py-1"
                               >
                                 {checkoutLoadingKey === feeKey ? 'Opening...' : 'Pay Fee'}
@@ -2512,4 +2677,5 @@ export function MarketplacePage() {
     </AppShell>
   );
 }
+
 

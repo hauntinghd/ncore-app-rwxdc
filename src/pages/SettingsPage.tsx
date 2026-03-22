@@ -33,6 +33,7 @@ import type { UserStatus, ServerProfile, AccountStandingEvent } from '../lib/typ
 import { formatFileSize, getRankInfo } from '../lib/utils';
 import { enumerateCallDevices, loadCallSettings, saveCallSettings, type MediaDeviceOption } from '../lib/callSettings';
 import { directCallSession } from '../lib/directCallSession';
+import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
 import {
   applyReleaseBadges,
   DEFAULT_UPDATE_FEED_URL,
@@ -50,6 +51,7 @@ import {
 } from '../lib/releaseFeed';
 import { promptPwaInstall } from '../lib/pwaRuntime';
 import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
+import { resolveGrowthSourceChannel } from '../lib/growthEvents';
 
 type SectionId =
   | 'my-account'
@@ -123,6 +125,38 @@ interface ConnectionProvider {
   icon: SimpleIcon | null;
   comingSoon?: boolean;
 }
+
+type MediaPermissionState = 'granted' | 'prompt' | 'denied' | 'unsupported' | 'unknown';
+
+interface VoiceDeviceHealth {
+  microphonePermission: MediaPermissionState;
+  cameraPermission: MediaPermissionState;
+  hasMicrophoneDevice: boolean;
+  hasSpeakerDevice: boolean;
+  hasCameraDevice: boolean;
+  inputDeviceValid: boolean;
+  outputDeviceValid: boolean;
+  cameraDeviceValid: boolean;
+  selectedInputLabel: string;
+  selectedOutputLabel: string;
+  selectedCameraLabel: string;
+  checkedAt: string | null;
+}
+
+const DEFAULT_VOICE_DEVICE_HEALTH: VoiceDeviceHealth = {
+  microphonePermission: 'unknown',
+  cameraPermission: 'unknown',
+  hasMicrophoneDevice: false,
+  hasSpeakerDevice: false,
+  hasCameraDevice: false,
+  inputDeviceValid: true,
+  outputDeviceValid: true,
+  cameraDeviceValid: true,
+  selectedInputLabel: 'System Default',
+  selectedOutputLabel: 'System Default',
+  selectedCameraLabel: 'System Default',
+  checkedAt: null,
+};
 
 type StandingResourceId = 'guidelines' | 'terms' | 'appeal';
 
@@ -893,6 +927,11 @@ function SettingRow({ label, description, children }: { label: string; descripti
 export function SettingsPage() {
   const { profile, user, updateProfile, signOut } = useAuth();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
+  const {
+    capabilities: growthCapabilities,
+    loading: growthCapabilitiesLoading,
+    refresh: refreshGrowthCapabilities,
+  } = useGrowthCapabilities();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SectionId>(() => parseSection(searchParams.get('section')) || 'my-account');
@@ -934,6 +973,18 @@ export function SettingsPage() {
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceOption[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceOption[]>([]);
   const [applyingVoiceSettings, setApplyingVoiceSettings] = useState(false);
+  const [voiceDeviceHealth, setVoiceDeviceHealth] = useState<VoiceDeviceHealth>(DEFAULT_VOICE_DEVICE_HEALTH);
+  const [voiceHealthChecking, setVoiceHealthChecking] = useState(false);
+  const [voiceHealthMessage, setVoiceHealthMessage] = useState('');
+  const [microphoneTesting, setMicrophoneTesting] = useState(false);
+  const [speakerTesting, setSpeakerTesting] = useState(false);
+  const [cameraTesting, setCameraTesting] = useState(false);
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const cameraPreviewRef = useRef<HTMLVideoElement>(null);
+  const cameraPreviewStreamRef = useRef<MediaStream | null>(null);
+  const microphoneTestStreamRef = useRef<MediaStream | null>(null);
+  const microphoneAudioContextRef = useRef<AudioContext | null>(null);
+  const microphoneAnimationFrameRef = useRef<number | null>(null);
 
   const [privacySettings, setPrivacySettings] = useState({
     showOnlineStatus: true,
@@ -961,6 +1012,9 @@ export function SettingsPage() {
   const [discordImportMessage, setDiscordImportMessage] = useState('');
   const [checkoutLoadingKey, setCheckoutLoadingKey] = useState<string | null>(null);
   const [billingActionMessage, setBillingActionMessage] = useState('');
+  const [inviteCodeInput, setInviteCodeInput] = useState('');
+  const [redeemingInviteCode, setRedeemingInviteCode] = useState(false);
+  const [growthUnlockMessage, setGrowthUnlockMessage] = useState('');
   const [releaseLog, setReleaseLog] = useState<ReleaseLogEntry[]>([]);
   const [latestFeedVersion, setLatestFeedVersion] = useState('');
   const [isMobileSettings, setIsMobileSettings] = useState(() => detectMobileSettingsLayout());
@@ -1104,12 +1158,41 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (activeSection !== 'voice-video') return;
-    enumerateCallDevices().then(({ audioInputs, audioOutputs, videoInputs }) => {
-      setAudioInputs(audioInputs);
-      setAudioOutputs(audioOutputs);
-      setVideoInputs(videoInputs);
-    });
+    let cancelled = false;
+    const run = async () => {
+      await refreshVoiceDeviceHealth();
+    };
+    void run();
+
+    const onDeviceChange = () => {
+      if (!cancelled) {
+        void run();
+      }
+    };
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
+
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
+    };
+  }, [
+    activeSection,
+    callSettings.inputDeviceId,
+    callSettings.outputDeviceId,
+    callSettings.cameraDeviceId,
+  ]);
+
+  useEffect(() => {
+    if (activeSection === 'voice-video') return undefined;
+    stopMicrophoneTest();
+    stopCameraPreview();
+    return undefined;
   }, [activeSection]);
+
+  useEffect(() => () => {
+    stopMicrophoneTest();
+    stopCameraPreview();
+  }, []);
 
   useEffect(() => {
     if (activeSection !== 'whats-new') return;
@@ -1177,10 +1260,35 @@ export function SettingsPage() {
   useEffect(() => {
     if (activeSection !== 'membership') return;
     void refreshEntitlements();
+    void refreshGrowthCapabilities();
     setBillingActionMessage('');
-  }, [activeSection, refreshEntitlements]);
+    setGrowthUnlockMessage('');
+  }, [activeSection, refreshEntitlements, refreshGrowthCapabilities]);
 
   const rankInfo = profile ? getRankInfo(profile.xp || 0) : null;
+  const growthTierLabel = String(growthCapabilities.trustTier || 'limited')
+    .replace(/_/g, ' ')
+    .toUpperCase();
+  const growthCapabilitiesRows = [
+    {
+      key: 'can_create_server',
+      label: 'Create Servers',
+      enabled: growthCapabilities.canCreateServer,
+      reason: getCapabilityLockReason('can_create_server'),
+    },
+    {
+      key: 'can_start_high_volume_calls',
+      label: 'Start High-volume Calls',
+      enabled: growthCapabilities.canStartHighVolumeCalls,
+      reason: getCapabilityLockReason('can_start_high_volume_calls'),
+    },
+    {
+      key: 'can_use_marketplace',
+      label: 'Use Marketplace',
+      enabled: growthCapabilities.canUseMarketplace,
+      reason: getCapabilityLockReason('can_use_marketplace'),
+    },
+  ];
   const updateAhead = compareSemver(latestFeedVersion, buildVersion) > 0;
   const updateStatusMessage = latestFeedVersion
     ? updateAhead
@@ -1490,12 +1598,277 @@ export function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   }
 
+  async function resolveMediaPermissionState(name: 'microphone' | 'camera'): Promise<MediaPermissionState> {
+    try {
+      const permissions = (navigator as Navigator & {
+        permissions?: {
+          query: (descriptor: PermissionDescriptor) => Promise<PermissionStatus>;
+        };
+      }).permissions;
+      if (!permissions?.query) return 'unsupported';
+      const status = await permissions.query({ name } as PermissionDescriptor);
+      if (status.state === 'granted' || status.state === 'prompt' || status.state === 'denied') {
+        return status.state;
+      }
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  function resolveSelectedDeviceLabel(
+    selectedId: string,
+    devices: MediaDeviceOption[],
+    fallbackLabel: string,
+  ): string {
+    if (!selectedId || selectedId === 'default') {
+      return 'System Default';
+    }
+    const selected = devices.find((device) => device.deviceId === selectedId);
+    return selected?.label || fallbackLabel;
+  }
+
+  function stopMicrophoneTest() {
+    if (microphoneAnimationFrameRef.current != null) {
+      window.cancelAnimationFrame(microphoneAnimationFrameRef.current);
+      microphoneAnimationFrameRef.current = null;
+    }
+    if (microphoneAudioContextRef.current) {
+      void microphoneAudioContextRef.current.close();
+      microphoneAudioContextRef.current = null;
+    }
+    if (microphoneTestStreamRef.current) {
+      microphoneTestStreamRef.current.getTracks().forEach((track) => track.stop());
+      microphoneTestStreamRef.current = null;
+    }
+    setMicrophoneTesting(false);
+    setMicrophoneLevel(0);
+  }
+
+  function stopCameraPreview() {
+    if (cameraPreviewStreamRef.current) {
+      cameraPreviewStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraPreviewStreamRef.current = null;
+    }
+    if (cameraPreviewRef.current) {
+      cameraPreviewRef.current.srcObject = null;
+    }
+    setCameraTesting(false);
+  }
+
+  async function refreshVoiceDeviceHealth() {
+    setVoiceHealthChecking(true);
+    try {
+      const { audioInputs: nextAudioInputs, audioOutputs: nextAudioOutputs, videoInputs: nextVideoInputs } = await enumerateCallDevices();
+      setAudioInputs(nextAudioInputs);
+      setAudioOutputs(nextAudioOutputs);
+      setVideoInputs(nextVideoInputs);
+
+      const [microphonePermission, cameraPermission] = await Promise.all([
+        resolveMediaPermissionState('microphone'),
+        resolveMediaPermissionState('camera'),
+      ]);
+
+      const nextHealth: VoiceDeviceHealth = {
+        microphonePermission,
+        cameraPermission,
+        hasMicrophoneDevice: nextAudioInputs.length > 0,
+        hasSpeakerDevice: nextAudioOutputs.length > 0,
+        hasCameraDevice: nextVideoInputs.length > 0,
+        inputDeviceValid: callSettings.inputDeviceId === 'default'
+          || nextAudioInputs.some((device) => device.deviceId === callSettings.inputDeviceId),
+        outputDeviceValid: callSettings.outputDeviceId === 'default'
+          || nextAudioOutputs.some((device) => device.deviceId === callSettings.outputDeviceId),
+        cameraDeviceValid: callSettings.cameraDeviceId === 'default'
+          || nextVideoInputs.some((device) => device.deviceId === callSettings.cameraDeviceId),
+        selectedInputLabel: resolveSelectedDeviceLabel(callSettings.inputDeviceId, nextAudioInputs, 'Saved microphone (unavailable)'),
+        selectedOutputLabel: resolveSelectedDeviceLabel(callSettings.outputDeviceId, nextAudioOutputs, 'Saved output (unavailable)'),
+        selectedCameraLabel: resolveSelectedDeviceLabel(callSettings.cameraDeviceId, nextVideoInputs, 'Saved camera (unavailable)'),
+        checkedAt: new Date().toISOString(),
+      };
+
+      const warnings: string[] = [];
+      if (!nextHealth.inputDeviceValid) warnings.push('Selected microphone is unavailable.');
+      if (!nextHealth.outputDeviceValid) warnings.push('Selected speaker output is unavailable.');
+      if (!nextHealth.cameraDeviceValid) warnings.push('Selected camera is unavailable.');
+      if (nextHealth.microphonePermission === 'denied') warnings.push('Microphone permission is denied.');
+      if (nextHealth.cameraPermission === 'denied') warnings.push('Camera permission is denied.');
+
+      setVoiceHealthMessage(
+        warnings.length > 0
+          ? warnings.join(' ')
+          : 'Device health check passed. Selected devices are ready for calls.',
+      );
+      setVoiceDeviceHealth(nextHealth);
+    } catch (err: unknown) {
+      setVoiceHealthMessage(`Could not run device health check: ${String((err as Error)?.message || err)}`);
+    } finally {
+      setVoiceHealthChecking(false);
+    }
+  }
+
+  async function handleRequestMediaPermissions() {
+    setVoiceHealthMessage('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setVoiceHealthMessage('Microphone and camera permissions were refreshed.');
+      await refreshVoiceDeviceHealth();
+    } catch (err: unknown) {
+      setVoiceHealthMessage(`Permission request failed: ${String((err as Error)?.message || err)}`);
+    }
+  }
+
+  async function handleTestMicrophone() {
+    stopMicrophoneTest();
+    setVoiceHealthMessage('');
+    setMicrophoneTesting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: callSettings.inputDeviceId && callSettings.inputDeviceId !== 'default'
+            ? { exact: callSettings.inputDeviceId }
+            : undefined,
+          echoCancellation: callSettings.echoCancellation,
+          noiseSuppression: callSettings.noiseSuppression,
+          autoGainControl: callSettings.automaticGainControl,
+        },
+        video: false,
+      });
+      microphoneTestStreamRef.current = stream;
+
+      const context = new AudioContext();
+      microphoneAudioContextRef.current = context;
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const startedAt = Date.now();
+
+      const updateLevel = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let total = 0;
+        for (let i = 0; i < dataArray.length; i += 1) total += dataArray[i];
+        const average = total / Math.max(1, dataArray.length);
+        setMicrophoneLevel(Math.max(0, Math.min(100, Math.round((average / 255) * 100))));
+        if (Date.now() - startedAt >= 6000) {
+          stopMicrophoneTest();
+          setVoiceHealthMessage('Microphone test complete.');
+          return;
+        }
+        microphoneAnimationFrameRef.current = window.requestAnimationFrame(updateLevel);
+      };
+
+      microphoneAnimationFrameRef.current = window.requestAnimationFrame(updateLevel);
+    } catch (err: unknown) {
+      stopMicrophoneTest();
+      setVoiceHealthMessage(`Microphone test failed: ${String((err as Error)?.message || err)}`);
+    }
+  }
+
+  async function handleTestSpeaker() {
+    setSpeakerTesting(true);
+    setVoiceHealthMessage('');
+    let context: AudioContext | null = null;
+    let audioElement: HTMLAudioElement | null = null;
+    try {
+      context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 880;
+      gain.gain.value = 0.08;
+
+      const outputDeviceId = String(callSettings.outputDeviceId || 'default');
+      if (outputDeviceId !== 'default' && typeof Audio !== 'undefined') {
+        const destination = context.createMediaStreamDestination();
+        oscillator.connect(gain);
+        gain.connect(destination);
+        audioElement = new Audio();
+        audioElement.srcObject = destination.stream;
+        const setSinkId = (audioElement as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId;
+        if (typeof setSinkId === 'function') {
+          await setSinkId.call(audioElement, outputDeviceId);
+        }
+        await audioElement.play();
+      } else {
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+      }
+
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.9);
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      setVoiceHealthMessage('Speaker test tone played successfully.');
+    } catch (err: unknown) {
+      setVoiceHealthMessage(`Speaker test failed: ${String((err as Error)?.message || err)}`);
+    } finally {
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.srcObject = null;
+      }
+      if (context) {
+        await context.close().catch(() => undefined);
+      }
+      setSpeakerTesting(false);
+    }
+  }
+
+  async function handleToggleCameraPreview() {
+    if (cameraTesting) {
+      stopCameraPreview();
+      setVoiceHealthMessage('Camera preview stopped.');
+      return;
+    }
+
+    setVoiceHealthMessage('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: callSettings.cameraDeviceId && callSettings.cameraDeviceId !== 'default'
+            ? { exact: callSettings.cameraDeviceId }
+            : undefined,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      cameraPreviewStreamRef.current = stream;
+      if (cameraPreviewRef.current) {
+        cameraPreviewRef.current.srcObject = stream;
+        await cameraPreviewRef.current.play().catch(() => undefined);
+      }
+      setCameraTesting(true);
+      setVoiceHealthMessage('Camera preview is active.');
+    } catch (err: unknown) {
+      stopCameraPreview();
+      setVoiceHealthMessage(`Camera preview failed: ${String((err as Error)?.message || err)}`);
+    }
+  }
+
+  function renderPermissionStateLabel(state: MediaPermissionState): string {
+    if (state === 'granted') return 'Granted';
+    if (state === 'denied') return 'Denied';
+    if (state === 'prompt') return 'Prompt';
+    if (state === 'unsupported') return 'Unsupported';
+    return 'Unknown';
+  }
+
+  function renderPermissionStateClass(state: MediaPermissionState): string {
+    if (state === 'granted') return 'border-green-500/30 bg-green-500/10 text-green-300';
+    if (state === 'denied') return 'border-red-500/30 bg-red-500/10 text-red-300';
+    if (state === 'prompt') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+    return 'border-surface-700 bg-surface-900/60 text-surface-400';
+  }
+
   async function handleApplyVoiceVideoSettings() {
     setError('');
     setApplyingVoiceSettings(true);
     try {
       saveCallSettings(callSettings);
       await directCallSession.applyCallSettings(callSettings);
+      await refreshVoiceDeviceHealth();
       flashSavedNotice();
     } catch (err: unknown) {
       setError(String((err as Error)?.message || err));
@@ -1507,6 +1880,7 @@ export function SettingsPage() {
   async function handleStartBoostCheckout() {
     setBillingActionMessage('');
     setCheckoutLoadingKey('boost');
+    const sourceChannel = resolveGrowthSourceChannel();
 
     function handleSessionExpired(message?: string) {
       setBillingActionMessage(message || 'Session expired. Please sign out and sign in again, then retry checkout.');
@@ -1518,6 +1892,7 @@ export function SettingsPage() {
       mode: 'boost_subscription',
       successUrl,
       cancelUrl,
+      sourceChannel,
       accessToken: String(accessToken || '').trim(),
     });
 
@@ -1651,6 +2026,38 @@ export function SettingsPage() {
       setBillingActionMessage(String((err as Error)?.message || err));
     } finally {
       setCheckoutLoadingKey(null);
+    }
+  }
+
+  async function handleRedeemInviteCode() {
+    const code = String(inviteCodeInput || '').trim();
+    if (!code) {
+      setGrowthUnlockMessage('Enter an invite code first.');
+      return;
+    }
+
+    setRedeemingInviteCode(true);
+    setGrowthUnlockMessage('');
+    try {
+      const { data, error } = await (supabase as any).rpc('redeem_growth_invite_code', {
+        p_code: code,
+        p_source_channel: resolveGrowthSourceChannel(),
+      });
+      if (error) {
+        setGrowthUnlockMessage(error.message || 'Invite code could not be redeemed.');
+        return;
+      }
+
+      await (supabase as any).rpc('mark_growth_referral_activation', {
+        p_event_name: 'invite_redeem',
+      });
+      setInviteCodeInput('');
+      setGrowthUnlockMessage('Invite redeemed successfully. Capability contract updated.');
+      await refreshGrowthCapabilities();
+    } catch (err: unknown) {
+      setGrowthUnlockMessage(String((err as Error)?.message || err));
+    } finally {
+      setRedeemingInviteCode(false);
     }
   }
 
@@ -2298,6 +2705,134 @@ export function SettingsPage() {
                 <div>
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Voice & Video</h2>
                   <p className="text-surface-500 text-sm">Configure your audio and video settings for calls</p>
+                </div>
+
+                <div className="nyptid-card p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Pre-call Device Health</div>
+                      <div className="text-sm text-surface-300 mt-1">
+                        Validate permissions, selected devices, and hardware readiness before joining a call.
+                      </div>
+                      <div className="text-[11px] text-surface-500 mt-1">
+                        Last checked: {voiceDeviceHealth.checkedAt ? new Date(voiceDeviceHealth.checkedAt).toLocaleString() : 'Not yet checked'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void refreshVoiceDeviceHealth()}
+                        disabled={voiceHealthChecking}
+                        className="nyptid-btn-secondary text-xs"
+                      >
+                        {voiceHealthChecking ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                        {voiceHealthChecking ? 'Checking...' : 'Run Health Check'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRequestMediaPermissions()}
+                        className="nyptid-btn-ghost text-xs"
+                      >
+                        Request Permissions
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${renderPermissionStateClass(voiceDeviceHealth.microphonePermission)}`}>
+                      <div className="font-semibold">Microphone Permission</div>
+                      <div className="mt-0.5">{renderPermissionStateLabel(voiceDeviceHealth.microphonePermission)}</div>
+                    </div>
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${renderPermissionStateClass(voiceDeviceHealth.cameraPermission)}`}>
+                      <div className="font-semibold">Camera Permission</div>
+                      <div className="mt-0.5">{renderPermissionStateLabel(voiceDeviceHealth.cameraPermission)}</div>
+                    </div>
+                    <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 text-xs text-surface-300">
+                      <div className="font-semibold">Hardware Presence</div>
+                      <div className="mt-0.5">
+                        Mic: {voiceDeviceHealth.hasMicrophoneDevice ? 'Detected' : 'Missing'} ·
+                        Speaker: {voiceDeviceHealth.hasSpeakerDevice ? 'Detected' : 'Missing'} ·
+                        Camera: {voiceDeviceHealth.hasCameraDevice ? 'Detected' : 'Missing'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-3">
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${voiceDeviceHealth.inputDeviceValid ? 'border-green-500/30 bg-green-500/10 text-green-200' : 'border-red-500/30 bg-red-500/10 text-red-200'}`}>
+                      <div className="font-semibold">Selected Microphone</div>
+                      <div className="mt-0.5">{voiceDeviceHealth.selectedInputLabel}</div>
+                    </div>
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${voiceDeviceHealth.outputDeviceValid ? 'border-green-500/30 bg-green-500/10 text-green-200' : 'border-red-500/30 bg-red-500/10 text-red-200'}`}>
+                      <div className="font-semibold">Selected Speaker</div>
+                      <div className="mt-0.5">{voiceDeviceHealth.selectedOutputLabel}</div>
+                    </div>
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${voiceDeviceHealth.cameraDeviceValid ? 'border-green-500/30 bg-green-500/10 text-green-200' : 'border-red-500/30 bg-red-500/10 text-red-200'}`}>
+                      <div className="font-semibold">Selected Camera</div>
+                      <div className="mt-0.5">{voiceDeviceHealth.selectedCameraLabel}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleTestMicrophone()}
+                      disabled={microphoneTesting}
+                      className="nyptid-btn-secondary text-xs"
+                    >
+                      {microphoneTesting ? 'Testing Microphone...' : 'Test Microphone'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleTestSpeaker()}
+                      disabled={speakerTesting}
+                      className="nyptid-btn-secondary text-xs"
+                    >
+                      {speakerTesting ? 'Playing Tone...' : 'Test Speaker'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleCameraPreview()}
+                      className="nyptid-btn-secondary text-xs"
+                    >
+                      {cameraTesting ? 'Stop Camera Preview' : 'Start Camera Preview'}
+                    </button>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-xl border border-surface-700 bg-surface-900/60 p-3">
+                      <div className="text-xs font-semibold text-surface-300 mb-2">Microphone Activity</div>
+                      <div className="h-2 w-full rounded-full bg-surface-800 overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${microphoneTesting ? 'bg-green-400' : 'bg-surface-600'}`}
+                          style={{ width: `${microphoneLevel}%` }}
+                        />
+                      </div>
+                      <div className="text-[11px] text-surface-500 mt-2">
+                        {microphoneTesting ? `Live input level: ${microphoneLevel}%` : 'Run microphone test to monitor live input level.'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-surface-700 bg-black/30 p-3">
+                      <div className="text-xs font-semibold text-surface-300 mb-2">Camera Preview</div>
+                      <div className="aspect-video rounded-lg overflow-hidden border border-surface-700 bg-surface-950">
+                        <video
+                          ref={cameraPreviewRef}
+                          className="h-full w-full object-cover"
+                          autoPlay
+                          muted
+                          playsInline
+                        />
+                      </div>
+                      <div className="text-[11px] text-surface-500 mt-2">
+                        {cameraTesting ? 'Camera preview is active.' : 'Start camera preview to verify framing and permissions.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {voiceHealthMessage && (
+                    <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 text-xs text-surface-300">
+                      {voiceHealthMessage}
+                    </div>
+                  )}
                 </div>
 
                 <div className="nyptid-card p-6">
@@ -3234,6 +3769,63 @@ export function SettingsPage() {
                         NCore Labs toggle
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Growth Access + Invite Unlock</div>
+                      <div className="text-sm text-surface-300 mt-1">
+                        Trust tier gates server creation, high-volume call starts, and marketplace actions.
+                      </div>
+                    </div>
+                    <span className="px-2 py-1 rounded-full text-[11px] font-bold border border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-200">
+                      Tier: {growthCapabilitiesLoading ? 'Loading...' : growthTierLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid md:grid-cols-3 gap-2">
+                    {growthCapabilitiesRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className={`rounded-lg border px-3 py-2 text-xs ${row.enabled ? 'border-green-500/30 bg-green-500/10 text-green-200' : 'border-red-500/30 bg-red-500/10 text-red-200'}`}
+                      >
+                        <div className="font-semibold">{row.label}</div>
+                        <div className="mt-0.5">{row.enabled ? 'Unlocked' : 'Locked'}</div>
+                        {!row.enabled && (
+                          <div className="mt-1 text-[11px] opacity-90">{row.reason}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-xl border border-surface-700 bg-surface-900/60 p-3">
+                    <div className="text-xs font-semibold text-surface-200 mb-2">Redeem Trusted Invite Code</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={inviteCodeInput}
+                        onChange={(e) => setInviteCodeInput(e.target.value)}
+                        placeholder="Enter invite code"
+                        className="nyptid-input flex-1 min-w-[220px]"
+                        maxLength={64}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleRedeemInviteCode()}
+                        disabled={redeemingInviteCode}
+                        className="nyptid-btn-primary text-sm"
+                      >
+                        {redeemingInviteCode ? 'Redeeming...' : 'Redeem Code'}
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-surface-500 mt-2">
+                      Unlock paths: trusted invite code, admin approval, or trust-tier promotion.
+                    </div>
+                    {growthUnlockMessage && (
+                      <div className="mt-2 text-xs text-surface-300">{growthUnlockMessage}</div>
+                    )}
                   </div>
                 </div>
 

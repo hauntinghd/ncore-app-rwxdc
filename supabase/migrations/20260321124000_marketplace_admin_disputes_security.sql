@@ -1,4 +1,4 @@
-﻿/*
+/*
   Marketplace phase-2: admin vetting + disputes + escrow processing + game security review
 */
 
