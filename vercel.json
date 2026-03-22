@@ -4,6 +4,8 @@
     { "source": "/login", "destination": "/index.html" },
     { "source": "/signup", "destination": "/index.html" },
     { "source": "/onboarding", "destination": "/index.html" },
+    { "source": "/marketplace", "destination": "/index.html" },
+    { "source": "/marketplace/:path*", "destination": "/index.html" },
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/:path*", "destination": "/index.html" }
   ],
@@ -50,6 +52,22 @@
     },
     {
       "source": "/onboarding",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "Pragma", "value": "no-cache" },
+        { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/marketplace",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "Pragma", "value": "no-cache" },
+        { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/marketplace/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
         { "key": "Pragma", "value": "no-cache" },

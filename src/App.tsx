@@ -4,8 +4,10 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoadingScreen } from './components/ui/Spinner';
 import { probeRunPodBackend } from './lib/runpod';
 import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
+import { detectWebSurface, type WebSurface } from './lib/webSurface';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
+const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
 const LoginPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.SignupPage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
@@ -44,17 +46,35 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AppRoutes({ isElectron }: { isElectron: boolean }) {
+function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface: WebSurface }) {
   return (
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route
           path="/"
-          element={isElectron ? <Navigate to="/app" replace /> : <PublicRoute><LandingPage /></PublicRoute>}
+          element={
+            isElectron ? (
+              <Navigate to="/app" replace />
+            ) : webSurface === 'app' ? (
+              <Navigate to="/app/dm" replace />
+            ) : webSurface === 'marketplace' ? (
+              <MarketplaceWebPage />
+            ) : (
+              <PublicRoute><LandingPage /></PublicRoute>
+            )
+          }
         />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
         <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route
+          path="/marketplace"
+          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
+        />
+        <Route
+          path="/marketplace/*"
+          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
+        />
 
         <Route path="/app" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
@@ -84,6 +104,7 @@ export default function App() {
   const isElectron =
     typeof window !== 'undefined' &&
     (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
+  const webSurface = detectWebSurface(isElectron);
 
   const Router = isElectron ? HashRouter : BrowserRouter;
 
@@ -92,7 +113,7 @@ export default function App() {
       <AuthProvider>
         <RealtimeBridge />
         <PwaExperienceBar isElectron={isElectron} />
-        <AppRoutes isElectron={isElectron} />
+        <AppRoutes isElectron={isElectron} webSurface={webSurface} />
       </AuthProvider>
     </Router>
   );
