@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.78",
+            "version": "11.7.79",
             "date": "2026-03-22",
             "badge": "Current Build",
+            "improvements": [
+                "Cosmetics preview now renders your real profile identity (avatar, banner, display name, @username, bio, and status) instead of a placeholder sample.",
+                "Permanent Unlock previews now animate per selected SKU so profile flair, frames, gradients, badges, banner FX, stream overlay, and chat-sound visuals are shown live before checkout.",
+                "Animation timing was re-tuned for a smoother premium feel with lower visual noise and more readable motion during preview browsing."
+            ],
+            "bugFixes": [
+                "Fixed static cosmetic mock card behavior where effects looked non-functional even when a cosmetic SKU supported animation.",
+                "Fixed preview identity mismatch so users now see effects on their own profile card context instead of generic NCore sample data.",
+                "Added reduced-motion handling for cosmetic preview animations to avoid excessive motion on accessibility-configured systems."
+            ]
+        },
+        {
+            "version": "11.7.78",
+            "date": "2026-03-22",
+            "badge": "Previous",
             "improvements": [
                 "Desktop auth now persists in Electron userData storage so session continuity survives app updates and relaunches.",
                 "Supabase auth storage now migrates legacy localStorage session values into persistent desktop storage automatically.",

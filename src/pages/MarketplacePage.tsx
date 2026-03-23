@@ -21,6 +21,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useEntitlements } from '../lib/entitlements';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
@@ -78,6 +79,18 @@ interface LevelUnlockTier {
   unlock: string;
 }
 
+interface CosmeticPreviewEffects {
+  profileFlair: boolean;
+  avatarFrame: boolean;
+  nameplateGradient: boolean;
+  supporterBadge: boolean;
+  founderBadge: boolean;
+  bannerFx: boolean;
+  chatSound: boolean;
+  streamOverlay: boolean;
+  serverTheme: boolean;
+}
+
 const LEVEL_UNLOCK_TRACK: LevelUnlockTier[] = [
   { level: 5, title: 'Status Presets', unlock: 'Custom status presets unlock for faster presence switching.' },
   { level: 10, title: 'Message Cap Boost', unlock: '+10% message length cap for longer structured messages.' },
@@ -86,6 +99,21 @@ const LEVEL_UNLOCK_TRACK: LevelUnlockTier[] = [
   { level: 50, title: 'Group DM Expansion', unlock: '+5 Group DM slots for larger private rooms.' },
   { level: 70, title: 'NCore Labs', unlock: 'Experimental NCore Labs features become available.' },
 ];
+
+function resolveCosmeticPreviewEffects(skuRaw: string): CosmeticPreviewEffects {
+  const sku = String(skuRaw || '').trim().toLowerCase();
+  return {
+    profileFlair: sku.includes('profile_flair'),
+    avatarFrame: sku.includes('avatar_frame'),
+    nameplateGradient: sku.includes('nameplate') || sku.includes('elite_nameplate'),
+    supporterBadge: sku.includes('supporter_badge'),
+    founderBadge: sku.includes('founders_badge'),
+    bannerFx: sku.includes('banner_fx'),
+    chatSound: sku.includes('chat_sound'),
+    streamOverlay: sku.includes('stream_overlay'),
+    serverTheme: sku.includes('server_theme'),
+  };
+}
 
 const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: string; subtitle: string; blocks: { title: string; body: string }[] }> = {
   terms: {
@@ -486,7 +514,17 @@ export function MarketplacePage() {
     () => storeProducts.find((item) => item.sku === selectedSku) || storeProducts[0] || null,
     [storeProducts, selectedSku],
   );
+  const selectedSkuNormalized = String(selectedProduct?.sku || '').trim().toLowerCase();
   const selectedPreview = selectedProduct ? (COSMETIC_PREVIEWS[selectedProduct.sku] || DEFAULT_PREVIEW) : DEFAULT_PREVIEW;
+  const cosmeticPreviewEffects = useMemo(
+    () => resolveCosmeticPreviewEffects(selectedSkuNormalized),
+    [selectedSkuNormalized],
+  );
+  const previewDisplayName = String(profile?.display_name || profile?.username || 'NCore Member');
+  const previewHandle = String(profile?.username || 'member');
+  const previewBio = String(profile?.bio || '').trim() || 'This is your live cosmetic preview card using your current profile.';
+  const previewStatus = String(profile?.custom_status || '').trim() || 'Available for calls';
+  const previewBannerUrl = String(profile?.banner_url || '').trim();
   const serviceDisputeByOrderId = useMemo(() => {
     const map = new Map<string, MarketplaceServiceDispute>();
     for (const dispute of serviceDisputes) {
@@ -1685,17 +1723,69 @@ export function MarketplacePage() {
 
                   <div className="rounded-xl border border-surface-700 bg-surface-900/80 p-3">
                     <div className="text-[11px] font-bold uppercase tracking-wide text-surface-500 mb-2">Visual Sample</div>
-                    <div className="rounded-xl border border-surface-700 bg-surface-800/70 p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-nyptid-300 via-nyptid-500 to-nyptid-700 p-[2px]">
-                          <div className="w-full h-full rounded-full bg-surface-950 flex items-center justify-center text-surface-100 font-bold text-sm">
-                            N
+                    <div
+                      className={`rounded-xl border border-surface-700 bg-surface-800/70 p-3 cosmetic-preview-stage ${
+                        cosmeticPreviewEffects.serverTheme ? 'cosmetic-preview-server-theme' : ''
+                      } ${
+                        cosmeticPreviewEffects.streamOverlay ? 'cosmetic-preview-stream-overlay' : ''
+                      }`}
+                    >
+                      <div
+                        className={`rounded-xl border border-surface-700 bg-surface-900/85 overflow-hidden cosmetic-preview-profile-card ${
+                          cosmeticPreviewEffects.bannerFx ? 'cosmetic-preview-banner-fx' : ''
+                        }`}
+                      >
+                        <div className="relative h-16 border-b border-surface-700">
+                          {previewBannerUrl ? (
+                            <img src={previewBannerUrl} alt="Profile banner" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-r from-nyptid-900/70 via-surface-900 to-nyptid-700/60" />
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-surface-950/35 via-transparent to-transparent" />
+                        </div>
+                        <div className="px-3 pb-3 -mt-4 relative">
+                          <div className="flex items-start gap-3">
+                            <div className={`cosmetic-preview-avatar-wrap ${cosmeticPreviewEffects.profileFlair ? 'cosmetic-preview-flair' : ''} ${cosmeticPreviewEffects.avatarFrame ? 'cosmetic-preview-avatar-frame' : ''}`}>
+                              <Avatar
+                                src={profile?.avatar_url}
+                                name={previewDisplayName}
+                                status={profile?.status}
+                                size="lg"
+                                className="ring-2 ring-surface-900"
+                              />
+                              {(cosmeticPreviewEffects.supporterBadge || cosmeticPreviewEffects.founderBadge) && (
+                                <span className="cosmetic-preview-badge-glow absolute -right-1 -top-1 rounded-full border border-nyptid-300/50 bg-surface-900 px-1.5 py-[2px] text-[9px] font-bold text-nyptid-200">
+                                  {cosmeticPreviewEffects.founderBadge ? 'Founder' : 'Supporter'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1 pt-2">
+                              <div className={`text-sm font-bold truncate ${cosmeticPreviewEffects.nameplateGradient ? 'cosmetic-preview-nameplate' : 'text-surface-100'}`}>
+                                {previewDisplayName}
+                              </div>
+                              <div className="text-[11px] text-surface-500 truncate">@{previewHandle}</div>
+                            </div>
+                          </div>
+                          <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/70 px-2.5 py-1.5 text-[11px] text-surface-300">
+                            {previewBio}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className="text-[11px] text-surface-500 truncate">Status: {previewStatus}</div>
+                            {cosmeticPreviewEffects.chatSound && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-nyptid-200">
+                                <span>Alert Tone</span>
+                                <span className="cosmetic-preview-audio-bars">
+                                  <span />
+                                  <span />
+                                  <span />
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-bold text-gradient truncate">NCore Elite</div>
-                          <div className="text-[11px] text-surface-500">Cosmetic preview representation</div>
-                        </div>
+                      </div>
+                      <div className="mt-2 text-[11px] text-surface-500">
+                        Live preview uses your current profile identity and applies selected cosmetic effects in real-time.
                       </div>
                     </div>
                   </div>
