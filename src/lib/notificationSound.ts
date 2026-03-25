@@ -46,6 +46,10 @@ function getAudioContext(): AudioContext | null {
   return audioContext;
 }
 
+export function primeNotificationAudio(): boolean {
+  return Boolean(getAudioContext());
+}
+
 function scheduleTone(
   ctx: AudioContext,
   {

@@ -27,6 +27,12 @@ import { useEntitlements } from '../lib/entitlements';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
 import { resolveGrowthSourceChannel, trackGrowthEvent } from '../lib/growthEvents';
 import { ensureFreshAuthSession } from '../lib/authSession';
+import {
+  buildCosmeticRotationSnapshot,
+  COSMETIC_ROTATION_DAYS,
+  mergeCosmeticPreviewEffects,
+  resolveCosmeticPreviewMeta,
+} from '../lib/cosmetics';
 import { supabase } from '../lib/supabase';
 import { resolveBillingReturnUrl } from '../lib/billingUrl';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,13 +50,6 @@ import type {
 
 function formatUsdFromCents(priceCents: number): string {
   return `$${(priceCents / 100).toFixed(2)}`;
-}
-
-interface CosmeticPreviewMeta {
-  headline: string;
-  summary: string;
-  effects: string[];
-  tags: string[];
 }
 
 type MarketplaceTrack = 'cosmetics' | 'quickdraw' | 'games';
@@ -79,18 +78,6 @@ interface LevelUnlockTier {
   unlock: string;
 }
 
-interface CosmeticPreviewEffects {
-  profileFlair: boolean;
-  avatarFrame: boolean;
-  nameplateGradient: boolean;
-  supporterBadge: boolean;
-  founderBadge: boolean;
-  bannerFx: boolean;
-  chatSound: boolean;
-  streamOverlay: boolean;
-  serverTheme: boolean;
-}
-
 const LEVEL_UNLOCK_TRACK: LevelUnlockTier[] = [
   { level: 5, title: 'Status Presets', unlock: 'Custom status presets unlock for faster presence switching.' },
   { level: 10, title: 'Message Cap Boost', unlock: '+10% message length cap for longer structured messages.' },
@@ -99,21 +86,6 @@ const LEVEL_UNLOCK_TRACK: LevelUnlockTier[] = [
   { level: 50, title: 'Group DM Expansion', unlock: '+5 Group DM slots for larger private rooms.' },
   { level: 70, title: 'NCore Labs', unlock: 'Experimental NCore Labs features become available.' },
 ];
-
-function resolveCosmeticPreviewEffects(skuRaw: string): CosmeticPreviewEffects {
-  const sku = String(skuRaw || '').trim().toLowerCase();
-  return {
-    profileFlair: sku.includes('profile_flair'),
-    avatarFrame: sku.includes('avatar_frame'),
-    nameplateGradient: sku.includes('nameplate') || sku.includes('elite_nameplate'),
-    supporterBadge: sku.includes('supporter_badge'),
-    founderBadge: sku.includes('founders_badge'),
-    bannerFx: sku.includes('banner_fx'),
-    chatSound: sku.includes('chat_sound'),
-    streamOverlay: sku.includes('stream_overlay'),
-    serverTheme: sku.includes('server_theme'),
-  };
-}
 
 const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: string; subtitle: string; blocks: { title: string; body: string }[] }> = {
   terms: {
@@ -203,120 +175,6 @@ function formatDateTime(value: string | null | undefined): string {
   if (Number.isNaN(parsed.getTime())) return 'N/A';
   return parsed.toLocaleString();
 }
-
-const DEFAULT_PREVIEW: CosmeticPreviewMeta = {
-  headline: 'NCore Cosmetic Unlock',
-  summary: 'Adds account-bound visual customization that stays permanently on your profile.',
-  effects: [
-    'Instant account unlock after successful purchase.',
-    'Permanent cosmetic entitlement with no consumable charges.',
-    'Visible across profile, DMs, and server interactions where supported.',
-  ],
-  tags: ['Permanent', 'Account-bound', 'Cosmetic'],
-};
-
-const COSMETIC_PREVIEWS: Record<string, CosmeticPreviewMeta> = {
-  profile_flair_pack: {
-    headline: 'Profile Flair Effects',
-    summary: 'Animated profile flair accents around your profile card and user identity surfaces.',
-    effects: [
-      'Adds premium flair accents to your profile card.',
-      'Displays an enhanced identity ribbon in profile surfaces.',
-      'Supports future flair variants as NCore style packs expand.',
-    ],
-    tags: ['Profile', 'Animated', 'Identity'],
-  },
-  avatar_frame_pack: {
-    headline: 'Avatar Frame Pack',
-    summary: 'Adds premium avatar rings and framed accents around profile pictures.',
-    effects: [
-      'Unlocks multiple framed avatar ring styles.',
-      'Frame rendering appears around your profile image in app surfaces.',
-      'Switch frame styles from profile customization settings.',
-    ],
-    tags: ['Avatar', 'Frame', 'Profile'],
-  },
-  nameplate_color_pack: {
-    headline: 'Nameplate Color Pack',
-    summary: 'Unlocks premium display-name gradients and nameplate color treatments.',
-    effects: [
-      'Adds custom name gradients for your display name.',
-      'Improves profile identity visibility in chats and member lists.',
-      'Works with supporter badges and future profile cosmetics.',
-    ],
-    tags: ['Nameplate', 'Gradient', 'Identity'],
-  },
-  supporter_badge_pack: {
-    headline: 'Supporter Badge Pack',
-    summary: 'Adds supporter badge marks that appear next to your profile identity.',
-    effects: [
-      'Displays supporter badge on compatible profile surfaces.',
-      'Highlights account supporter status in social contexts.',
-      'Pairs cleanly with flair and nameplate customizations.',
-    ],
-    tags: ['Badge', 'Supporter', 'Identity'],
-  },
-  banner_fx_pack: {
-    headline: 'Banner FX Pack',
-    summary: 'Adds animated profile banner overlays and motion effects.',
-    effects: [
-      'Unlocks animated banner visual overlays.',
-      'Enhances profile banner presence with dynamic motion effects.',
-      'Designed for profile headers and identity showcases.',
-    ],
-    tags: ['Banner', 'FX', 'Animated'],
-  },
-  chat_sound_pack: {
-    headline: 'Chat Sound Pack',
-    summary: 'Adds alternate notification and message alert sound profiles.',
-    effects: [
-      'Unlocks alternate chat and ping sound themes.',
-      'Supports future expanded sound profiles in settings.',
-      'Lets users pick styles that match their preferred tone.',
-    ],
-    tags: ['Audio', 'Notifications', 'Chat'],
-  },
-  stream_overlay_pack: {
-    headline: 'Stream Overlay Pack',
-    summary: 'Adds premium call and screen-share overlay treatments.',
-    effects: [
-      'Unlocks additional live-call overlay style options.',
-      'Applies cosmetic frame treatments to stream presentation surfaces.',
-      'Designed to improve visual polish during live sessions.',
-    ],
-    tags: ['Call', 'Stream', 'Overlay'],
-  },
-  server_theme_pack: {
-    headline: 'Server Theme Pack',
-    summary: 'Unlocks additional server color and gradient theme presets.',
-    effects: [
-      'Adds premium server color presets.',
-      'Enables extended gradient combinations for server theming.',
-      'Designed for community owners to improve visual identity.',
-    ],
-    tags: ['Server', 'Theme', 'Customization'],
-  },
-  elite_nameplate_pack: {
-    headline: 'Elite Nameplate Pack',
-    summary: 'Adds higher-tier identity styling for display names and nameplates.',
-    effects: [
-      'Unlocks elite-tier nameplate styling.',
-      'Adds stronger contrast and premium identity accents.',
-      'Built to layer with supporter and profile flair cosmetics.',
-    ],
-    tags: ['Elite', 'Nameplate', 'Premium'],
-  },
-  founders_badge_pack: {
-    headline: 'Founders Badge Pack',
-    summary: 'Adds a permanent founder identity badge to your profile.',
-    effects: [
-      'Grants permanent founder badge entitlement.',
-      'Displays founder identity marker on profile surfaces.',
-      'Useful for early supporters and community recognition.',
-    ],
-    tags: ['Founder', 'Badge', 'Permanent'],
-  },
-};
 
 function isInvalidJwtMessage(value: unknown): boolean {
   const normalized = String(value || '').toLowerCase();
@@ -506,25 +364,67 @@ export function MarketplacePage() {
   const [issueContractTagsText, setIssueContractTagsText] = useState('');
   const [issueContractAcknowledged, setIssueContractAcknowledged] = useState(false);
   const [quickdrawContractDrafts, setQuickdrawContractDrafts] = useState<QuickdrawContractDraft[]>([]);
+  const [cosmeticRotationClock, setCosmeticRotationClock] = useState(() => Date.now());
   const marketplaceLocked = !capabilities.canUseMarketplace;
   const marketplaceLockReason = getCapabilityLockReason('can_use_marketplace');
 
   const ownedSkus = useMemo(() => new Set(entitlements.ownedSkus || []), [entitlements.ownedSkus]);
-  const selectedProduct = useMemo(
-    () => storeProducts.find((item) => item.sku === selectedSku) || storeProducts[0] || null,
-    [storeProducts, selectedSku],
+  const cosmeticRotation = useMemo(
+    () => buildCosmeticRotationSnapshot(storeProducts, new Date(cosmeticRotationClock)),
+    [cosmeticRotationClock, storeProducts],
   );
-  const selectedSkuNormalized = String(selectedProduct?.sku || '').trim().toLowerCase();
-  const selectedPreview = selectedProduct ? (COSMETIC_PREVIEWS[selectedProduct.sku] || DEFAULT_PREVIEW) : DEFAULT_PREVIEW;
+  const rotatingStoreProducts = cosmeticRotation.currentCollection;
+  const upcomingStoreProducts = cosmeticRotation.nextCollection.filter(
+    (product) => !rotatingStoreProducts.some((current) => current.sku === product.sku),
+  );
+  const ownedVaultProducts = cosmeticRotation.archivedCollection.filter((product) => ownedSkus.has(product.sku));
+  const previewableStoreProducts = useMemo(() => {
+    const merged = [...rotatingStoreProducts, ...ownedVaultProducts];
+    const seen = new Set<string>();
+    return merged.filter((product) => {
+      const key = String(product.sku || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [ownedVaultProducts, rotatingStoreProducts]);
+  const selectedProduct = useMemo(
+    () => previewableStoreProducts.find((item) => item.sku === selectedSku) || previewableStoreProducts[0] || null,
+    [previewableStoreProducts, selectedSku],
+  );
+  const selectedPreview = resolveCosmeticPreviewMeta(String(selectedProduct?.sku || ''));
+  const previewEffectSkus = useMemo(() => {
+    const source = Array.isArray(entitlements.ownedSkus) ? entitlements.ownedSkus : [];
+    const candidate = selectedProduct?.sku ? [...source, selectedProduct.sku] : source;
+    return Array.from(new Set(candidate.map((entry) => String(entry || '').trim()).filter(Boolean)));
+  }, [entitlements.ownedSkus, selectedProduct?.sku]);
   const cosmeticPreviewEffects = useMemo(
-    () => resolveCosmeticPreviewEffects(selectedSkuNormalized),
-    [selectedSkuNormalized],
+    () => mergeCosmeticPreviewEffects(previewEffectSkus),
+    [previewEffectSkus],
+  );
+  const activeOwnedCosmeticEffects = useMemo(
+    () => mergeCosmeticPreviewEffects(Array.isArray(entitlements.ownedSkus) ? entitlements.ownedSkus : []),
+    [entitlements.ownedSkus],
+  );
+  const activeOwnedEffectCount = useMemo(
+    () => Object.values(activeOwnedCosmeticEffects).filter(Boolean).length,
+    [activeOwnedCosmeticEffects],
   );
   const previewDisplayName = String(profile?.display_name || profile?.username || 'NCore Member');
   const previewHandle = String(profile?.username || 'member');
   const previewBio = String(profile?.bio || '').trim() || 'This is your live cosmetic preview card using your current profile.';
   const previewStatus = String(profile?.custom_status || '').trim() || 'Available for calls';
   const previewBannerUrl = String(profile?.banner_url || '').trim();
+  const rotationTimeRemaining = useMemo(() => {
+    if (!cosmeticRotation.nextRotationAt) return null;
+    const remainingMs = Math.max(cosmeticRotation.nextRotationAt.getTime() - cosmeticRotationClock, 0);
+    const totalMinutes = Math.floor(remainingMs / 60000);
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const minutes = totalMinutes % 60;
+    return { days, hours, minutes };
+  }, [cosmeticRotation.nextRotationAt, cosmeticRotationClock]);
+  const selectedProductOwned = selectedProduct ? ownedSkus.has(selectedProduct.sku) : false;
   const serviceDisputeByOrderId = useMemo(() => {
     const map = new Map<string, MarketplaceServiceDispute>();
     for (const dispute of serviceDisputes) {
@@ -740,8 +640,8 @@ export function MarketplacePage() {
     cosmetics: {
       label: 'Permanent Unlocks',
       summary: 'Permanent account cosmetics with live previews before checkout.',
-      count: storeProducts.length,
-      countLabel: 'cosmetics',
+      count: rotatingStoreProducts.length,
+      countLabel: 'live rotation items',
     },
   };
   const activeTrackMeta = marketplaceTrackMeta[activeTrack];
@@ -753,6 +653,26 @@ export function MarketplacePage() {
   }, [routeTrack]);
 
   useEffect(() => {
+    if (activeTrack !== 'cosmetics') return undefined;
+    setCosmeticRotationClock(Date.now());
+    const timer = window.setInterval(() => {
+      setCosmeticRotationClock(Date.now());
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [activeTrack]);
+
+  useEffect(() => {
+    if (previewableStoreProducts.length === 0) {
+      if (selectedSku) setSelectedSku('');
+      return;
+    }
+    const hasSelected = previewableStoreProducts.some((product) => product.sku === selectedSku);
+    if (!hasSelected) {
+      setSelectedSku(previewableStoreProducts[0].sku);
+    }
+  }, [previewableStoreProducts, selectedSku]);
+
+  useEffect(() => {
     const validIds = new Set(quickdrawNavItems.map((item) => item.id));
     if (!validIds.has(quickdrawNavId)) {
       setQuickdrawNavId(quickdrawNavItems[0]?.id || 'my_contracts');
@@ -760,6 +680,7 @@ export function MarketplacePage() {
   }, [quickdrawNavId, quickdrawNavItems]);
 
   useEffect(() => {
+    if (activeTrack !== 'cosmetics') return undefined;
     let cancelled = false;
     setLoadingStoreProducts(true);
     setBillingActionMessage('');
@@ -768,7 +689,7 @@ export function MarketplacePage() {
     (async () => {
       const { data, error } = await supabase
         .from('store_products')
-        .select('*')
+        .select('sku, name, description, kind, price_cents, currency, active, grant_key, grant_payload, created_at, updated_at')
         .eq('active', true)
         .order('price_cents', { ascending: true });
 
@@ -779,9 +700,6 @@ export function MarketplacePage() {
       } else {
         const nextProducts = (data || []) as StoreProduct[];
         setStoreProducts(nextProducts);
-        if (nextProducts.length > 0 && !selectedSku) {
-          setSelectedSku(nextProducts[0].sku);
-        }
       }
       setLoadingStoreProducts(false);
     })();
@@ -789,12 +707,12 @@ export function MarketplacePage() {
     return () => {
       cancelled = true;
     };
-  }, [refreshEntitlements]);
+  }, [activeTrack, refreshEntitlements]);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!profile?.id || activeTrack === 'cosmetics') return;
     void reloadMarketplacePanels();
-  }, [profile?.id]);
+  }, [activeTrack, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) {
@@ -1617,198 +1535,351 @@ export function MarketplacePage() {
           )}
 
           {activeTrack === 'cosmetics' && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-5">
-            <div className="nyptid-card p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="font-bold text-surface-100">Available Cosmetics</div>
-                  <div className="text-xs text-surface-500">Select an item to preview the effect before checkout.</div>
+            <div className="grid grid-cols-1 lg:grid-cols-[1.12fr_0.88fr] gap-5">
+              <div className="space-y-5">
+                <div className="nyptid-card p-5">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full border border-nyptid-300/25 bg-nyptid-300/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-nyptid-200">
+                        <Sparkles size={12} />
+                        Live Rotation Window
+                      </div>
+                      <div className="mt-3 text-2xl font-black text-surface-100">Cosmetic Drop {cosmeticRotation.totalRotations > 0 ? `${cosmeticRotation.rotationIndex + 1}/${cosmeticRotation.totalRotations}` : '0/0'}</div>
+                      <div className="mt-2 max-w-2xl text-sm text-surface-400">
+                        NCore rotates a curated cosmetic collection every {COSMETIC_ROTATION_DAYS} days. Owned cosmetics stay active on your profile even after they leave the active storefront.
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Live now</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{rotatingStoreProducts.length}</div>
+                      </div>
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Owned</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{ownedSkus.size}</div>
+                      </div>
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Preview stack</div>
+                        <div className="mt-1 text-lg font-black text-surface-100">{previewEffectSkus.length}</div>
+                      </div>
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Next swap</div>
+                        <div className="mt-1 text-sm font-black text-surface-100">
+                          {rotationTimeRemaining
+                            ? `${rotationTimeRemaining.days}d ${rotationTimeRemaining.hours}h ${rotationTimeRemaining.minutes}m`
+                            : 'Pending'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {upcomingStoreProducts.length > 0 ? upcomingStoreProducts.map((product) => (
+                      <span
+                        key={`up-next-${product.sku}`}
+                        className="inline-flex items-center gap-2 rounded-full border border-surface-700 bg-surface-900/70 px-3 py-1.5 text-xs text-surface-300"
+                      >
+                        <Clock3 size={12} className="text-nyptid-300" />
+                        Up next: {product.name}
+                      </span>
+                    )) : (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-surface-700 bg-surface-900/70 px-3 py-1.5 text-xs text-surface-300">
+                        <Clock3 size={12} className="text-nyptid-300" />
+                        The current rotation is the full cosmetic catalog.
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {loadingStoreProducts && <div className="text-xs text-surface-500">Loading...</div>}
+
+                <div className="nyptid-card p-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                      <div className="font-bold text-surface-100">Active Storefront Rotation</div>
+                      <div className="text-xs text-surface-500">Preview exactly how each item layers onto your current profile before checkout.</div>
+                    </div>
+                    {loadingStoreProducts && <div className="text-xs text-surface-500">Loading...</div>}
+                  </div>
+
+                  <div className="space-y-3">
+                    {rotatingStoreProducts.map((product) => {
+                      const owned = ownedSkus.has(product.sku);
+                      const loadingForProduct = checkoutLoadingKey === `sku:${product.sku}`;
+                      const previewMeta = resolveCosmeticPreviewMeta(product.sku);
+                      const isSelected = selectedProduct?.sku === product.sku;
+
+                      return (
+                        <div
+                          key={product.sku}
+                          className={`rounded-2xl border p-4 transition-all ${
+                            isSelected
+                              ? 'border-nyptid-300/45 bg-nyptid-300/10 shadow-glow-sm'
+                              : 'border-surface-700/70 bg-surface-800/40 hover:border-surface-600'
+                          }`}
+                        >
+                          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSku(product.sku)}
+                              className="min-w-0 text-left flex-1"
+                            >
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="font-semibold text-surface-100 truncate">{product.name}</div>
+                                {isSelected && (
+                                  <span className="px-2 py-0.5 rounded-full bg-nyptid-300/20 text-[10px] font-bold uppercase tracking-wide text-nyptid-100">
+                                    Selected
+                                  </span>
+                                )}
+                                {owned && (
+                                  <span className="px-2 py-0.5 rounded-full bg-green-500/15 text-[10px] font-bold uppercase tracking-wide text-green-300">
+                                    Owned
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-surface-500 mt-1 line-clamp-2">{previewMeta.summary}</div>
+                              <div className="flex flex-wrap gap-1.5 mt-3">
+                                {previewMeta.tags.slice(0, 3).map((tag) => (
+                                  <span key={`${product.sku}-${tag}`} className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-800 text-[10px] font-semibold text-surface-300">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+
+                            <div className="flex flex-col items-start xl:items-end gap-3">
+                              <div className="text-sm font-black text-surface-100">
+                                {formatUsdFromCents(product.price_cents)}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {!owned && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBuyStoreProduct(product)}
+                                    disabled={checkoutLoadingKey !== null || marketplaceLocked}
+                                    className="nyptid-btn-primary text-xs px-3 py-2"
+                                  >
+                                    {loadingForProduct ? 'Opening...' : 'Buy'}
+                                  </button>
+                                )}
+                                {owned && (
+                                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-green-500/40 bg-green-500/15 text-green-300 text-xs font-semibold">
+                                    <CheckCircle2 size={12} />
+                                    Live on profile
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleGiftStoreProduct(product)}
+                                  disabled={checkoutLoadingKey !== null || marketplaceLocked}
+                                  className="nyptid-btn-secondary text-xs px-3 py-2"
+                                >
+                                  <Gift size={12} />
+                                  {checkoutLoadingKey === `gift:${product.sku}` ? 'Opening...' : 'Gift'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {!loadingStoreProducts && rotatingStoreProducts.length === 0 && (
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 p-4 text-sm text-surface-500">
+                        No active cosmetics are in the current storefront rotation.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                      <div className="font-bold text-surface-100">Owned Cosmetics Vault</div>
+                      <div className="text-xs text-surface-500">Anything you already bought stays active and previewable even when it rotates out of the storefront.</div>
+                    </div>
+                    <div className="text-xs text-surface-500">{ownedVaultProducts.length} archived owned item{ownedVaultProducts.length === 1 ? '' : 's'}</div>
+                  </div>
+
+                  {ownedVaultProducts.length > 0 ? (
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      {ownedVaultProducts.map((product) => (
+                        <button
+                          key={`vault-${product.sku}`}
+                          type="button"
+                          onClick={() => setSelectedSku(product.sku)}
+                          className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                            selectedProduct?.sku === product.sku
+                              ? 'border-nyptid-300/45 bg-nyptid-300/10'
+                              : 'border-surface-700 bg-surface-900/60 hover:border-surface-600'
+                          }`}
+                        >
+                          <div className="text-sm font-semibold text-surface-100">{product.name}</div>
+                          <div className="mt-1 text-xs text-surface-500">{resolveCosmeticPreviewMeta(product.sku).summary}</div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-surface-700 bg-surface-900/50 px-4 py-5 text-sm text-surface-500">
+                      No archived owned cosmetics yet. When a purchased cosmetic rotates out, it will stay active here and on your profile.
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="space-y-2.5">
-              {storeProducts.map((product) => {
-                const owned = ownedSkus.has(product.sku);
-                const loadingForProduct = checkoutLoadingKey === `sku:${product.sku}`;
-                const previewMeta = COSMETIC_PREVIEWS[product.sku] || DEFAULT_PREVIEW;
-                const isSelected = selectedProduct?.sku === product.sku;
+              <div className="space-y-5 lg:sticky lg:top-5 h-fit">
+                <div className="nyptid-card p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Wand2 size={15} className="text-nyptid-300" />
+                    <div className="text-sm font-bold text-surface-100">Profile Render Preview</div>
+                  </div>
 
-                return (
-                  <div
-                    key={product.sku}
-                    className={`rounded-xl border px-3 py-3 transition-all ${
-                      isSelected
-                        ? 'border-nyptid-300/45 bg-nyptid-300/10 shadow-glow-sm'
-                        : 'border-surface-700/70 bg-surface-800/40 hover:border-surface-600'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedSku(product.sku)}
-                        className="min-w-0 text-left flex-1"
-                      >
-                        <div className="font-semibold text-surface-100 truncate">{product.name}</div>
-                        <div className="text-xs text-surface-500 mt-0.5 line-clamp-1">{product.description}</div>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                          {previewMeta.tags.slice(0, 3).map((tag) => (
-                            <span key={`${product.sku}-${tag}`} className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-800 text-[10px] font-semibold text-surface-300">
+                  {selectedProduct ? (
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-nyptid-300/20 bg-gradient-to-br from-nyptid-300/15 via-surface-900 to-surface-900 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-black text-surface-100">{selectedPreview.headline}</div>
+                            <div className="text-xs text-surface-400 mt-1">{selectedPreview.summary}</div>
+                          </div>
+                          <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                            selectedProductOwned
+                              ? 'border border-green-500/40 bg-green-500/15 text-green-300'
+                              : 'border border-nyptid-300/30 bg-nyptid-300/10 text-nyptid-200'
+                          }`}>
+                            {selectedProductOwned ? 'Already live' : 'Previewing purchase'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                          {selectedPreview.tags.map((tag) => (
+                            <span key={`preview-tag-${tag}`} className="px-2 py-0.5 rounded-md text-[10px] border border-nyptid-300/30 bg-nyptid-300/10 text-nyptid-200 font-semibold">
                               {tag}
                             </span>
                           ))}
                         </div>
-                      </button>
-                      <div className="text-sm font-black text-surface-100 flex-shrink-0">
-                        {formatUsdFromCents(product.price_cents)}
+                      </div>
+
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/80 p-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-surface-500 mb-2">Real Profile Simulation</div>
+                        <div
+                          className={`rounded-xl border border-surface-700 bg-surface-800/70 p-3 cosmetic-preview-stage ${
+                            cosmeticPreviewEffects.serverTheme ? 'cosmetic-preview-server-theme' : ''
+                          } ${
+                            cosmeticPreviewEffects.streamOverlay ? 'cosmetic-preview-stream-overlay' : ''
+                          }`}
+                        >
+                          <div
+                            className={`rounded-xl border border-surface-700 bg-surface-900/85 overflow-hidden cosmetic-preview-profile-card ${
+                              cosmeticPreviewEffects.bannerFx ? 'cosmetic-preview-banner-fx' : ''
+                            }`}
+                          >
+                            <div className="relative h-16 border-b border-surface-700">
+                              {previewBannerUrl ? (
+                                <img src={previewBannerUrl} alt="Profile banner" className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full bg-gradient-to-r from-nyptid-900/70 via-surface-900 to-nyptid-700/60" />
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-surface-950/35 via-transparent to-transparent" />
+                            </div>
+                            <div className="px-3 pb-3 -mt-4 relative">
+                              <div className="flex items-start gap-3">
+                                <div className={`cosmetic-preview-avatar-wrap ${cosmeticPreviewEffects.profileFlair ? 'cosmetic-preview-flair' : ''} ${cosmeticPreviewEffects.avatarFrame ? 'cosmetic-preview-avatar-frame' : ''}`}>
+                                  <Avatar
+                                    src={profile?.avatar_url}
+                                    name={previewDisplayName}
+                                    status={profile?.status}
+                                    size="lg"
+                                    className="ring-2 ring-surface-900"
+                                  />
+                                  {(cosmeticPreviewEffects.supporterBadge || cosmeticPreviewEffects.founderBadge) && (
+                                    <span className="cosmetic-preview-badge-glow absolute -right-1 -top-1 rounded-full border border-nyptid-300/50 bg-surface-900 px-1.5 py-[2px] text-[9px] font-bold text-nyptid-200">
+                                      {cosmeticPreviewEffects.founderBadge ? 'Founder' : 'Supporter'}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1 pt-2">
+                                  <div className={`text-sm font-bold truncate ${cosmeticPreviewEffects.nameplateGradient ? 'cosmetic-preview-nameplate' : 'text-surface-100'}`}>
+                                    {previewDisplayName}
+                                  </div>
+                                  <div className="text-[11px] text-surface-500 truncate">@{previewHandle}</div>
+                                </div>
+                              </div>
+                              <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/70 px-2.5 py-1.5 text-[11px] text-surface-300">
+                                {previewBio}
+                              </div>
+                              <div className="mt-2 flex items-center justify-between gap-2">
+                                <div className="text-[11px] text-surface-500 truncate">Status: {previewStatus}</div>
+                                {cosmeticPreviewEffects.chatSound && (
+                                  <div className="flex items-center gap-1.5 text-[10px] text-nyptid-200">
+                                    <span>Alert Tone</span>
+                                    <span className="cosmetic-preview-audio-bars">
+                                      <span />
+                                      <span />
+                                      <span />
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-[11px] text-surface-500">
+                            Preview layers the selected item on top of the cosmetics you already own, so this is the same effect stack your real profile uses after purchase.
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-surface-700 bg-surface-900/80 p-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-surface-500 mb-2">What This Unlock Adds</div>
+                        <ul className="space-y-2">
+                          {selectedPreview.effects.map((effect) => (
+                            <li key={`${selectedProduct.sku}-${effect}`} className="text-xs text-surface-300 flex items-start gap-2">
+                              <Sparkles size={12} className="text-nyptid-300 mt-0.5 flex-shrink-0" />
+                              <span>{effect}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
+                  ) : (
+                    <div className="text-sm text-surface-500">Select a cosmetic to preview it.</div>
+                  )}
+                </div>
 
-                    <div className="mt-3 flex items-center justify-end gap-2">
-                      {owned ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-green-500/40 bg-green-500/15 text-green-300 text-xs font-semibold">
-                          <CheckCircle2 size={12} />
-                          Owned
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleBuyStoreProduct(product)}
-                          disabled={checkoutLoadingKey !== null || marketplaceLocked}
-                          className="nyptid-btn-primary text-xs px-3 py-2"
-                        >
-                          {loadingForProduct ? 'Opening...' : 'Buy'}
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleGiftStoreProduct(product)}
-                        disabled={checkoutLoadingKey !== null || marketplaceLocked}
-                        className="nyptid-btn-secondary text-xs px-3 py-2"
-                      >
-                        <Gift size={12} />
-                        {checkoutLoadingKey === `gift:${product.sku}` ? 'Opening...' : 'Gift'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {!loadingStoreProducts && storeProducts.length === 0 && (
-                <div className="text-sm text-surface-500">No active store items.</div>
-              )}
-              </div>
-            </div>
-
-            <div className="nyptid-card p-4 lg:sticky lg:top-5 h-fit">
-              <div className="flex items-center gap-2 mb-3">
-                <Wand2 size={15} className="text-nyptid-300" />
-                <div className="text-sm font-bold text-surface-100">Cosmetic Preview</div>
-              </div>
-
-              {selectedProduct ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-nyptid-300/20 bg-gradient-to-br from-nyptid-300/15 via-surface-900 to-surface-900 p-3">
-                    <div className="text-sm font-black text-surface-100">{selectedPreview.headline}</div>
-                    <div className="text-xs text-surface-400 mt-1">{selectedPreview.summary}</div>
-                    <div className="flex flex-wrap gap-1.5 mt-3">
-                      {selectedPreview.tags.map((tag) => (
-                        <span key={`preview-tag-${tag}`} className="px-2 py-0.5 rounded-md text-[10px] border border-nyptid-300/30 bg-nyptid-300/10 text-nyptid-200 font-semibold">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+                <div className="nyptid-card p-4">
+                  <div className="text-sm font-bold text-surface-100">Live Cosmetic State</div>
+                  <div className="mt-1 text-xs text-surface-500">
+                    {activeOwnedEffectCount > 0
+                      ? `${activeOwnedEffectCount} cosmetic effect${activeOwnedEffectCount === 1 ? '' : 's'} are currently active on your profile.`
+                      : 'You do not have any active cosmetic effects on your profile yet.'}
                   </div>
 
-                  <div className="rounded-xl border border-surface-700 bg-surface-900/80 p-3">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-surface-500 mb-2">Visual Sample</div>
-                    <div
-                      className={`rounded-xl border border-surface-700 bg-surface-800/70 p-3 cosmetic-preview-stage ${
-                        cosmeticPreviewEffects.serverTheme ? 'cosmetic-preview-server-theme' : ''
-                      } ${
-                        cosmeticPreviewEffects.streamOverlay ? 'cosmetic-preview-stream-overlay' : ''
-                      }`}
-                    >
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    {[
+                      ['Profile flair', activeOwnedCosmeticEffects.profileFlair],
+                      ['Avatar frame', activeOwnedCosmeticEffects.avatarFrame],
+                      ['Nameplate', activeOwnedCosmeticEffects.nameplateGradient],
+                      ['Supporter badge', activeOwnedCosmeticEffects.supporterBadge],
+                      ['Founder badge', activeOwnedCosmeticEffects.founderBadge],
+                      ['Banner FX', activeOwnedCosmeticEffects.bannerFx],
+                      ['Chat sound', activeOwnedCosmeticEffects.chatSound],
+                      ['Stream overlay', activeOwnedCosmeticEffects.streamOverlay],
+                      ['Server theme', activeOwnedCosmeticEffects.serverTheme],
+                    ].map(([label, active]) => (
                       <div
-                        className={`rounded-xl border border-surface-700 bg-surface-900/85 overflow-hidden cosmetic-preview-profile-card ${
-                          cosmeticPreviewEffects.bannerFx ? 'cosmetic-preview-banner-fx' : ''
+                        key={String(label)}
+                        className={`rounded-xl border px-3 py-2 text-xs ${
+                          active
+                            ? 'border-green-500/35 bg-green-500/10 text-green-300'
+                            : 'border-surface-700 bg-surface-900/60 text-surface-500'
                         }`}
                       >
-                        <div className="relative h-16 border-b border-surface-700">
-                          {previewBannerUrl ? (
-                            <img src={previewBannerUrl} alt="Profile banner" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full bg-gradient-to-r from-nyptid-900/70 via-surface-900 to-nyptid-700/60" />
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-surface-950/35 via-transparent to-transparent" />
-                        </div>
-                        <div className="px-3 pb-3 -mt-4 relative">
-                          <div className="flex items-start gap-3">
-                            <div className={`cosmetic-preview-avatar-wrap ${cosmeticPreviewEffects.profileFlair ? 'cosmetic-preview-flair' : ''} ${cosmeticPreviewEffects.avatarFrame ? 'cosmetic-preview-avatar-frame' : ''}`}>
-                              <Avatar
-                                src={profile?.avatar_url}
-                                name={previewDisplayName}
-                                status={profile?.status}
-                                size="lg"
-                                className="ring-2 ring-surface-900"
-                              />
-                              {(cosmeticPreviewEffects.supporterBadge || cosmeticPreviewEffects.founderBadge) && (
-                                <span className="cosmetic-preview-badge-glow absolute -right-1 -top-1 rounded-full border border-nyptid-300/50 bg-surface-900 px-1.5 py-[2px] text-[9px] font-bold text-nyptid-200">
-                                  {cosmeticPreviewEffects.founderBadge ? 'Founder' : 'Supporter'}
-                                </span>
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1 pt-2">
-                              <div className={`text-sm font-bold truncate ${cosmeticPreviewEffects.nameplateGradient ? 'cosmetic-preview-nameplate' : 'text-surface-100'}`}>
-                                {previewDisplayName}
-                              </div>
-                              <div className="text-[11px] text-surface-500 truncate">@{previewHandle}</div>
-                            </div>
-                          </div>
-                          <div className="mt-2 rounded-lg border border-surface-700 bg-surface-900/70 px-2.5 py-1.5 text-[11px] text-surface-300">
-                            {previewBio}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="text-[11px] text-surface-500 truncate">Status: {previewStatus}</div>
-                            {cosmeticPreviewEffects.chatSound && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-nyptid-200">
-                                <span>Alert Tone</span>
-                                <span className="cosmetic-preview-audio-bars">
-                                  <span />
-                                  <span />
-                                  <span />
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        <div className="font-semibold">{label}</div>
+                        <div className="mt-0.5">{active ? 'Active' : 'Locked'}</div>
                       </div>
-                      <div className="mt-2 text-[11px] text-surface-500">
-                        Live preview uses your current profile identity and applies selected cosmetic effects in real-time.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-surface-700 bg-surface-900/80 p-3">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-surface-500 mb-2">What You Get</div>
-                    <ul className="space-y-2">
-                      {selectedPreview.effects.map((effect) => (
-                        <li key={`${selectedProduct.sku}-${effect}`} className="text-xs text-surface-300 flex items-start gap-2">
-                          <Sparkles size={12} className="text-nyptid-300 mt-0.5 flex-shrink-0" />
-                          <span>{effect}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    ))}
                   </div>
                 </div>
-              ) : (
-                <div className="text-sm text-surface-500">Select a cosmetic to preview it.</div>
-              )}
+              </div>
             </div>
-          </div>
           )}
-
                     {activeTrack === 'quickdraw' && (
             <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
               <aside className="nyptid-card p-4 h-fit xl:sticky xl:top-5 space-y-4">

@@ -11,7 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { directCallSession, useDirectCallSession } from '../../lib/directCallSession';
 import type { Notification } from '../../lib/types';
 import { formatRelativeTime } from '../../lib/utils';
-import { playNotificationSound, startIncomingCallRing, stopIncomingCallRing, type NotificationSoundKind } from '../../lib/notificationSound';
+import { playNotificationSound, primeNotificationAudio, startIncomingCallRing, stopIncomingCallRing, type NotificationSoundKind } from '../../lib/notificationSound';
 import { getStreamerModeSettings, sanitizeNotificationBody, sanitizeNotificationTitle } from '../../lib/streamerMode';
 import {
   DEFAULT_UPDATE_FEED_URL,
@@ -93,6 +93,11 @@ function getNotificationSoundKind(notification: Notification): NotificationSound
   return 'message';
 }
 
+function canUseRendererNotificationAudio(): boolean {
+  if (typeof document === 'undefined') return false;
+  return !document.hidden && document.hasFocus();
+}
+
 export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSidebar, sidebarOpen }: TopBarProps) {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -160,6 +165,18 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     if (Notification.permission === 'default') {
       Notification.requestPermission().catch(() => undefined);
     }
+  }, []);
+
+  useEffect(() => {
+    const prime = () => {
+      primeNotificationAudio();
+    };
+    window.addEventListener('pointerdown', prime, { passive: true });
+    window.addEventListener('keydown', prime, { passive: true } as AddEventListenerOptions);
+    return () => {
+      window.removeEventListener('pointerdown', prime);
+      window.removeEventListener('keydown', prime);
+    };
   }, []);
 
   useEffect(() => {
@@ -364,7 +381,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           if (incoming.type === 'incoming_call') {
             setIncomingCall(incoming);
           }
-          if (!useMainProcessDesktopNotifications) {
+          if (canUseRendererNotificationAudio()) {
             const soundKind = getNotificationSoundKind(incoming);
             if (soundKind === 'call') {
               startIncomingCallRing({ status: profile.status });
@@ -402,11 +419,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   }, []);
 
   useEffect(() => {
-    if (useMainProcessDesktopNotifications) {
+    if (streamerMode.silentNotifications) {
       stopIncomingCallRing();
       return;
     }
-    if (streamerMode.silentNotifications) {
+    if (!canUseRendererNotificationAudio()) {
       stopIncomingCallRing();
       return;
     }
@@ -418,7 +435,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     }
     stopIncomingCallRing();
     return;
-  }, [incomingCall?.id, profile?.status, streamerMode.silentNotifications, useMainProcessDesktopNotifications]);
+  }, [incomingCall?.id, profile?.status, streamerMode.silentNotifications]);
 
   async function markAllRead() {
     markReleaseUpdatesRead();

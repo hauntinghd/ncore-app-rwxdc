@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Calendar, MessageSquare, Award, Users, BookOpen, Crown, Shield, CreditCard as Edit3 } from 'lucide-react';
+import { Calendar, MessageSquare, Award, Users, Crown, Shield, Sparkles, CreditCard as Edit3 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { useAuth } from '../contexts/AuthContext';
+import { useEntitlements } from '../lib/entitlements';
+import { mergeCosmeticPreviewEffects, resolveCosmeticPreviewMeta } from '../lib/cosmetics';
 import { supabase } from '../lib/supabase';
 import type { Profile, UserAchievement, Community } from '../lib/types';
 import { getRankInfo, getRankBadgeClasses, getPlatformRoleBadge, getCommunityRoleBadge } from '../lib/utils';
@@ -12,6 +14,7 @@ import { getRankInfo, getRankBadgeClasses, getPlatformRoleBadge, getCommunityRol
 export function ProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const { profile: currentProfile } = useAuth();
+  const { entitlements } = useEntitlements();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [achievements, setAchievements] = useState<UserAchievement[]>([]);
@@ -19,6 +22,28 @@ export function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   const isOwn = userId === currentProfile?.id;
+  const ownedCosmeticSkus = useMemo(
+    () => (isOwn && Array.isArray(entitlements.ownedSkus) ? entitlements.ownedSkus : []),
+    [entitlements.ownedSkus, isOwn],
+  );
+  const cosmeticEffects = useMemo(
+    () => mergeCosmeticPreviewEffects(ownedCosmeticSkus),
+    [ownedCosmeticSkus],
+  );
+  const activeCosmeticItems = useMemo(() => {
+    const seen = new Set<string>();
+    return ownedCosmeticSkus
+      .map((sku) => {
+        const normalized = String(sku || '').trim().toLowerCase();
+        if (!normalized || seen.has(normalized)) return null;
+        seen.add(normalized);
+        return {
+          sku: normalized,
+          meta: resolveCosmeticPreviewMeta(normalized),
+        };
+      })
+      .filter(Boolean) as Array<{ sku: string; meta: ReturnType<typeof resolveCosmeticPreviewMeta> }>;
+  }, [ownedCosmeticSkus]);
 
   useEffect(() => {
     if (!userId) return;
@@ -65,8 +90,14 @@ export function ProfilePage() {
     <AppShell showChannelSidebar={false} title={profile.display_name || profile.username}>
       <div className="h-full overflow-y-auto">
         <div className="max-w-3xl mx-auto p-6">
-          <div className="nyptid-card overflow-hidden mb-6">
-            <div className="h-24 bg-gradient-to-br from-nyptid-900/60 to-surface-800 relative overflow-hidden">
+          <div className={`nyptid-card overflow-hidden mb-6 cosmetic-preview-stage ${
+            isOwn && cosmeticEffects.serverTheme ? 'cosmetic-preview-server-theme' : ''
+          } ${
+            isOwn && cosmeticEffects.streamOverlay ? 'cosmetic-preview-stream-overlay' : ''
+          }`}>
+            <div className={`h-24 bg-gradient-to-br from-nyptid-900/60 to-surface-800 relative overflow-hidden ${
+              isOwn && cosmeticEffects.bannerFx ? 'cosmetic-preview-banner-fx' : ''
+            }`}>
               {profile.banner_url && (
                 <img
                   src={profile.banner_url}
@@ -78,8 +109,12 @@ export function ProfilePage() {
             </div>
             <div className="px-6 pb-6">
               <div className="flex items-end gap-4 -mt-8 mb-4">
-                <div className="relative flex-shrink-0">
-                  <div className="w-20 h-20 rounded-2xl border-4 border-surface-800">
+                <div className={`relative flex-shrink-0 cosmetic-preview-avatar-wrap ${
+                  isOwn && cosmeticEffects.profileFlair ? 'cosmetic-preview-flair' : ''
+                } ${
+                  isOwn && cosmeticEffects.avatarFrame ? 'cosmetic-preview-avatar-frame' : ''
+                }`}>
+                  <div className="w-20 h-20 rounded-2xl border-4 border-surface-800 overflow-hidden">
                     <Avatar
                       src={profile.avatar_url}
                       name={profile.display_name || profile.username}
@@ -87,10 +122,17 @@ export function ProfilePage() {
                       status={profile.status}
                     />
                   </div>
+                  {isOwn && (cosmeticEffects.supporterBadge || cosmeticEffects.founderBadge) && (
+                    <span className="cosmetic-preview-badge-glow absolute -right-1 -top-1 rounded-full border border-nyptid-300/50 bg-surface-900 px-1.5 py-[2px] text-[9px] font-bold text-nyptid-200">
+                      {cosmeticEffects.founderBadge ? 'Founder' : 'Supporter'}
+                    </span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0 pb-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h1 className="text-2xl font-black text-surface-100">
+                    <h1 className={`text-2xl font-black ${
+                      isOwn && cosmeticEffects.nameplateGradient ? 'cosmetic-preview-nameplate' : 'text-surface-100'
+                    }`}>
                       {profile.display_name || profile.username}
                     </h1>
                     {profile.platform_role === 'owner' && (
@@ -108,6 +150,13 @@ export function ProfilePage() {
                     <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-surface-700 bg-surface-800/70 px-3 py-1 text-xs text-surface-300">
                       {profile.custom_status_emoji && <span>{profile.custom_status_emoji}</span>}
                       <span className="truncate max-w-[320px]">{profile.custom_status || 'Status set'}</span>
+                      {isOwn && cosmeticEffects.chatSound && (
+                        <span className="cosmetic-preview-audio-bars ml-1">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -142,6 +191,35 @@ export function ProfilePage() {
                   {communities.length} communities
                 </span>
               </div>
+
+              {isOwn && (
+                <div className="mt-4 rounded-xl border border-surface-700 bg-surface-900/65 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-bold text-surface-100">Active Cosmetic Stack</div>
+                      <div className="text-xs text-surface-500">
+                        {activeCosmeticItems.length > 0
+                          ? 'These are the cosmetic unlocks currently rendering on your profile.'
+                          : 'No cosmetic unlocks are active on this profile yet.'}
+                      </div>
+                    </div>
+                    <div className="text-xs text-surface-400">{activeCosmeticItems.length} active</div>
+                  </div>
+                  {activeCosmeticItems.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {activeCosmeticItems.map(({ sku, meta }) => (
+                        <div key={sku} className="rounded-xl border border-surface-700 bg-surface-800/70 px-3 py-2">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-surface-100">
+                            <Sparkles size={12} className="text-nyptid-300" />
+                            {meta.headline}
+                          </div>
+                          <div className="mt-1 text-xs text-surface-500 max-w-xs">{meta.summary}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Mic, MicOff, Video, VideoOff, Monitor, PhoneOff, Volume2 } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
 
 interface PersistentVoiceBarProps {
   channelName: string;
@@ -52,7 +52,7 @@ export function PersistentVoiceBar({
             isDeafened ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' : 'bg-surface-700 text-surface-300 hover:bg-surface-600'
           }`}
         >
-          {isDeafened ? <VideoOff size={14} /> : <Volume2 size={14} />}
+          {isDeafened ? <VolumeX size={14} /> : <Volume2 size={14} />}
         </button>
 
         <button

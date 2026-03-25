@@ -8,6 +8,7 @@ import { Modal } from '../ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
 import { trackGrowthEvent } from '../../lib/growthEvents';
+import { serverVoiceSession, useServerVoiceSession } from '../../lib/serverVoiceSession';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
@@ -16,15 +17,6 @@ import {
   detectCommunityTemplate,
   getCommunityBlueprint,
 } from '../../lib/communityBlueprints';
-
-interface VoiceState {
-  channelId: string;
-  channelName: string;
-  communityId: string;
-  isMuted: boolean;
-  isDeafened: boolean;
-  isCameraOn: boolean;
-}
 
 interface AppShellProps {
   children: ReactNode;
@@ -64,12 +56,12 @@ export function AppShell({
   const { capabilities } = useGrowthCapabilities();
   const navigate = useNavigate();
   const location = useLocation();
+  const voiceSession = useServerVoiceSession();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [categories, setCategories] = useState<ChannelCategory[]>([]);
   const [voiceSessions, setVoiceSessions] = useState<Record<string, VoiceSession[]>>({});
-  const [currentVoice, setCurrentVoice] = useState<VoiceState | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktopSidebar, setIsDesktopSidebar] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -86,6 +78,11 @@ export function AppShell({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const communitiesCacheKey = profile ? `ncore.cache.communities.${profile.id}` : null;
+  const hasActiveServerVoice = voiceSession.phase !== 'idle' && Boolean(voiceSession.channelId);
+  const isOnActiveVoiceRoute = hasActiveServerVoice
+    && Boolean(voiceSession.channelId)
+    && Boolean(voiceSession.communityId)
+    && location.pathname === `/app/community/${voiceSession.communityId}/voice/${voiceSession.channelId}`;
 
   async function loadUserCommunities() {
     if (!profile) return;
@@ -866,7 +863,7 @@ export function AppShell({
             categories={categories}
             activeChannelId={activeChannelId}
             voiceSessions={voiceSessions}
-            currentVoiceChannelId={currentVoice?.channelId}
+            currentVoiceChannelId={voiceSession.channelId || undefined}
             onAddCategory={handleAddCategory}
             onAddChannel={handleAddChannel}
             onEditCategory={handleEditCategory}
@@ -891,7 +888,7 @@ export function AppShell({
                 categories={categories}
                 activeChannelId={activeChannelId}
                 voiceSessions={voiceSessions}
-                currentVoiceChannelId={currentVoice?.channelId}
+                currentVoiceChannelId={voiceSession.channelId || undefined}
                 onAddCategory={handleAddCategory}
                 onAddChannel={handleAddChannel}
                 onEditCategory={handleEditCategory}
@@ -917,18 +914,18 @@ export function AppShell({
           sidebarOpen={isDesktopSidebar ? true : sidebarOpen}
         />
         <div className="flex-1 overflow-hidden">{children}</div>
-        {currentVoice && (
+        {hasActiveServerVoice && !isOnActiveVoiceRoute && voiceSession.channelId && voiceSession.communityId && (
           <PersistentVoiceBar
-            channelName={currentVoice.channelName}
-            communityId={currentVoice.communityId}
-            channelId={currentVoice.channelId}
-            isMuted={currentVoice.isMuted}
-            isDeafened={currentVoice.isDeafened}
-            isCameraOn={currentVoice.isCameraOn}
-            onToggleMute={() => setCurrentVoice((value) => (value ? { ...value, isMuted: !value.isMuted } : null))}
-            onToggleDeafen={() => setCurrentVoice((value) => (value ? { ...value, isDeafened: !value.isDeafened } : null))}
-            onToggleCamera={() => setCurrentVoice((value) => (value ? { ...value, isCameraOn: !value.isCameraOn } : null))}
-            onLeave={() => setCurrentVoice(null)}
+            channelName={voiceSession.channelName}
+            communityId={voiceSession.communityId}
+            channelId={voiceSession.channelId}
+            isMuted={voiceSession.isMuted}
+            isDeafened={voiceSession.isDeafened}
+            isCameraOn={voiceSession.isCameraOn}
+            onToggleMute={() => void serverVoiceSession.toggleMute()}
+            onToggleDeafen={() => void serverVoiceSession.toggleDeafen()}
+            onToggleCamera={() => void serverVoiceSession.toggleCamera()}
+            onLeave={() => void serverVoiceSession.leave()}
           />
         )}
       </div>

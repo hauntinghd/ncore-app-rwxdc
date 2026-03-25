@@ -124,8 +124,10 @@ function RealtimeBridge() {
     typeof window !== 'undefined' && (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
   const { session, profile } = useAuth();
   const navigate = useNavigate();
+  const shouldProbeRunPod = import.meta.env.DEV || String(import.meta.env.VITE_ENABLE_RUNPOD_PROBE || '').trim() === '1';
 
   useEffect(() => {
+    if (!shouldProbeRunPod) return;
     let cancelled = false;
     const runProbe = () => {
       void probeRunPodBackend().then((result) => {
@@ -158,7 +160,7 @@ function RealtimeBridge() {
       }
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, []);
+  }, [shouldProbeRunPod]);
 
   // Start/stop realtime listener in main process when running in Electron
   useEffect(() => {

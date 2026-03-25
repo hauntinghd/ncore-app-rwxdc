@@ -18,6 +18,7 @@ import {
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
+import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
 import { extractMentionHandles, hasBroadcastMention, isMentioningTarget } from '../lib/mentions';
 import { supabase } from '../lib/supabase';
@@ -233,6 +234,35 @@ function groupMessages(messages: Message[]): Message[][] {
   });
   if (current.length > 0) groups.push(current);
   return groups;
+}
+
+function isAuthOrJwtError(error: any): boolean {
+  const message = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const status = Number(error?.status || error?.statusCode || 0);
+  return (
+    status === 401
+    || status === 403
+    || code === 'PGRST301'
+    || code === 'PGRST302'
+    || message.includes('invalid jwt')
+    || message.includes('jwt')
+    || message.includes('unauthorized')
+    || message.includes('permission denied')
+  );
+}
+
+async function insertNotificationsWithRetry(rows: any[]) {
+  if (!rows || rows.length === 0) return null;
+  let { error } = await supabase.from('notifications').insert(rows as any);
+  if (error && isAuthOrJwtError(error)) {
+    const refreshed = await ensureFreshAuthSession(60, { forceRefresh: true, verifyOnServer: false });
+    if (refreshed.ok) {
+      const retry = await supabase.from('notifications').insert(rows as any);
+      error = retry.error;
+    }
+  }
+  return error || null;
 }
 
 export function ChatPage() {
@@ -650,7 +680,10 @@ export function ChatPage() {
             },
             is_read: false,
           }));
-          await supabase.from('notifications').insert(mentionNotifications as any);
+          const notifyError = await insertNotificationsWithRetry(mentionNotifications as any[]);
+          if (notifyError) {
+            console.warn('Failed to queue channel mention notifications:', notifyError);
+          }
         }
       }
     } catch (notifyError) {

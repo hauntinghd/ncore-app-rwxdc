@@ -147,6 +147,15 @@ function showMainWindow() {
   return win;
 }
 
+function isRendererInForeground() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  try {
+    return mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused();
+  } catch {
+    return false;
+  }
+}
+
 function destroyTray() {
   if (!appTray) return;
   try {
@@ -533,6 +542,9 @@ ipcMain.handle('realtime:start', async (_event, accessToken) => {
         try {
           const incoming = payload.new || {};
           if (normalizeStatus(_currentUserStatus) === 'dnd') {
+            return;
+          }
+          if (isRendererInForeground()) {
             return;
           }
           showNativeNotificationForEvent(incoming);

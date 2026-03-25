@@ -1,9 +1,28 @@
 {
     "releases": [
         {
+            "version": "11.7.80",
+            "date": "2026-03-25",
+            "badge": "Current Build",
+            "improvements": [
+                "Permanent Unlocks now run as a curated 4-day cosmetic storefront rotation with live drop timing, upcoming cosmetics visibility, and owned-vault carryover for previously purchased items.",
+                "Cosmetic preview now simulates the selected item on top of the cosmetics you already own, and owned cosmetics now render on the real profile page using the same effect stack as the storefront preview.",
+                "Server voice sessions now persist across server navigation so you can join a voice channel, click through text channels, and stay connected with a shared live session bar.",
+                "Desktop notification audio now plays more reliably by letting the focused renderer own foreground notification sounds while the Electron main process continues handling background notifications.",
+                "Startup and marketplace responsiveness were tightened by skipping the default RunPod probe in production and avoiding QuickDraw/game data hydration when you are only browsing the cosmetic storefront."
+            ],
+            "bugFixes": [
+                "Fixed the cosmetics trust gap where a store preview could look correct but the same owned effects were not rendered on the actual profile page after purchase.",
+                "Fixed server voice channel teardown when switching from a server call into text channels by moving channel voice state out of the route lifecycle.",
+                "Fixed channel @mention notification delivery failures by retrying inserts through the refreshed auth-session path instead of silently dying on stale auth.",
+                "Reduced unnecessary marketplace background work on the cosmetics track so the normal NCore market no longer pays QuickDraw/game refresh costs while you are shopping for account cosmetics.",
+                "Fixed desktop notification sound ownership conflicts that caused missing or inconsistent sounds while the app window was already focused."
+            ]
+        },
+        {
             "version": "11.7.79",
             "date": "2026-03-22",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "Cosmetics preview now renders your real profile identity (avatar, banner, display name, @username, bio, and status) instead of a placeholder sample.",
                 "Permanent Unlock previews now animate per selected SKU so profile flair, frames, gradients, badges, banner FX, stream overlay, and chat-sound visuals are shown live before checkout.",
