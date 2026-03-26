@@ -2,11 +2,27 @@ interface MentionTarget {
   id?: string | null;
   username?: string | null;
   display_name?: string | null;
+  avatar_url?: string | null;
+  status?: string | null;
 }
 
 export interface MentionTextSegment {
   text: string;
   isMention: boolean;
+}
+
+export interface ActiveMentionQuery {
+  start: number;
+  end: number;
+  query: string;
+}
+
+export interface MentionSuggestion {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  status?: string | null;
 }
 
 function escapeRegex(value: string): string {
@@ -19,6 +35,22 @@ function normalizeHandle(value: unknown): string {
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[^a-z0-9_.-]/g, '');
+}
+
+function scoreMentionSuggestion(target: MentionSuggestion, query: string): number {
+  const normalizedQuery = normalizeHandle(query);
+  if (!normalizedQuery) return 0;
+
+  const username = normalizeHandle(target.username);
+  const display = normalizeHandle(target.display_name || '');
+
+  if (username === normalizedQuery) return 0;
+  if (display === normalizedQuery) return 1;
+  if (username.startsWith(normalizedQuery)) return 2;
+  if (display.startsWith(normalizedQuery)) return 3;
+  if (username.includes(normalizedQuery)) return 4;
+  if (display.includes(normalizedQuery)) return 5;
+  return Number.POSITIVE_INFINITY;
 }
 
 function buildMentionCandidates(target: MentionTarget): string[] {
@@ -54,6 +86,101 @@ export function extractMentionHandles(content: unknown): Set<string> {
     match = regex.exec(text);
   }
   return handles;
+}
+
+export function getActiveMentionQuery(content: unknown, caretPosition?: number | null): ActiveMentionQuery | null {
+  const text = String(content || '');
+  const normalizedCaret = Number.isFinite(Number(caretPosition))
+    ? Math.max(0, Math.min(Number(caretPosition), text.length))
+    : text.length;
+  const beforeCaret = text.slice(0, normalizedCaret);
+  const atIndex = beforeCaret.lastIndexOf('@');
+
+  if (atIndex < 0) return null;
+  if (atIndex > 0) {
+    const leadingChar = beforeCaret[atIndex - 1];
+    if (leadingChar && !/[\s([{'"]/.test(leadingChar)) {
+      return null;
+    }
+  }
+
+  const query = beforeCaret.slice(atIndex + 1);
+  if (/[^a-z0-9_.-]/i.test(query)) return null;
+
+  let end = normalizedCaret;
+  while (end < text.length && /[a-z0-9_.-]/i.test(text[end])) {
+    end += 1;
+  }
+
+  return {
+    start: atIndex,
+    end,
+    query,
+  };
+}
+
+export function buildMentionSuggestions(
+  targets: MentionTarget[],
+  query: unknown,
+  maxResults = 8,
+): MentionSuggestion[] {
+  const deduped = new Map<string, MentionSuggestion>();
+
+  for (const target of targets || []) {
+    const id = String(target?.id || '').trim();
+    const username = String(target?.username || '').trim();
+    if (!id || !username) continue;
+
+    deduped.set(id, {
+      id,
+      username,
+      display_name: target?.display_name ? String(target.display_name) : null,
+      avatar_url: target?.avatar_url ? String(target.avatar_url) : null,
+      status: target?.status ? String(target.status) : null,
+    });
+  }
+
+  const normalizedQuery = normalizeHandle(query);
+  return Array.from(deduped.values())
+    .filter((target) => {
+      if (!normalizedQuery) return true;
+      return scoreMentionSuggestion(target, normalizedQuery) !== Number.POSITIVE_INFINITY;
+    })
+    .sort((left, right) => {
+      const leftScore = scoreMentionSuggestion(left, normalizedQuery);
+      const rightScore = scoreMentionSuggestion(right, normalizedQuery);
+      if (leftScore !== rightScore) return leftScore - rightScore;
+
+      const leftLabel = String(left.display_name || left.username).toLowerCase();
+      const rightLabel = String(right.display_name || right.username).toLowerCase();
+      return leftLabel.localeCompare(rightLabel);
+    })
+    .slice(0, Math.max(1, maxResults));
+}
+
+export function insertMentionSuggestion(
+  content: unknown,
+  mention: ActiveMentionQuery,
+  suggestion: Pick<MentionSuggestion, 'username'> | string,
+): { value: string; caretPosition: number } {
+  const text = String(content || '');
+  const username = typeof suggestion === 'string'
+    ? normalizeHandle(suggestion)
+    : normalizeHandle(suggestion.username);
+  if (!username) {
+    return { value: text, caretPosition: text.length };
+  }
+
+  const before = text.slice(0, mention.start);
+  const after = text.slice(mention.end);
+  const needsTrailingSpace = after.length === 0 || !/^[\s.,!?;:)}\]]/.test(after);
+  const inserted = `@${username}${needsTrailingSpace ? ' ' : ''}`;
+  const value = `${before}${inserted}${after}`;
+
+  return {
+    value,
+    caretPosition: before.length + inserted.length,
+  };
 }
 
 export function isMentioningTarget(content: unknown, target: MentionTarget, allowBroadcast = true): boolean {

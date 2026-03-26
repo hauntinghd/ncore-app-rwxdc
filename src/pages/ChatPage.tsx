@@ -1,4 +1,4 @@
-import { memo, useCallback, useState, useEffect, useMemo, useRef, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useCallback, useState, useEffect, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   BellOff,
@@ -20,7 +20,14 @@ import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
-import { resolveMentionTargetIds, splitMentionText } from '../lib/mentions';
+import {
+  buildMentionSuggestions,
+  getActiveMentionQuery,
+  insertMentionSuggestion,
+  resolveMentionTargetIds,
+  splitMentionText,
+  type MentionSuggestion,
+} from '../lib/mentions';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
@@ -310,6 +317,8 @@ export function ChatPage() {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
+  const [composerSelectionStart, setComposerSelectionStart] = useState(0);
+  const [mentionSuggestionIndex, setMentionSuggestionIndex] = useState(0);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -359,6 +368,42 @@ export function ChatPage() {
     [messages],
   );
   const messageGroups = useMemo(() => groupMessages(messages), [messages]);
+  const mentionTargets = useMemo(() => {
+    const deduped = new Map<string, {
+      id: string;
+      username: string;
+      display_name: string | null;
+      avatar_url: string | null;
+      status: string | null;
+    }>();
+
+    for (const member of members) {
+      const id = String(member.profile?.id || '').trim();
+      const username = String(member.profile?.username || '').trim();
+      if (!id || !username) continue;
+      deduped.set(id, {
+        id,
+        username,
+        display_name: member.profile?.display_name || null,
+        avatar_url: member.profile?.avatar_url || null,
+        status: member.profile?.status || null,
+      });
+    }
+
+    return Array.from(deduped.values());
+  }, [members]);
+  const activeMentionQuery = useMemo(
+    () => getActiveMentionQuery(input, composerSelectionStart),
+    [composerSelectionStart, input],
+  );
+  const mentionSuggestions = useMemo(
+    () => (activeMentionQuery ? buildMentionSuggestions(mentionTargets, activeMentionQuery.query) : []),
+    [activeMentionQuery, mentionTargets],
+  );
+
+  useEffect(() => {
+    setMentionSuggestionIndex(0);
+  }, [activeMentionQuery?.query, activeMentionQuery?.start, channelId]);
 
   useEffect(() => {
     if (!channelId) return;
@@ -856,7 +901,48 @@ export function ChatPage() {
     });
   }, []);
 
+  const syncComposerSelection = useCallback((target: HTMLTextAreaElement | null) => {
+    if (!target) return;
+    setComposerSelectionStart(target.selectionStart ?? target.value.length);
+  }, []);
+
+  const commitMentionSuggestion = useCallback((suggestion: MentionSuggestion) => {
+    if (!activeMentionQuery) return;
+    const next = insertMentionSuggestion(input, activeMentionQuery, suggestion);
+    setInput(next.value);
+    requestAnimationFrame(() => {
+      const target = inputRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(next.caretPosition, next.caretPosition);
+      setComposerSelectionStart(next.caretPosition);
+    });
+  }, [activeMentionQuery, input]);
+
+  const handleComposerChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = event.target.value.slice(0, maxMessageLength);
+    setInput(nextValue);
+    setComposerSelectionStart(event.target.selectionStart ?? nextValue.length);
+  }, [maxMessageLength]);
+
   function handleKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (activeMentionQuery && mentionSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionSuggestionIndex((prev) => (prev + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionSuggestionIndex((prev) => (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        commitMentionSuggestion(mentionSuggestions[mentionSuggestionIndex] || mentionSuggestions[0]);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1019,7 +1105,46 @@ export function ChatPage() {
               </div>
             </div>
           )}
-          <div className={`flex items-end gap-2 bg-surface-800 border border-surface-700 px-3 py-2 ${replyTo || editingMsg ? 'rounded-b-xl' : 'rounded-xl'}`}>
+          <div className="relative">
+            {activeMentionQuery && mentionSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 shadow-2xl z-20">
+                <div className="border-b border-surface-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-surface-500">
+                  Mention someone in this server
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {mentionSuggestions.map((suggestion, index) => {
+                    const isActive = index === mentionSuggestionIndex;
+                    const label = suggestion.display_name || suggestion.username;
+                    return (
+                      <button
+                        key={`mention-${suggestion.id}`}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          commitMentionSuggestion(suggestion);
+                        }}
+                        className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                          isActive ? 'bg-nyptid-300/10 text-surface-100' : 'text-surface-300 hover:bg-surface-800'
+                        }`}
+                      >
+                        <Avatar
+                          src={suggestion.avatar_url}
+                          name={label}
+                          size="sm"
+                          status={(suggestion.status as any) || undefined}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-surface-100">{label}</div>
+                          <div className="truncate text-xs text-surface-500">@{suggestion.username}</div>
+                        </div>
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Mention</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className={`flex items-end gap-2 bg-surface-800 border border-surface-700 px-3 py-2 ${replyTo || editingMsg ? 'rounded-b-xl' : 'rounded-xl'}`}>
             <button
               type="button"
               onClick={() => attachmentInputRef.current?.click()}
@@ -1041,9 +1166,12 @@ export function ChatPage() {
             <textarea
               ref={inputRef}
               value={input}
-              onChange={e => setInput(e.target.value.slice(0, maxMessageLength))}
+              onChange={handleComposerChange}
               onPaste={handleComposerPaste}
               onKeyDown={handleKeyDown}
+              onClick={(event) => syncComposerSelection(event.currentTarget)}
+              onKeyUp={(event) => syncComposerSelection(event.currentTarget)}
+              onSelect={(event) => syncComposerSelection(event.currentTarget)}
               placeholder={`Message #${channel?.name || 'channel'}`}
               className="flex-1 bg-transparent text-sm text-surface-100 placeholder-surface-600 resize-none outline-none max-h-32 min-h-[20px]"
               rows={1}
@@ -1071,6 +1199,7 @@ export function ChatPage() {
                 <Send size={18} />
               </button>
             </div>
+          </div>
           </div>
           <div className="mt-1 px-1 text-[11px] text-surface-500">
             Up to 10GB per file. Message limit: 20,000 characters.

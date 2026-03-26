@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.82",
+            "version": "11.7.83",
             "date": "2026-03-26",
             "badge": "Current Build",
+            "improvements": [
+                "Typing @ in server channels, 1:1 DMs, and group DMs now opens a real participant picker with avatar, display name, @username, and keyboard selection support.",
+                "Mention insertion now uses the live conversation member list so @selection is resolved from the people actually in the current server or DM context.",
+                "The cosmetics storefront rotation card now runs a live second-by-second countdown and uses a wider summary layout that fits the next-swap timer cleanly."
+            ],
+            "bugFixes": [
+                "Fixed the composer behavior where typing @ gave no usable mention list, forcing users to guess handles manually.",
+                "Fixed DM and group-DM mention composition so the same mention picker behavior now works outside server channels.",
+                "Fixed the cosmetics rotation window card crowding issue that compressed the stats grid and made the next-rotation timer fit poorly."
+            ]
+        },
+        {
+            "version": "11.7.82",
+            "date": "2026-03-26",
+            "badge": "Previous",
             "improvements": [
                 "Channel chat and DMs now insert your sent message into the local view immediately instead of waiting on realtime echo before it appears.",
                 "Message bodies now render @mention tokens as highlighted pings so mentions read like real interactive callouts instead of plain body text.",

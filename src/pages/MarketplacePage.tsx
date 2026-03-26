@@ -242,6 +242,10 @@ async function invokeCheckoutWithToken(accessToken: string, requestBody: Record<
   }
 }
 
+function padCountdownUnit(value: number): string {
+  return String(Math.max(0, Math.floor(value))).padStart(2, '0');
+}
+
 function normalizeExternalHttpUrl(targetUrl: string, label: string): string {
   const raw = String(targetUrl || '').trim().replace(/^['"]|['"]$/g, '');
   if (!raw) {
@@ -418,11 +422,18 @@ export function MarketplacePage() {
   const rotationTimeRemaining = useMemo(() => {
     if (!cosmeticRotation.nextRotationAt) return null;
     const remainingMs = Math.max(cosmeticRotation.nextRotationAt.getTime() - cosmeticRotationClock, 0);
-    const totalMinutes = Math.floor(remainingMs / 60000);
-    const days = Math.floor(totalMinutes / (60 * 24));
-    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-    const minutes = totalMinutes % 60;
-    return { days, hours, minutes };
+    const totalSeconds = Math.floor(remainingMs / 1000);
+    const days = Math.floor(totalSeconds / (60 * 60 * 24));
+    const hours = Math.floor((totalSeconds % (60 * 60 * 24)) / (60 * 60));
+    const minutes = Math.floor((totalSeconds % (60 * 60)) / 60);
+    const seconds = totalSeconds % 60;
+    return {
+      days,
+      hours,
+      minutes,
+      seconds,
+      compact: `${days}d ${padCountdownUnit(hours)}h ${padCountdownUnit(minutes)}m ${padCountdownUnit(seconds)}s`,
+    };
   }, [cosmeticRotation.nextRotationAt, cosmeticRotationClock]);
   const selectedProductOwned = selectedProduct ? ownedSkus.has(selectedProduct.sku) : false;
   const serviceDisputeByOrderId = useMemo(() => {
@@ -657,7 +668,7 @@ export function MarketplacePage() {
     setCosmeticRotationClock(Date.now());
     const timer = window.setInterval(() => {
       setCosmeticRotationClock(Date.now());
-    }, 60000);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [activeTrack]);
 
@@ -1538,7 +1549,7 @@ export function MarketplacePage() {
             <div className="grid grid-cols-1 lg:grid-cols-[1.12fr_0.88fr] gap-5">
               <div className="space-y-5">
                 <div className="nyptid-card p-5">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="flex flex-col gap-4">
                     <div>
                       <div className="inline-flex items-center gap-2 rounded-full border border-nyptid-300/25 bg-nyptid-300/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-nyptid-200">
                         <Sparkles size={12} />
@@ -1549,7 +1560,7 @@ export function MarketplacePage() {
                         NCore rotates a curated cosmetic collection every {COSMETIC_ROTATION_DAYS} days. Owned cosmetics stay active on your profile even after they leave the active storefront.
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
                         <div className="text-[11px] uppercase tracking-wide text-surface-500">Live now</div>
                         <div className="mt-1 text-lg font-black text-surface-100">{rotatingStoreProducts.length}</div>
@@ -1562,12 +1573,15 @@ export function MarketplacePage() {
                         <div className="text-[11px] uppercase tracking-wide text-surface-500">Preview stack</div>
                         <div className="mt-1 text-lg font-black text-surface-100">{previewEffectSkus.length}</div>
                       </div>
-                      <div className="rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5">
+                      <div className="col-span-2 rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5 lg:col-span-1">
                         <div className="text-[11px] uppercase tracking-wide text-surface-500">Next swap</div>
-                        <div className="mt-1 text-sm font-black text-surface-100">
+                        <div className="mt-1 text-base font-black tracking-wide text-surface-100 tabular-nums sm:text-lg">
                           {rotationTimeRemaining
-                            ? `${rotationTimeRemaining.days}d ${rotationTimeRemaining.hours}h ${rotationTimeRemaining.minutes}m`
+                            ? rotationTimeRemaining.compact
                             : 'Pending'}
+                        </div>
+                        <div className="mt-1 text-[11px] text-surface-500">
+                          Live countdown until the storefront rotates.
                         </div>
                       </div>
                     </div>
