@@ -8,6 +8,7 @@ import type {
   UID,
 } from 'agora-rtc-sdk-ng';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
+import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenoiser';
 import { createConfiguredLocalAudioTrack } from './callMedia';
 import { loadCallSettings, saveCallSettings } from './callSettings';
 import { supabase } from './supabase';
@@ -95,12 +96,14 @@ function formatRtcError(error: unknown): string {
 class ServerVoiceSessionStore {
   private listeners = new Set<Listener>();
   private state: ServerVoiceSessionState = { ...initialState };
+  private lifecycleToken = 0;
 
   private client: IAgoraRTCClient | null = null;
   private localUid: string | null = null;
   private localProfileId: string | null = null;
   private localVideoTrack: ILocalVideoTrack | null = null;
   private localAudioTrack: ILocalAudioTrack | null = null;
+  private audioDenoiserBinding: AIDenoiserBinding | null = null;
   private screenTrack: ILocalVideoTrack | null = null;
   private remoteVideoTracks = new Map<string, IRemoteVideoTrack>();
   private remoteAudioTracks = new Map<string, IRemoteAudioTrack>();
@@ -177,6 +180,7 @@ class ServerVoiceSessionStore {
       .from('voice_sessions')
       .select('*, profile:profiles(*)')
       .eq('channel_id', channelId);
+    if (this.state.channelId !== channelId) return;
     this.setState({
       dbSessions: (data || []) as VoiceSession[],
     });
@@ -219,6 +223,18 @@ class ServerVoiceSessionStore {
     try {
       activeTrack.stop();
       activeTrack.play(this.localVideoContainer);
+    } catch {
+      // noop
+    }
+  }
+
+  private async disposeAudioDenoiser(binding: AIDenoiserBinding | null = this.audioDenoiserBinding) {
+    if (!binding) return;
+    if (binding === this.audioDenoiserBinding) {
+      this.audioDenoiserBinding = null;
+    }
+    try {
+      await binding.teardown();
     } catch {
       // noop
     }
@@ -276,6 +292,7 @@ class ServerVoiceSessionStore {
   async join(options: JoinOptions) {
     const { communityId, channelId, channelName, profileId, userId } = options;
     if (!channelId || !profileId) return false;
+    const joinToken = ++this.lifecycleToken;
 
     if (
       this.state.channelId === channelId
@@ -324,8 +341,17 @@ class ServerVoiceSessionStore {
         is_camera_on: false,
         is_screen_sharing: false,
       });
+      if (joinToken !== this.lifecycleToken) {
+        await supabase
+          .from('voice_sessions')
+          .delete()
+          .eq('channel_id', channelId)
+          .eq('user_id', profileId);
+        return false;
+      }
 
       if (!AGORA_APP_ID) {
+        if (joinToken !== this.lifecycleToken) return false;
         this.setState({
           phase: 'active',
           isConnected: true,
@@ -416,12 +442,80 @@ class ServerVoiceSessionStore {
       });
 
       const token = await resolveAgoraJoinToken(channelId, this.localUid);
+      if (joinToken !== this.lifecycleToken) {
+        try {
+          await client.leave();
+        } catch {
+          // noop
+        }
+        return false;
+      }
       await client.join(AGORA_APP_ID, channelId, token, this.localUid);
       rtcJoined = true;
+      if (joinToken !== this.lifecycleToken) {
+        try {
+          await client.leave();
+        } catch {
+          // noop
+        }
+        await supabase
+          .from('voice_sessions')
+          .delete()
+          .eq('channel_id', channelId)
+          .eq('user_id', profileId);
+        return false;
+      }
 
-      const audioTrack = await createConfiguredLocalAudioTrack(loadCallSettings());
+      const activeCallSettings = loadCallSettings();
+      const audioTrack = await createConfiguredLocalAudioTrack(activeCallSettings);
+      if (joinToken !== this.lifecycleToken) {
+        try {
+          audioTrack.stop();
+          audioTrack.close();
+        } catch {
+          // noop
+        }
+        try {
+          await client.leave();
+        } catch {
+          // noop
+        }
+        await supabase
+          .from('voice_sessions')
+          .delete()
+          .eq('channel_id', channelId)
+          .eq('user_id', profileId);
+        return false;
+      }
+      const audioDenoiserBinding = await createAIDenoiserBinding(audioTrack, activeCallSettings.noiseSuppression);
       this.localAudioTrack = audioTrack;
+      this.audioDenoiserBinding = audioDenoiserBinding;
       await client.publish(audioTrack);
+      if (joinToken !== this.lifecycleToken) {
+        try {
+          await client.unpublish(audioTrack);
+        } catch {
+          // noop
+        }
+        await this.disposeAudioDenoiser(audioDenoiserBinding);
+        try {
+          audioTrack.stop();
+          audioTrack.close();
+        } catch {
+          // noop
+        }
+        try {
+          await client.leave();
+        } catch {
+          // noop
+        }
+        await supabase
+          .from('voice_sessions')
+          .delete()
+          .eq('channel_id', channelId)
+          .eq('user_id', profileId);
+        return false;
+      }
 
       this.setState({
         phase: 'active',
@@ -432,6 +526,7 @@ class ServerVoiceSessionStore {
       return true;
     } catch (error) {
       console.error('Failed to join server voice channel:', error);
+      await this.disposeAudioDenoiser();
       this.setState({
         phase: 'idle',
         isConnected: false,
@@ -451,8 +546,29 @@ class ServerVoiceSessionStore {
   }
 
   async leave() {
+    const leaveToken = ++this.lifecycleToken;
     const currentChannelId = this.state.channelId;
     const currentProfileId = this.localProfileId;
+    const preservedScreenSources = this.state.screenSources;
+    const preservedSelectedScreenSourceId = this.state.selectedScreenSourceId;
+    const activeClient = this.client;
+    const activeDbSessionsChannel = this.dbSessionsChannel;
+    const activeRemoteVideoTracks = Array.from(this.remoteVideoTracks.values());
+
+    this.client = null;
+    this.dbSessionsChannel = null;
+    this.localUid = null;
+    this.localProfileId = null;
+    this.remoteVideoTracks.clear();
+    this.remoteAudioTracks.clear();
+    this.remoteVideoContainers.clear();
+    this.activeSpeakerKey = '';
+    this.setState({
+      ...initialState,
+      noiseSuppressionEnabled: loadCallSettings().noiseSuppression,
+      screenSources: preservedScreenSources,
+      selectedScreenSourceId: preservedSelectedScreenSourceId,
+    });
 
     try {
       this.localVideoTrack?.stop();
@@ -463,6 +579,7 @@ class ServerVoiceSessionStore {
     this.localVideoTrack = null;
 
     try {
+      await this.disposeAudioDenoiser();
       this.localAudioTrack?.stop();
       this.localAudioTrack?.close();
     } catch {
@@ -478,49 +595,43 @@ class ServerVoiceSessionStore {
     }
     this.screenTrack = null;
 
-    this.remoteVideoTracks.forEach((track) => {
+    activeRemoteVideoTracks.forEach((track) => {
       try {
         track.stop();
       } catch {
         // noop
       }
     });
-    this.remoteVideoTracks.clear();
-    this.remoteAudioTracks.clear();
-    this.remoteVideoContainers.clear();
-    this.activeSpeakerKey = '';
 
-    if (this.client) {
+    if (activeClient) {
       try {
-        this.client.removeAllListeners();
+        activeClient.removeAllListeners();
       } catch {
         // noop
       }
-      await this.client.leave();
-      this.client = null;
+      try {
+        await activeClient.leave();
+      } catch (error) {
+        console.warn('Failed leaving active voice client:', error);
+      }
     }
 
     if (currentChannelId && currentProfileId) {
-      await supabase
+      const { error } = await supabase
         .from('voice_sessions')
         .delete()
         .eq('channel_id', currentChannelId)
         .eq('user_id', currentProfileId);
+      if (error) {
+        console.warn('Failed deleting voice session row during leave:', error);
+      }
     }
 
-    if (this.dbSessionsChannel) {
-      supabase.removeChannel(this.dbSessionsChannel);
-      this.dbSessionsChannel = null;
+    if (activeDbSessionsChannel) {
+      supabase.removeChannel(activeDbSessionsChannel);
     }
 
-    this.localUid = null;
-    this.localProfileId = null;
-    this.setState({
-      ...initialState,
-      noiseSuppressionEnabled: loadCallSettings().noiseSuppression,
-      screenSources: this.state.screenSources,
-      selectedScreenSourceId: this.state.selectedScreenSourceId,
-    });
+    if (leaveToken !== this.lifecycleToken) return;
   }
 
   async toggleMute() {
@@ -663,6 +774,7 @@ class ServerVoiceSessionStore {
     this.setState({ noiseSuppressionEnabled: next });
 
     if (!this.localAudioTrack) return;
+    await this.disposeAudioDenoiser();
 
     try {
       await this.client.unpublish(this.localAudioTrack);
@@ -676,15 +788,29 @@ class ServerVoiceSessionStore {
       // noop
     }
 
+    let rebuilt: ILocalAudioTrack | null = null;
+    let denoiserBinding: AIDenoiserBinding | null = null;
     try {
-      const rebuilt = await createConfiguredLocalAudioTrack(nextSettings);
+      rebuilt = await createConfiguredLocalAudioTrack(nextSettings);
+      denoiserBinding = await createAIDenoiserBinding(rebuilt, nextSettings.noiseSuppression);
       if (this.state.isMuted) {
         await rebuilt.setEnabled(false);
       }
       this.localAudioTrack = rebuilt;
+      this.audioDenoiserBinding = denoiserBinding;
       await this.client.publish(rebuilt);
       this.setState({ connectionError: '' });
     } catch (error) {
+      if (denoiserBinding) {
+        await this.disposeAudioDenoiser(denoiserBinding);
+      }
+      try {
+        rebuilt?.stop();
+        rebuilt?.close();
+      } catch {
+        // noop
+      }
+      this.localAudioTrack = null;
       this.setState({ connectionError: `Could not apply noise suppression: ${formatRtcError(error)}` });
     }
   }

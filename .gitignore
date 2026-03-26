@@ -38,3 +38,4 @@ public/updates/*.apk
 # Local scratch/debug artifacts
 .bolt
 tmp_*
+agora-extension-ai-denoiser-*.tgz

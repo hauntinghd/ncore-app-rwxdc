@@ -20,7 +20,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
-import { extractMentionHandles, hasBroadcastMention, isMentioningTarget } from '../lib/mentions';
+import { resolveMentionTargetIds } from '../lib/mentions';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
@@ -639,29 +639,33 @@ export function ChatPage() {
         const recipientIds = Array.from(
           new Set((memberRows || []).map((row: any) => String(row.user_id || '')).filter(Boolean)),
         ) as string[];
-        const mentionedRecipientIds = new Set<string>();
-        const allowBroadcastMention = hasBroadcastMention(content);
+        const localMentionTargets = members
+          .map((member) => ({
+            id: String(member.profile?.id || '').trim(),
+            username: member.profile?.username || null,
+            display_name: member.profile?.display_name || null,
+          }))
+          .filter((target) => target.id && target.id !== profile.id);
+        const localTargetIds = new Set(localMentionTargets.map((target) => target.id));
+        const missingRecipientIds = recipientIds.filter((recipientId) => !localTargetIds.has(recipientId));
 
-        if (allowBroadcastMention) {
-          recipientIds.forEach((id) => mentionedRecipientIds.add(id));
+        let mentionTargets = localMentionTargets;
+        if (missingRecipientIds.length > 0) {
+          const { data: recipientProfiles } = await supabase
+            .from('profiles')
+            .select('id, username, display_name')
+            .in('id', missingRecipientIds);
+          mentionTargets = [
+            ...localMentionTargets,
+            ...((recipientProfiles || []) as any[]).map((row) => ({
+              id: String(row?.id || '').trim(),
+              username: row?.username || null,
+              display_name: row?.display_name || null,
+            })).filter((target) => target.id),
+          ];
         }
 
-        if ((content.includes('@') || content.includes('<@')) && recipientIds.length > 0) {
-          const mentionHandles = extractMentionHandles(content);
-          if (mentionHandles.size > 0 || content.includes('<@')) {
-            const { data: recipientProfiles } = await supabase
-              .from('profiles')
-              .select('id, username, display_name')
-              .in('id', recipientIds);
-            for (const row of recipientProfiles || []) {
-              const rowId = String((row as any).id || '').trim();
-              if (!rowId) continue;
-              if (isMentioningTarget(content, row as any, false)) {
-                mentionedRecipientIds.add(rowId);
-              }
-            }
-          }
-        }
+        const mentionedRecipientIds = resolveMentionTargetIds(content, mentionTargets, true);
 
         if (mentionedRecipientIds.size > 0) {
           const senderName = profile.display_name || profile.username || 'Someone';

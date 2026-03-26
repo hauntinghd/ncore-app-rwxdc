@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.80",
+  "version": "11.7.81",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -10,8 +10,9 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:electron:web": "set NCORE_ELECTRON_BUILD=1&& vite build",
+    "audio:assets:sync": "node scripts/sync-ai-denoiser-assets.cjs",
+    "build": "npm run audio:assets:sync && vite build",
+    "build:electron:web": "npm run audio:assets:sync && set NCORE_ELECTRON_BUILD=1&& vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
@@ -40,6 +41,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "agora-extension-ai-denoiser": "^2.0.1",
     "agora-rtc-react": "^2.5.1",
     "agora-rtc-sdk-ng": "^4.24.2",
     "autoprefixer": "^10.4.18",
@@ -54,10 +56,10 @@
     "playwright": "^1.58.2",
     "png-to-ico": "^3.0.1",
     "postcss": "^8.4.35",
+    "rcedit": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.13.1",
-    "rcedit": "^4.0.1",
     "simple-icons": "^16.12.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.5.3",

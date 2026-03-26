@@ -73,6 +73,7 @@ export function AppShell({
   });
   const trackedCommunityIdsRef = useRef<Set<string>>(new Set());
   const memberCountRefreshTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const sidebarVoiceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showCreateCommunity, setShowCreateCommunity] = useState(false);
   const [newCommunity, setNewCommunity] = useState<CreateCommunityForm>(DEFAULT_FORM);
   const [creating, setCreating] = useState(false);
@@ -370,6 +371,50 @@ export function AppShell({
     if (!activeCommunityId) return;
     void refreshCommunityMemberCount(activeCommunityId);
   }, [activeCommunityId]);
+
+  useEffect(() => {
+    if (!activeServerId) return;
+    const activeChannelIds = new Set(
+      categories.flatMap((category) => (category.channels || []).map((channel) => String(channel.id || '').trim()).filter(Boolean)),
+    );
+    if (activeChannelIds.size === 0) return;
+
+    const scheduleRefresh = (channelId: string) => {
+      if (!activeChannelIds.has(channelId)) return;
+      if (sidebarVoiceRefreshTimerRef.current) {
+        clearTimeout(sidebarVoiceRefreshTimerRef.current);
+      }
+      sidebarVoiceRefreshTimerRef.current = setTimeout(() => {
+        sidebarVoiceRefreshTimerRef.current = null;
+        void refreshSidebarForServer(activeServerId);
+      }, 120);
+    };
+
+    const channel = supabase
+      .channel(`appshell:voice-sidebar:${activeServerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'voice_sessions',
+        },
+        (payload) => {
+          const changedChannelId = String((payload.new as any)?.channel_id || (payload.old as any)?.channel_id || '').trim();
+          if (!changedChannelId) return;
+          scheduleRefresh(changedChannelId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      if (sidebarVoiceRefreshTimerRef.current) {
+        clearTimeout(sidebarVoiceRefreshTimerRef.current);
+        sidebarVoiceRefreshTimerRef.current = null;
+      }
+      supabase.removeChannel(channel);
+    };
+  }, [activeServerId, categories]);
 
   useEffect(() => {
     if (!profile?.id) return;

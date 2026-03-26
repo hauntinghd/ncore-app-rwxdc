@@ -8,6 +8,7 @@ import type {
   IRemoteVideoTrack,
   ScreenVideoTrackInitConfig,
 } from 'agora-rtc-sdk-ng';
+import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenoiser';
 import { loadCallSettings, saveCallSettings, type CallSettings } from './callSettings';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
@@ -198,6 +199,7 @@ class DirectCallSessionStore {
   private screenUid: string | null = null;
   private appId: string | null = null;
   private audioTrack: ILocalAudioTrack | null = null;
+  private audioDenoiserBinding: AIDenoiserBinding | null = null;
   private videoTrack: ILocalVideoTrack | null = null;
   private screenTrack: ILocalVideoTrack | null = null;
   private screenAudioTrack: ILocalAudioTrack | null = null;
@@ -226,6 +228,18 @@ class DirectCallSessionStore {
       if (a[i] !== b[i]) return false;
     }
     return true;
+  }
+
+  private async disposeAudioDenoiser(binding: AIDenoiserBinding | null = this.audioDenoiserBinding) {
+    if (!binding) return;
+    if (binding === this.audioDenoiserBinding) {
+      this.audioDenoiserBinding = null;
+    }
+    try {
+      await binding.teardown();
+    } catch {
+      // noop
+    }
   }
 
   private bindScreenTrackEnded(track: ILocalVideoTrack | null) {
@@ -683,6 +697,7 @@ class DirectCallSessionStore {
 
       try {
         this.audioTrack = await this.createLocalAudioTrack(callSettings);
+        this.audioDenoiserBinding = await createAIDenoiserBinding(this.audioTrack, callSettings.noiseSuppression);
         if (typeof this.audioTrack.setVolume === 'function') {
           this.audioTrack.setVolume(callSettings.inputVolume);
         }
@@ -786,6 +801,7 @@ class DirectCallSessionStore {
     } catch {
       // noop
     }
+    await this.disposeAudioDenoiser();
     try {
       previousTrack.stop();
       previousTrack.close();
@@ -793,9 +809,13 @@ class DirectCallSessionStore {
       // noop
     }
 
+    let rebuiltTrack: ILocalAudioTrack | null = null;
+    let denoiserBinding: AIDenoiserBinding | null = null;
     try {
-      const rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
+      rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
+      denoiserBinding = await createAIDenoiserBinding(rebuiltTrack, nextSettings.noiseSuppression);
       this.audioTrack = rebuiltTrack;
+      this.audioDenoiserBinding = denoiserBinding;
       if (typeof rebuiltTrack.setVolume === 'function') {
         rebuiltTrack.setVolume(nextSettings.inputVolume);
       }
@@ -808,6 +828,18 @@ class DirectCallSessionStore {
         mediaErrorDetail: '',
       });
     } catch (error) {
+      if (denoiserBinding) {
+        await this.disposeAudioDenoiser(denoiserBinding);
+      }
+      if (rebuiltTrack) {
+        try {
+          rebuiltTrack.stop();
+          rebuiltTrack.close();
+        } catch {
+          // noop
+        }
+      }
+      this.audioTrack = null;
       this.setState({
         mediaError: 'Could not reconfigure microphone right now.',
         mediaErrorDetail: formatRtcError(error),
@@ -845,11 +877,14 @@ class DirectCallSessionStore {
     }
 
     const previousTrack = this.audioTrack;
+    const previousBinding = this.audioDenoiserBinding;
     const wasMuted = this.state.isMuted;
     let rebuiltTrack: ILocalAudioTrack | null = null;
+    let rebuiltBinding: AIDenoiserBinding | null = null;
 
     try {
       rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
+      rebuiltBinding = await createAIDenoiserBinding(rebuiltTrack, nextSettings.noiseSuppression);
       if (typeof rebuiltTrack.setVolume === 'function') {
         rebuiltTrack.setVolume(nextSettings.inputVolume);
       }
@@ -882,7 +917,12 @@ class DirectCallSessionStore {
       }
       await this.client.publish(rebuiltTrack);
       this.audioTrack = rebuiltTrack;
+      this.audioDenoiserBinding = rebuiltBinding;
+      rebuiltBinding = null;
       if (previousTrack) {
+        if (previousBinding) {
+          await this.disposeAudioDenoiser(previousBinding);
+        }
         try {
           previousTrack.stop();
           previousTrack.close();
@@ -895,14 +935,18 @@ class DirectCallSessionStore {
         mediaErrorDetail: '',
       });
     } catch (error) {
+      if (rebuiltBinding) {
+        await this.disposeAudioDenoiser(rebuiltBinding);
+      }
       try {
-        rebuiltTrack.stop();
-        rebuiltTrack.close();
+        rebuiltTrack?.stop();
+        rebuiltTrack?.close();
       } catch {
         // noop
       }
       if (previousTrack) {
         this.audioTrack = previousTrack;
+        this.audioDenoiserBinding = previousBinding;
         try {
           await this.client.publish(previousTrack);
         } catch {
@@ -910,6 +954,7 @@ class DirectCallSessionStore {
         }
       } else {
         this.audioTrack = null;
+        this.audioDenoiserBinding = null;
       }
       this.setState({
         mediaError: 'Could not apply microphone settings right now.',
@@ -1277,6 +1322,7 @@ class DirectCallSessionStore {
 
   private forceLocalCleanup() {
     this.disposeScreenTracks();
+    void this.disposeAudioDenoiser();
 
     try {
       if (this.videoTrack) {
@@ -1311,6 +1357,7 @@ class DirectCallSessionStore {
     const activeScreenClient = this.screenClient;
     this.screenClient = null;
 
+    await this.disposeAudioDenoiser();
     this.forceLocalCleanup();
 
     if (!activeClient) return;
