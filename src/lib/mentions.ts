@@ -4,6 +4,11 @@ interface MentionTarget {
   display_name?: string | null;
 }
 
+export interface MentionTextSegment {
+  text: string;
+  isMention: boolean;
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -13,7 +18,7 @@ function normalizeHandle(value: unknown): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '')
-    .replace(/[^a-z0-9_]/g, '');
+    .replace(/[^a-z0-9_.-]/g, '');
 }
 
 function buildMentionCandidates(target: MentionTarget): string[] {
@@ -38,7 +43,7 @@ export function hasBroadcastMention(content: unknown): boolean {
 
 export function extractMentionHandles(content: unknown): Set<string> {
   const text = String(content || '');
-  const regex = /@([a-z0-9_]{2,32})/gi;
+  const regex = /@([a-z0-9_.-]{2,32})/gi;
   const handles = new Set<string>();
   let match: RegExpExecArray | null = regex.exec(text);
   while (match) {
@@ -95,6 +100,40 @@ export function resolveMentionTargetIds(
   }
 
   return ids;
+}
+
+export function splitMentionText(content: unknown): MentionTextSegment[] {
+  const text = String(content || '');
+  if (!text) return [];
+
+  const segments: MentionTextSegment[] = [];
+  const mentionRegex = /(<@!?[0-9a-f-]{36}>|@(everyone|here|[a-z0-9_.-]{2,32}))/gi;
+  let lastIndex = 0;
+  let match = mentionRegex.exec(text);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      segments.push({
+        text: text.slice(lastIndex, match.index),
+        isMention: false,
+      });
+    }
+    segments.push({
+      text: match[0],
+      isMention: true,
+    });
+    lastIndex = match.index + match[0].length;
+    match = mentionRegex.exec(text);
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({
+      text: text.slice(lastIndex),
+      isMention: false,
+    });
+  }
+
+  return segments;
 }
 
 export { normalizeHandle };

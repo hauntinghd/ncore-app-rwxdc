@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useCallback, useState, useEffect, useMemo, useRef, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   BellOff,
@@ -20,7 +20,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
-import { resolveMentionTargetIds } from '../lib/mentions';
+import { resolveMentionTargetIds, splitMentionText } from '../lib/mentions';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
@@ -53,6 +53,21 @@ interface MessageContextMenuState {
   x: number;
   y: number;
   message: Message;
+}
+
+function renderMessageContent(content: string) {
+  return splitMentionText(content).map((segment, index) => (
+    segment.isMention ? (
+      <span
+        key={`${segment.text}:${index}`}
+        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
+      >
+        {segment.text}
+      </span>
+    ) : (
+      <span key={`${segment.text}:${index}`}>{segment.text}</span>
+    )
+  ));
 }
 
 function MessageGroup({
@@ -91,7 +106,7 @@ function MessageGroup({
           >
             <div className="text-sm text-surface-300 leading-relaxed break-words">
               {msg.content && (
-                <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                <div className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content)}</div>
               )}
               {(msg.attachments || []).length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
@@ -215,6 +230,8 @@ function MessageGroup({
   );
 }
 
+const MemoMessageGroup = memo(MessageGroup);
+
 function groupMessages(messages: Message[]): Message[][] {
   const groups: Message[][] = [];
   let current: Message[] = [];
@@ -293,9 +310,42 @@ export function ChatPage() {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+
+  const isNearBottom = useCallback(() => {
+    const container = messageScrollRef.current;
+    if (!container) return true;
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return remaining < 140;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+    });
+  }, []);
+
+  const upsertMessage = useCallback((message: Message) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((entry) => entry.id === message.id);
+      if (existingIndex >= 0) {
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...message,
+          attachments: (message.attachments || next[existingIndex].attachments || []),
+          reactions: (message.reactions || next[existingIndex].reactions || []),
+        };
+      } else {
+        next.push(message);
+      }
+      next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      return next;
+    });
+  }, []);
 
   const canModerateMessages = useMemo(() => (
     profile?.platform_role === 'owner'
@@ -308,6 +358,7 @@ export function ChatPage() {
     () => messages.filter((message) => Boolean(message.is_pinned)),
     [messages],
   );
+  const messageGroups = useMemo(() => groupMessages(messages), [messages]);
 
   useEffect(() => {
     if (!channelId) return;
@@ -446,7 +497,7 @@ export function ChatPage() {
 
     if (data) setMessages(data as Message[]);
     setLoading(false);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    scrollToBottom('auto');
   }
 
   useEffect(() => {
@@ -459,14 +510,17 @@ export function ChatPage() {
         table: 'messages',
         filter: `channel_id=eq.${channelId}`,
       }, async (payload) => {
+        const shouldStickToBottom = isNearBottom();
         const { data } = await supabase
           .from('messages')
           .select('*, author:profiles(*), reactions:message_reactions(*), attachments:message_attachments(*)')
           .eq('id', payload.new.id)
           .maybeSingle();
         if (data) {
-          setMessages(prev => [...prev, data as Message]);
-          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+          upsertMessage(data as Message);
+          if (shouldStickToBottom) {
+            scrollToBottom('auto');
+          }
         }
       })
       .on('postgres_changes', {
@@ -496,7 +550,7 @@ export function ChatPage() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [channelId]);
+  }, [channelId, isNearBottom, scrollToBottom, upsertMessage]);
 
   function queueSelectedFiles(fileList: FileList | File[] | null | undefined) {
     if (!fileList) return;
@@ -621,6 +675,23 @@ export function ChatPage() {
       return;
     }
 
+    const optimisticMessage: Message = {
+      id: String(insertedMessage.id),
+      channel_id: String(channelId),
+      author_id: profile.id,
+      content,
+      is_edited: false,
+      is_pinned: false,
+      parent_message_id: replyTo?.id || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      author: profile as any,
+      reactions: [],
+      attachments: [],
+    };
+    upsertMessage(optimisticMessage);
+    scrollToBottom('auto');
+
     if (filesToSend.length > 0) {
       await uploadMessageAttachments(String(insertedMessage.id), filesToSend);
       await loadMessages();
@@ -708,7 +779,20 @@ export function ChatPage() {
     inputRef.current?.focus();
   }
 
-  async function handleReact(messageId: string, emoji: string) {
+  const handleReplySelect = useCallback((msg: Message) => {
+    setReplyTo(msg);
+    setEditingMsg(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const handleEditSelect = useCallback((msg: Message) => {
+    setEditingMsg(msg);
+    setInput(msg.content);
+    setReplyTo(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const handleReact = useCallback(async (messageId: string, emoji: string) => {
     if (!profile) return;
     const existing = messages
       .find(m => m.id === messageId)
@@ -735,18 +819,18 @@ export function ChatPage() {
         ));
       }
     }
-  }
+  }, [messages, profile]);
 
-  async function handleDelete(messageId: string) {
+  const handleDelete = useCallback(async (messageId: string) => {
     const { error: deleteError } = await supabase.from('messages').delete().eq('id', messageId);
     if (deleteError) {
       setComposerError(deleteError.message || 'Failed to delete message.');
       return;
     }
     setMessages(prev => prev.filter(m => m.id !== messageId));
-  }
+  }, []);
 
-  async function handleTogglePin(message: Message) {
+  const handleTogglePin = useCallback(async (message: Message) => {
     if (!message?.id) return;
     const nextPinned = !Boolean(message.is_pinned);
     const { error: updateError } = await supabase
@@ -760,9 +844,9 @@ export function ChatPage() {
     setMessages((prev) => prev.map((entry) => (
       entry.id === message.id ? { ...entry, is_pinned: nextPinned } : entry
     )));
-  }
+  }, []);
 
-  function openMessageContextMenu(event: ReactMouseEvent, message: Message) {
+  const openMessageContextMenu = useCallback((event: ReactMouseEvent, message: Message) => {
     event.preventDefault();
     event.stopPropagation();
     setMessageContextMenu({
@@ -770,7 +854,7 @@ export function ChatPage() {
       y: event.clientY,
       message,
     });
-  }
+  }, []);
 
   function handleKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -783,7 +867,33 @@ export function ChatPage() {
     }
   }
 
-  const messageGroups = groupMessages(messages);
+  const renderedMessageGroups = useMemo(() => (
+    messageGroups.map((group) => (
+      <MemoMessageGroup
+        key={group[0].id}
+        messages={group}
+        onReact={handleReact}
+        onReply={handleReplySelect}
+        onEdit={handleEditSelect}
+        onTogglePin={handleTogglePin}
+        onDelete={handleDelete}
+        onOpenContextMenu={openMessageContextMenu}
+        currentUserId={profile?.id}
+        canModerateMessages={canModerateMessages}
+      />
+    ))
+  ), [
+    canModerateMessages,
+    handleDelete,
+    handleEditSelect,
+    handleReact,
+    handleReplySelect,
+    handleTogglePin,
+    messageGroups,
+    openMessageContextMenu,
+    profile?.id,
+  ]);
+
   const topBarActions = (
     <div className="hidden md:flex items-center gap-1.5">
       <button
@@ -840,7 +950,7 @@ export function ChatPage() {
             <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto py-4 scrollbar-thin space-y-1">
+          <div ref={messageScrollRef} className="flex-1 overflow-y-auto py-4 scrollbar-thin space-y-1">
             {messageGroups.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <div className="w-16 h-16 bg-surface-800 rounded-2xl flex items-center justify-center mb-4">
@@ -855,20 +965,7 @@ export function ChatPage() {
               </div>
             )}
 
-            {messageGroups.map((group) => (
-              <MessageGroup
-                key={group[0].id}
-                messages={group}
-                onReact={handleReact}
-                onReply={msg => { setReplyTo(msg); setEditingMsg(null); inputRef.current?.focus(); }}
-                onEdit={msg => { setEditingMsg(msg); setInput(msg.content); setReplyTo(null); inputRef.current?.focus(); }}
-                onTogglePin={handleTogglePin}
-                onDelete={handleDelete}
-                onOpenContextMenu={openMessageContextMenu}
-                currentUserId={profile?.id}
-                canModerateMessages={canModerateMessages}
-              />
-            ))}
+            {renderedMessageGroups}
 
             {typingUsers.length > 0 && (
               <div className="px-4 py-1 text-xs text-surface-500 italic">

@@ -56,6 +56,16 @@ export interface ServerVoiceSessionState {
   loadingScreenSources: boolean;
 }
 
+export interface ServerVoiceSessionShellState {
+  phase: ServerVoiceSessionState['phase'];
+  communityId: string | null;
+  channelId: string | null;
+  channelName: string;
+  isMuted: boolean;
+  isDeafened: boolean;
+  isCameraOn: boolean;
+}
+
 interface JoinOptions {
   communityId: string;
   channelId: string;
@@ -96,6 +106,15 @@ function formatRtcError(error: unknown): string {
 class ServerVoiceSessionStore {
   private listeners = new Set<Listener>();
   private state: ServerVoiceSessionState = { ...initialState };
+  private shellState: ServerVoiceSessionShellState = {
+    phase: initialState.phase,
+    communityId: initialState.communityId,
+    channelId: initialState.channelId,
+    channelName: initialState.channelName,
+    isMuted: initialState.isMuted,
+    isDeafened: initialState.isDeafened,
+    isCameraOn: initialState.isCameraOn,
+  };
   private lifecycleToken = 0;
 
   private client: IAgoraRTCClient | null = null;
@@ -118,6 +137,19 @@ class ServerVoiceSessionStore {
   };
 
   getState = () => this.state;
+  getShellState = () => this.shellState;
+
+  private deriveShellState(state: ServerVoiceSessionState): ServerVoiceSessionShellState {
+    return {
+      phase: state.phase,
+      communityId: state.communityId,
+      channelId: state.channelId,
+      channelName: state.channelName,
+      isMuted: state.isMuted,
+      isDeafened: state.isDeafened,
+      isCameraOn: state.isCameraOn,
+    };
+  }
 
   private setState(patch: Partial<ServerVoiceSessionState>) {
     let changed = false;
@@ -131,6 +163,16 @@ class ServerVoiceSessionStore {
     });
     if (!changed) return;
     this.state = nextState;
+    const nextShellState = this.deriveShellState(nextState);
+    const shellChanged = Object.keys(nextShellState).some((key) => (
+      !Object.is(
+        this.shellState[key as keyof ServerVoiceSessionShellState],
+        nextShellState[key as keyof ServerVoiceSessionShellState],
+      )
+    ));
+    if (shellChanged) {
+      this.shellState = nextShellState;
+    }
     this.listeners.forEach((listener) => listener());
   }
 
@@ -823,5 +865,13 @@ export function useServerVoiceSession(): ServerVoiceSessionState {
     serverVoiceSession.subscribe,
     serverVoiceSession.getState,
     serverVoiceSession.getState,
+  );
+}
+
+export function useServerVoiceSessionShell(): ServerVoiceSessionShellState {
+  return useSyncExternalStore(
+    serverVoiceSession.subscribe,
+    serverVoiceSession.getShellState,
+    serverVoiceSession.getShellState,
   );
 }

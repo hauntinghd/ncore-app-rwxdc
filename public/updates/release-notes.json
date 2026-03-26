@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.81",
+            "version": "11.7.82",
             "date": "2026-03-26",
             "badge": "Current Build",
+            "improvements": [
+                "Channel chat and DMs now insert your sent message into the local view immediately instead of waiting on realtime echo before it appears.",
+                "Message bodies now render @mention tokens as highlighted pings so mentions read like real interactive callouts instead of plain body text.",
+                "App shell voice state now subscribes to a smaller server-voice snapshot so active-speaker churn stops repainting the full shell while you browse."
+            ],
+            "bugFixes": [
+                "Fixed the send-message visibility bug where messages could look unsent until you switched away from the server or DM and came back.",
+                "Fixed brittle mention parsing by broadening valid handle matching and using the same mention-resolution path across server chat and DMs.",
+                "Reduced chat jitter by memoizing message groups, stabilizing message action callbacks, and avoiding unnecessary scroll animations on every update."
+            ]
+        },
+        {
+            "version": "11.7.81",
+            "date": "2026-03-26",
+            "badge": "Previous",
             "improvements": [
                 "Voice calls now use Agora's AI denoiser path with shipped WASM assets, giving NCore a real ML-backed noise suppression layer instead of relying only on browser audio flags.",
                 "Direct calls and server voice channels now rebuild local audio tracks through the same denoiser-aware pipeline when noise suppression is toggled, keeping call behavior consistent across both call surfaces.",

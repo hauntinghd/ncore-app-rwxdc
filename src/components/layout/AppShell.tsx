@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ServerRail } from './ServerRail';
 import { ChannelSidebar } from './ChannelSidebar';
@@ -8,7 +8,7 @@ import { Modal } from '../ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
 import { trackGrowthEvent } from '../../lib/growthEvents';
-import { serverVoiceSession, useServerVoiceSession } from '../../lib/serverVoiceSession';
+import { serverVoiceSession, useServerVoiceSessionShell } from '../../lib/serverVoiceSession';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
@@ -56,7 +56,7 @@ export function AppShell({
   const { capabilities } = useGrowthCapabilities();
   const navigate = useNavigate();
   const location = useLocation();
-  const voiceSession = useServerVoiceSession();
+  const voiceSession = useServerVoiceSessionShell();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
@@ -80,6 +80,16 @@ export function AppShell({
   const [createError, setCreateError] = useState('');
   const communitiesCacheKey = profile ? `ncore.cache.communities.${profile.id}` : null;
   const hasActiveServerVoice = voiceSession.phase !== 'idle' && Boolean(voiceSession.channelId);
+  const sidebarVoiceChannelIds = useMemo(
+    () => categories
+      .flatMap((category) => (category.channels || []).map((channel) => String(channel.id || '').trim()).filter(Boolean))
+      .sort(),
+    [categories],
+  );
+  const sidebarVoiceChannelIdsSignature = useMemo(
+    () => sidebarVoiceChannelIds.join('|'),
+    [sidebarVoiceChannelIds],
+  );
   const isOnActiveVoiceRoute = hasActiveServerVoice
     && Boolean(voiceSession.channelId)
     && Boolean(voiceSession.communityId)
@@ -374,9 +384,7 @@ export function AppShell({
 
   useEffect(() => {
     if (!activeServerId) return;
-    const activeChannelIds = new Set(
-      categories.flatMap((category) => (category.channels || []).map((channel) => String(channel.id || '').trim()).filter(Boolean)),
-    );
+    const activeChannelIds = new Set(sidebarVoiceChannelIds);
     if (activeChannelIds.size === 0) return;
 
     const scheduleRefresh = (channelId: string) => {
@@ -414,7 +422,7 @@ export function AppShell({
       }
       supabase.removeChannel(channel);
     };
-  }, [activeServerId, categories]);
+  }, [activeServerId, sidebarVoiceChannelIds, sidebarVoiceChannelIdsSignature]);
 
   useEffect(() => {
     if (!profile?.id) return;

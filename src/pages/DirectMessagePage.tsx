@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, type ClipboardEvent } from 'react';
+import { useCallback, useState, useEffect, useRef, useMemo, type ClipboardEvent } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -31,7 +31,7 @@ import {
   isCallsModernSchemaMissingError,
   normalizeCallRow,
 } from '../lib/callsCompat';
-import { extractMentionHandles, hasBroadcastMention, isMentioningTarget } from '../lib/mentions';
+import { hasBroadcastMention, resolveMentionTargetIds, splitMentionText } from '../lib/mentions';
 import type { DirectConversation, DirectMessage, DirectMessageAttachment, Profile } from '../lib/types';
 import { formatFileSize, formatRelativeTime } from '../lib/utils';
 
@@ -63,6 +63,21 @@ const PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, 
 const DM_LIST_PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen';
 const MAX_BOOTSTRAP_DM_CONVERSATIONS = 80;
 const MAX_ACTIVE_CALL_SYNC_CONVERSATIONS = 40;
+
+function renderDirectMessageContent(content: string) {
+  return splitMentionText(content).map((segment, index) => (
+    segment.isMention ? (
+      <span
+        key={`${segment.text}:${index}`}
+        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
+      >
+        {segment.text}
+      </span>
+    ) : (
+      <span key={`${segment.text}:${index}`}>{segment.text}</span>
+    )
+  ));
+}
 
 function isUuid(value: unknown): boolean {
   return UUID_REGEX.test(String(value || '').trim());
@@ -138,6 +153,7 @@ export function DirectMessagePage() {
   const callRefreshTimersRef = useRef<Record<string, number>>({});
   const autoCallAttemptKeyRef = useRef<string>('');
   const conversationMembershipRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const groupIconInputRef = useRef<HTMLInputElement>(null);
@@ -160,6 +176,36 @@ export function DirectMessagePage() {
     () => conversationIdsForActiveCallSync.join('|'),
     [conversationIdsForActiveCallSync]
   );
+  const isNearBottom = useCallback(() => {
+    const container = messageScrollRef.current;
+    if (!container) return true;
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return remaining < 140;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+    });
+  }, []);
+
+  const upsertDirectMessage = useCallback((message: DirectMessage) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((entry) => entry.id === message.id);
+      if (existingIndex >= 0) {
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...message,
+          attachments: message.attachments || next[existingIndex].attachments || [],
+        };
+      } else {
+        next.push(message);
+      }
+      next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     trackedConversationIdsRef.current = new Set(trackedConversationIds);
@@ -647,10 +693,13 @@ export function DirectMessagePage() {
         table: 'direct_messages',
         filter: `conversation_id=eq.${conversationId}`,
       }, async (payload) => {
+        const shouldStickToBottom = isNearBottom();
         const hydrated = await fetchHydratedDirectMessage(String(payload.new.id));
         if (hydrated) {
-          setMessages(prev => [...prev, hydrated]);
-          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+          upsertDirectMessage(hydrated);
+          if (shouldStickToBottom) {
+            scrollToBottom('auto');
+          }
         }
       })
       .on('postgres_changes', {
@@ -674,7 +723,7 @@ export function DirectMessagePage() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [conversationId]);
+  }, [conversationId, isNearBottom, scrollToBottom, upsertDirectMessage]);
 
   useEffect(() => {
     if (!profile) return;
@@ -1289,7 +1338,7 @@ export function DirectMessagePage() {
         // best-effort cache
       }
     }
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    scrollToBottom('auto');
   }
 
   useEffect(() => {
@@ -1631,6 +1680,20 @@ export function DirectMessagePage() {
       return;
     }
 
+    const optimisticMessage: DirectMessage = {
+      id: String(insertedMessage.id),
+      conversation_id: String(conversationId),
+      author_id: profile.id,
+      content,
+      is_edited: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      author: profile as any,
+      attachments: [],
+    };
+    upsertDirectMessage(optimisticMessage);
+    scrollToBottom('auto');
+
     const activityAtIso = new Date().toISOString();
     promoteConversationActivity(conversationId, activityAtIso);
     void supabase
@@ -1663,19 +1726,21 @@ export function DirectMessagePage() {
         }
 
         if (content.includes('@') || content.includes('<@')) {
-          const mentionHandles = extractMentionHandles(content);
-          if (mentionHandles.size > 0 || content.includes('<@')) {
-            const { data: recipientProfiles } = await supabase
-              .from('profiles')
-              .select('id, username, display_name')
-              .in('id', recipientIds);
-            for (const row of recipientProfiles || []) {
-              const rowId = String((row as any).id || '');
-              if (!rowId) continue;
-              if (isMentioningTarget(content, row as any, false)) {
-                mentionedRecipientIds.add(rowId);
-              }
-            }
+          const { data: recipientProfiles } = await supabase
+            .from('profiles')
+            .select('id, username, display_name')
+            .in('id', recipientIds);
+          const resolvedMentionTargets = resolveMentionTargetIds(
+            content,
+            ((recipientProfiles || []) as any[]).map((row) => ({
+              id: String(row?.id || '').trim(),
+              username: row?.username || null,
+              display_name: row?.display_name || null,
+            })),
+            false,
+          );
+          for (const id of resolvedMentionTargets) {
+            mentionedRecipientIds.add(id);
           }
         }
 
@@ -1966,6 +2031,84 @@ export function DirectMessagePage() {
       console.error('startCall error:', error);
     }
   }
+
+  const renderedMessages = useMemo(() => (
+    messages.map((msg, i) => {
+      const prev = messages[i - 1];
+      const isOwn = msg.author_id === profile?.id;
+      const author = (msg.author as any);
+      const attachments = (msg.attachments || []) as DirectMessageAttachment[];
+      const showAvatar = !prev || prev.author_id !== msg.author_id ||
+        new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() > 5 * 60 * 1000;
+
+      return (
+        <div key={msg.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'} group`}>
+          <div className="w-8 flex-shrink-0">
+            {showAvatar && (
+              <Avatar
+                src={author?.avatar_url}
+                name={author?.display_name || author?.username || 'User'}
+                size="sm"
+              />
+            )}
+          </div>
+          <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-lg`}>
+            {showAvatar && (
+              <span className="text-xs text-surface-500 mb-1 px-1">
+                {isOwn ? 'You' : author?.display_name || author?.username}
+                {' · '}
+                {formatShortTime(msg.created_at)}
+              </span>
+            )}
+            <div className={`px-3 py-2 rounded-2xl text-sm ${isOwn
+              ? 'bg-nyptid-300 text-surface-950 rounded-tr-sm'
+              : 'bg-surface-700 text-surface-200 rounded-tl-sm'}`}>
+              {msg.content && (
+                <div className="whitespace-pre-wrap break-words">{renderDirectMessageContent(msg.content)}</div>
+              )}
+              {attachments.length > 0 && (
+                <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
+                  {attachments.map((attachment) => {
+                    const isImage = String(attachment.file_type || '').startsWith('image/');
+                    return (
+                      <a
+                        key={attachment.id}
+                        href={attachment.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`block rounded-lg border text-xs overflow-hidden ${
+                          isOwn
+                            ? 'border-surface-950/20 hover:border-surface-950/30'
+                            : 'border-surface-500/30 hover:border-surface-400/40'
+                        }`}
+                      >
+                        {isImage ? (
+                          <img
+                            src={attachment.file_url}
+                            alt={attachment.file_name}
+                            className="max-h-64 w-auto object-contain bg-black/20"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2 px-2.5 py-2">
+                            <Paperclip size={13} />
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{attachment.file_name}</div>
+                              <div className="opacity-70">{formatFileSize(Number(attachment.file_size || 0))}</div>
+                            </div>
+                          </div>
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+              {msg.is_edited && <span className="text-xs opacity-60 ml-1">(edited)</span>}
+            </div>
+          </div>
+        </div>
+      );
+    })
+  ), [messages, profile?.id]);
 
   async function startCall(video: boolean) {
     if (!conversationId) return;
@@ -2631,7 +2774,7 @@ export function DirectMessagePage() {
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto py-4 px-4 scrollbar-thin space-y-1">
+              <div ref={messageScrollRef} className="flex-1 overflow-y-auto py-4 px-4 scrollbar-thin space-y-1">
                 {activeConversation && activeConversationCall && (
                   <div className="mb-3 rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2.5 flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -2662,81 +2805,7 @@ export function DirectMessagePage() {
                     <p className="text-surface-400">This is the beginning of your conversation</p>
                   </div>
                 )}
-                {messages.map((msg, i) => {
-                  const prev = messages[i - 1];
-                  const isOwn = msg.author_id === profile?.id;
-                  const author = (msg.author as any);
-                  const attachments = (msg.attachments || []) as DirectMessageAttachment[];
-                  const showAvatar = !prev || prev.author_id !== msg.author_id ||
-                    new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() > 5 * 60 * 1000;
-
-                  return (
-                    <div key={msg.id} className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'} group`}>
-                      <div className="w-8 flex-shrink-0">
-                        {showAvatar && (
-                          <Avatar
-                            src={author?.avatar_url}
-                            name={author?.display_name || author?.username || 'User'}
-                            size="sm"
-                          />
-                        )}
-                      </div>
-                      <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-lg`}>
-                        {showAvatar && (
-                          <span className="text-xs text-surface-500 mb-1 px-1">
-                            {isOwn ? 'You' : author?.display_name || author?.username}
-                            {' · '}
-                            {formatShortTime(msg.created_at)}
-                          </span>
-                        )}
-                        <div className={`px-3 py-2 rounded-2xl text-sm ${isOwn
-                          ? 'bg-nyptid-300 text-surface-950 rounded-tr-sm'
-                          : 'bg-surface-700 text-surface-200 rounded-tl-sm'}`}>
-                          {msg.content && (
-                            <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                          )}
-                          {attachments.length > 0 && (
-                            <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
-                              {attachments.map((attachment) => {
-                                const isImage = String(attachment.file_type || '').startsWith('image/');
-                                return (
-                                  <a
-                                    key={attachment.id}
-                                    href={attachment.file_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className={`block rounded-lg border text-xs overflow-hidden ${
-                                      isOwn
-                                        ? 'border-surface-950/20 hover:border-surface-950/30'
-                                        : 'border-surface-500/30 hover:border-surface-400/40'
-                                    }`}
-                                  >
-                                    {isImage ? (
-                                      <img
-                                        src={attachment.file_url}
-                                        alt={attachment.file_name}
-                                        className="max-h-64 w-auto object-contain bg-black/20"
-                                      />
-                                    ) : (
-                                      <div className="flex items-center gap-2 px-2.5 py-2">
-                                        <Paperclip size={13} />
-                                        <div className="min-w-0">
-                                          <div className="truncate font-medium">{attachment.file_name}</div>
-                                          <div className="opacity-70">{formatFileSize(Number(attachment.file_size || 0))}</div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </a>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {msg.is_edited && <span className="text-xs opacity-60 ml-1">(edited)</span>}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                {renderedMessages}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -3456,4 +3525,5 @@ function formatShortTime(dateString: string): string {
     hour12: true,
   });
 }
+
 
