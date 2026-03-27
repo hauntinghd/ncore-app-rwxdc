@@ -4,6 +4,7 @@ import { Copy, Palette, Plus, Save, ShieldCheck, SlidersHorizontal, Sparkles, Tr
 import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { buildCommunityInviteLink } from '../lib/inviteLinks';
 import type { Community, CommunityMember, CommunityRole, Profile, Visibility } from '../lib/types';
 
 type VerificationLevel = 'none' | 'low' | 'medium' | 'high' | 'very_high';
@@ -137,10 +138,9 @@ export function CommunitySettingsPage() {
     return labels[role] || role;
   }
 
-  function buildInviteLink(code: string): string {
-    const origin = window.location.origin;
-    return `${origin}/app/community/${communityId}?invite=${encodeURIComponent(code)}`;
-  }
+function buildInviteLink(code: string): string {
+  return buildCommunityInviteLink(code);
+}
 
   async function loadMembers(targetCommunityId: string): Promise<CommunityMember[]> {
     const { data: memberRows } = await supabase

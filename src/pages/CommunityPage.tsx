@@ -6,6 +6,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { buildCommunityInviteLink } from '../lib/inviteLinks';
 import type { Community, CommunityMember, CommunityServerCustomization, Profile } from '../lib/types';
 import { getCommunityRoleBadge } from '../lib/utils';
 import { detectCommunityTemplate, getCommunityBlueprint } from '../lib/communityBlueprints';
@@ -407,7 +408,7 @@ export function CommunityPage() {
       return;
     }
 
-    const inviteLink = `${window.location.origin}/app/community/${selectedServer.id}?invite=${encodeURIComponent(String((inviteRow as any).code))}`;
+    const inviteLink = buildCommunityInviteLink(String((inviteRow as any).code));
 
     try {
       await navigator.clipboard.writeText(inviteLink);

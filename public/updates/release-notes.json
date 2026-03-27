@@ -1,9 +1,26 @@
 {
     "releases": [
         {
-            "version": "11.7.87",
+            "version": "11.7.88",
             "date": "2026-03-27",
             "badge": "Current Build",
+            "improvements": [
+                "QuickDraw now uses a much closer TRW-style contract grid with a dedicated command rail, saved-contract controls, alert toggles, live filters, richer detail states, and a more operator-focused browse/deploy split.",
+                "Game marketplace now behaves more like a real storefront with a stronger Steam-style layout, featured capsules, dedicated tabs including Wishlist, safe installer opens, and cleaner detail / library flows.",
+                "Server creation and discovery were overhauled with template-driven community setup, Discord-style Discover surfaces for Apps/Servers/Quests, short invite links on ncore.gg, and direct invite resolution that can continue through login.",
+                "Server shell controls now cover more of the Discord owner/member surface, including invite-from-plus, richer server dropdown actions, owner create-event flow, and stronger right-click creation paths for channel/category management."
+            ],
+            "bugFixes": [
+                "Fixed server invite links generating file:// style desktop paths by moving community invites onto the ncore.gg short-link format and handling them through a dedicated invite resolver route.",
+                "Fixed multiple partially wired server actions by connecting create event, discover app-directory routing, invite entry, hide/show channel toggles, and owner creation actions to real app state instead of dead shell placeholders.",
+                "Fixed QuickDraw and game-market browsing gaps by adding real saved-contract, alert, category-filter, and wishlist state instead of static buttons that did not mutate anything.",
+                "Connections settings now clearly stay staged as coming soon instead of presenting half-built provider wiring that suggested unsupported integrations were already live."
+            ]
+        },
+        {
+            "version": "11.7.87",
+            "date": "2026-03-27",
+            "badge": "Previous",
             "improvements": [
                 "Server voice screen sharing now uses a separate share client like the direct-call stack, with capture fallback paths for Agora and native display capture instead of a single fragile publish path.",
                 "Screen-share startup now negotiates quality more defensively, stepping down through supported capture modes so NCore can keep sharing alive instead of hard-failing on one unsupported screen source configuration.",

@@ -1,6 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Users, TrendingUp, Globe, Lock, ArrowRight, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Compass,
+  Globe,
+  Lock,
+  Plus,
+  Search,
+  Sparkles,
+  Swords,
+  Users,
+} from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge } from '../components/ui/Badge';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,13 +17,87 @@ import { supabase } from '../lib/supabase';
 import { COMMUNITY_CATEGORIES } from '../lib/utils';
 import type { Community } from '../lib/types';
 
+type DiscoverTab = 'apps' | 'servers' | 'quests';
+
+interface DiscoverCardProps {
+  community: Community;
+  joined: boolean;
+  joining: boolean;
+  onOpen: () => void;
+  onJoin: () => void;
+}
+
+function DiscoverServerCard({ community, joined, joining, onOpen, onJoin }: DiscoverCardProps) {
+  return (
+    <div className="overflow-hidden rounded-[26px] border border-surface-700 bg-surface-900/92 shadow-[0_16px_60px_rgba(0,0,0,0.28)] transition-transform duration-300 hover:-translate-y-0.5">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block h-44 w-full bg-cover bg-center text-left"
+        style={{
+          backgroundImage: community.banner_url
+            ? `linear-gradient(180deg, rgba(7,18,30,0.1), rgba(7,18,30,0.72)), url(${community.banner_url})`
+            : 'linear-gradient(135deg, rgba(42,78,154,0.95), rgba(18,28,56,0.95))',
+        }}
+      >
+        <div className="flex h-full items-end px-5 pb-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="h-14 w-14 overflow-hidden rounded-[18px] border border-white/10 bg-surface-900 shadow-xl">
+              {community.icon_url ? (
+                <img src={community.icon_url} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-lg font-black text-nyptid-200">
+                  {community.name.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-2xl font-black text-white">{community.name}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/75">
+                <span className="inline-flex items-center gap-1"><Users size={12} />{Number(community.member_count || 0).toLocaleString()}</span>
+                <Badge size="sm">{community.category}</Badge>
+                {community.visibility === 'private' && <span className="inline-flex items-center gap-1"><Lock size={12} />Invite only</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      <div className="p-5">
+        <div className="min-h-[4.5rem] text-sm leading-6 text-surface-300">
+          {community.description || 'Open the server to view channels, members, and onboarding.'}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="text-xs text-surface-500">
+            {community.visibility === 'private'
+              ? 'Invite required to enter this server'
+              : 'Open join server with instant access'}
+          </div>
+          <button
+            type="button"
+            onClick={joined ? onOpen : onJoin}
+            disabled={joining}
+            className={joined ? 'nyptid-btn-secondary px-4 py-2 text-sm' : 'nyptid-btn-primary px-4 py-2 text-sm'}
+          >
+            {joining ? 'Joining...' : joined ? 'Open Server' : 'Join Server'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DiscoverPage() {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const discoverTab = (String(searchParams.get('tab') || 'servers').toLowerCase() as DiscoverTab);
+  const activeTab: DiscoverTab = discoverTab === 'apps' || discoverTab === 'quests' ? discoverTab : 'servers';
+
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
+  const [activeCategory, setActiveCategory] = useState('Home');
   const [joining, setJoining] = useState<string | null>(null);
   const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
 
@@ -25,29 +108,34 @@ export function DiscoverPage() {
       .select('community_id')
       .eq('user_id', profile.id)
       .then(({ data }) => {
-        if (data) setJoinedIds(new Set(data.map((m: any) => m.community_id)));
+        if (data) setJoinedIds(new Set(data.map((member: any) => member.community_id)));
       });
   }, [profile]);
 
   useEffect(() => {
+    if (activeTab !== 'servers') {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     let query = supabase
       .from('communities')
       .select('*')
       .eq('visibility', 'public')
       .order('member_count', { ascending: false });
 
-    if (activeCategory !== 'All') {
+    if (activeCategory !== 'Home') {
       query = query.eq('category', activeCategory);
     }
     if (search.trim()) {
-      query = query.ilike('name', `%${search}%`);
+      query = query.or(`name.ilike.%${search.trim()}%,description.ilike.%${search.trim()}%`);
     }
 
-    query.limit(50).then(({ data }) => {
+    query.limit(48).then(({ data }) => {
       if (data) setCommunities(data as Community[]);
       setLoading(false);
     });
-  }, [search, activeCategory]);
+  }, [activeCategory, activeTab, search]);
 
   async function handleJoin(communityId: string) {
     if (!profile || joining) return;
@@ -79,131 +167,226 @@ export function DiscoverPage() {
         community_id: communityId,
         user_id: profile.id,
         role: 'member',
-      });
-      if (joinError) {
+      } as any);
+      if (joinError && !String(joinError.message || '').toLowerCase().includes('duplicate')) {
         window.alert(`Join failed: ${joinError.message}`);
         setJoining(null);
         return;
       }
     }
 
-    setJoinedIds(prev => new Set([...prev, communityId]));
+    setJoinedIds((prev) => new Set([...prev, communityId]));
     setJoining(null);
   }
 
-  const categories = ['All', ...COMMUNITY_CATEGORIES];
+  const heroCommunity = communities[0] || null;
+  const featuredCommunities = communities.slice(0, 8);
+  const sidebarTabs: { id: DiscoverTab; label: string; icon: typeof Compass; subtitle: string }[] = [
+    { id: 'apps', label: 'Apps', icon: Sparkles, subtitle: 'Bots, tools, and integrations' },
+    { id: 'servers', label: 'Servers', icon: Compass, subtitle: 'Public communities you can join' },
+    { id: 'quests', label: 'Quests', icon: Swords, subtitle: 'Featured campaigns and unlock paths' },
+  ];
+  const discoverCategories = ['Home', 'Gaming', 'Music', 'Entertainment', 'Science', 'Technology', 'Education', 'Business'];
+  const spotlightCount = communities.slice(0, 4).reduce((sum, community) => sum + Number(community.member_count || 0), 0);
 
   return (
-    <AppShell showChannelSidebar={false} title="Discover Communities">
-      <div className="h-full overflow-y-auto">
-        <div className="max-w-5xl mx-auto p-6">
-          <div className="mb-8">
-            <h1 className="text-3xl font-black text-surface-100 mb-2">Discover Communities</h1>
-            <p className="text-surface-400">Find your people. Join communities built around skills you want to develop.</p>
-          </div>
-
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search communities..."
-                className="nyptid-input pl-9"
-              />
+    <AppShell showChannelSidebar={false} title="Discover">
+      <div className="h-full overflow-y-auto bg-surface-950">
+        <div className="flex min-h-full">
+          <aside className="hidden w-[22rem] flex-shrink-0 border-r border-surface-800 bg-surface-900/75 px-6 py-6 xl:block">
+            <div className="text-4xl font-black text-surface-100">Discover</div>
+            <div className="mt-2 text-sm text-surface-500">
+              Find public NCore communities, app surfaces, and curated launch channels from one directory.
             </div>
-          </div>
 
-          <div className="flex gap-2 flex-wrap mb-6">
-            {categories.slice(0, 12).map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
-                  activeCategory === cat
-                    ? 'bg-nyptid-300 text-surface-950'
-                    : 'bg-surface-800 text-surface-400 hover:text-surface-200 hover:bg-surface-700 border border-surface-700'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          {loading ? (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="nyptid-card h-48 animate-pulse" />
+            <div className="mt-8 space-y-3">
+              {sidebarTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSearchParams(tab.id === 'servers' ? {} : { tab: tab.id })}
+                  className={`flex w-full items-center gap-3 rounded-[22px] border px-4 py-4 text-left transition-colors ${
+                    activeTab === tab.id
+                      ? 'border-surface-600 bg-surface-800 text-surface-100'
+                      : 'border-transparent bg-surface-900/40 text-surface-400 hover:border-surface-700 hover:bg-surface-800/60 hover:text-surface-200'
+                  }`}
+                >
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
+                    activeTab === tab.id ? 'bg-nyptid-300/15 text-nyptid-200' : 'bg-surface-800 text-surface-500'
+                  }`}>
+                    <tab.icon size={20} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-lg font-bold">{tab.label}</div>
+                    <div className="text-xs text-surface-500">{tab.subtitle}</div>
+                  </div>
+                </button>
               ))}
             </div>
-          ) : communities.length === 0 ? (
-            <div className="text-center py-16">
-              <Globe size={48} className="text-surface-700 mx-auto mb-4" />
-              <p className="text-surface-400 text-lg font-medium mb-2">No communities found</p>
-              <p className="text-surface-600 text-sm">Try a different search or category</p>
+
+            <div className="mt-8 rounded-[24px] border border-surface-700 bg-surface-950/70 p-5">
+              <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500">Directory Pulse</div>
+              <div className="mt-4 text-4xl font-black text-surface-100">{spotlightCount.toLocaleString()}</div>
+              <div className="mt-1 text-sm text-surface-400">combined member reach across the current spotlight</div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-surface-700 bg-surface-900/70 px-3 py-3">
+                  <div className="text-[11px] uppercase tracking-wide text-surface-500">Visible Servers</div>
+                  <div className="mt-1 text-xl font-black text-surface-100">{communities.length}</div>
+                </div>
+                <div className="rounded-2xl border border-surface-700 bg-surface-900/70 px-3 py-3">
+                  <div className="text-[11px] uppercase tracking-wide text-surface-500">Joined</div>
+                  <div className="mt-1 text-xl font-black text-surface-100">{joinedIds.size}</div>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {communities.map(community => {
-                const isJoined = joinedIds.has(community.id);
-                return (
-                  <div key={community.id} className="nyptid-card-hover overflow-hidden group">
-                    <div
-                      className="h-20 bg-gradient-to-br from-nyptid-900/60 to-surface-800 cursor-pointer"
-                      onClick={() => navigate(`/app/community/${community.id}`)}
-                    >
-                      {community.banner_url && (
-                        <img src={community.banner_url} alt="" className="w-full h-full object-cover" />
-                      )}
+          </aside>
+
+          <main className="min-w-0 flex-1">
+            {activeTab === 'servers' && (
+              <div className="px-5 py-5 lg:px-8 lg:py-6">
+                <div className="overflow-hidden rounded-[30px] border border-surface-700 bg-surface-900 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+                  <div className="border-b border-surface-800 bg-[#2b2f8e]">
+                    <div className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex flex-wrap gap-4 text-sm font-semibold text-white/85">
+                        {discoverCategories.map((category) => (
+                          <button
+                            key={category}
+                            type="button"
+                            onClick={() => setActiveCategory(category)}
+                            className={`border-b-2 pb-3 transition-colors ${
+                              activeCategory === category
+                                ? 'border-white text-white'
+                                : 'border-transparent text-white/70 hover:text-white'
+                            }`}
+                          >
+                            {category}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="relative w-full max-w-sm">
+                        <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/55" />
+                        <input
+                          type="text"
+                          value={search}
+                          onChange={(event) => setSearch(event.target.value)}
+                          placeholder="Search servers..."
+                          className="h-12 w-full rounded-2xl border border-white/10 bg-[#1d215d] pl-11 pr-4 text-sm text-white placeholder:text-white/45 outline-none transition-colors focus:border-white/25"
+                        />
+                      </div>
                     </div>
-                    <div className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div
-                          className="flex items-center gap-2 cursor-pointer flex-1 min-w-0"
-                          onClick={() => navigate(`/app/community/${community.id}`)}
-                        >
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-nyptid-800 to-nyptid-950 flex items-center justify-center text-sm font-bold text-nyptid-300 flex-shrink-0 -mt-6 border-2 border-surface-800">
-                            {community.icon_url ? (
-                              <img src={community.icon_url} alt="" className="w-full h-full rounded-xl object-cover" />
-                            ) : (
-                              community.name.slice(0, 2).toUpperCase()
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-surface-100 text-sm truncate group-hover:text-nyptid-300 transition-colors">{community.name}</h3>
-                          </div>
-                        </div>
-                        {community.visibility === 'private' && <Lock size={12} className="text-surface-500 mt-1 flex-shrink-0" />}
-                      </div>
 
-                      {community.description && (
-                        <p className="text-xs text-surface-400 mb-3 line-clamp-2">{community.description}</p>
-                      )}
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 text-xs text-surface-500">
-                          <span className="flex items-center gap-1"><Users size={11} /> {community.member_count.toLocaleString()}</span>
-                          <Badge size="sm">{community.category}</Badge>
+                    <div className="grid gap-6 px-6 pb-8 pt-3 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-white/70">NCore Discovery</div>
+                        <div className="mt-4 max-w-3xl text-4xl font-black leading-none text-white lg:text-[4.5rem]">
+                          Find your community on NCore.
                         </div>
-                        <button
-                          onClick={() => isJoined ? navigate(`/app/community/${community.id}`) : handleJoin(community.id)}
-                          disabled={joining === community.id}
-                          className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${
-                            isJoined
-                              ? 'bg-surface-700 text-surface-300 hover:bg-surface-600'
-                              : 'bg-nyptid-300 text-surface-950 hover:bg-nyptid-200'
-                          }`}
-                        >
-                          {joining === community.id ? '...' : isJoined ? 'Open' : 'Join'}
-                        </button>
+                        <div className="mt-4 max-w-2xl text-lg text-white/80">
+                          From private operators to public communities, discover the servers worth joining and route into them fast.
+                        </div>
                       </div>
+                      <div
+                        className="h-48 rounded-[24px] border border-white/10 bg-cover bg-center shadow-2xl"
+                        style={{
+                          backgroundImage: heroCommunity?.banner_url
+                            ? `linear-gradient(135deg, rgba(16,20,45,0.25), rgba(16,20,45,0.55)), url(${heroCommunity.banner_url})`
+                            : 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))',
+                        }}
+                      />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
+
+                  <div className="bg-surface-900 px-6 py-7">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-3xl font-black text-surface-100">Featured Servers</div>
+                        <div className="mt-1 text-sm text-surface-500">Curated public communities currently visible in discovery.</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/app')}
+                        className="hidden rounded-2xl border border-surface-700 bg-surface-950/70 px-4 py-2 text-sm font-semibold text-surface-300 transition-colors hover:border-surface-600 hover:text-surface-100 lg:inline-flex lg:items-center lg:gap-2"
+                      >
+                        <Plus size={14} />
+                        Back to app
+                      </button>
+                    </div>
+
+                    {loading ? (
+                      <div className="mt-6 grid gap-5 xl:grid-cols-2">
+                        {Array.from({ length: 4 }).map((_, index) => (
+                          <div key={index} className="h-[24rem] animate-pulse rounded-[26px] border border-surface-700 bg-surface-950/60" />
+                        ))}
+                      </div>
+                    ) : featuredCommunities.length === 0 ? (
+                      <div className="mt-8 rounded-[26px] border border-dashed border-surface-700 bg-surface-950/60 px-6 py-14 text-center">
+                        <Globe size={42} className="mx-auto text-surface-600" />
+                        <div className="mt-4 text-xl font-bold text-surface-100">No servers matched this slice</div>
+                        <div className="mt-2 text-sm text-surface-500">Change the category or search to broaden the directory.</div>
+                      </div>
+                    ) : (
+                      <div className="mt-6 grid gap-5 xl:grid-cols-2">
+                        {featuredCommunities.map((community) => (
+                          <DiscoverServerCard
+                            key={community.id}
+                            community={community}
+                            joined={joinedIds.has(community.id)}
+                            joining={joining === community.id}
+                            onOpen={() => navigate(`/app/community/${community.id}`)}
+                            onJoin={() => void handleJoin(community.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab !== 'servers' && (
+              <div className="px-5 py-5 lg:px-8 lg:py-6">
+                <div className="rounded-[30px] border border-surface-700 bg-surface-900 px-6 py-7 shadow-[0_24px_80px_rgba(0,0,0,0.3)]">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">
+                    {activeTab === 'apps' ? 'App Directory' : 'Quest Surface'}
+                  </div>
+                  <div className="mt-4 text-4xl font-black text-surface-100">
+                    {activeTab === 'apps' ? 'App discovery is wired next.' : 'Quest discovery is staged next.'}
+                  </div>
+                  <div className="mt-4 max-w-3xl text-base text-surface-400">
+                    The server shell now routes into these surfaces, but the public catalog data still needs to be populated. The tab works, the layout works, and the next release can land content without another discover overhaul.
+                  </div>
+
+                  <div className="mt-8 grid gap-4 lg:grid-cols-3">
+                    {[
+                      {
+                        title: activeTab === 'apps' ? 'Verified tools' : 'Operator missions',
+                        body: activeTab === 'apps'
+                          ? 'Browse approved utilities, moderation apps, and workflow integrations.'
+                          : 'Time-boxed campaigns and progression quests for communities.',
+                      },
+                      {
+                        title: activeTab === 'apps' ? 'Approval pipeline' : 'Reward rails',
+                        body: activeTab === 'apps'
+                          ? 'App directory approval and trust rails are now represented in the UI.'
+                          : 'Quest rewards, XP unlocks, and completion validation slot here.',
+                      },
+                      {
+                        title: activeTab === 'apps' ? 'Permissions preview' : 'Campaign analytics',
+                        body: activeTab === 'apps'
+                          ? 'App scopes, install permissions, and audit trails will live here.'
+                          : 'Community campaign conversion, participation, and completion metrics go here.',
+                      },
+                    ].map((item) => (
+                      <div key={item.title} className="rounded-[24px] border border-surface-700 bg-surface-950/70 p-5">
+                        <div className="text-lg font-bold text-surface-100">{item.title}</div>
+                        <div className="mt-2 text-sm leading-6 text-surface-400">{item.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
         </div>
       </div>
     </AppShell>

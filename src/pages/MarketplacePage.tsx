@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   BadgeCheck,
+  Bookmark,
   BookOpen,
   Briefcase,
   CheckCircle2,
+  ChevronRight,
   Clock3,
+  Download,
   ExternalLink,
   FileText,
   Gamepad2,
@@ -57,7 +60,7 @@ type MarketplaceTrack = 'cosmetics' | 'quickdraw' | 'games';
 type QuickdrawRoleView = 'hiring' | 'specialist';
 type QuickdrawBriefingId = 'terms' | 'tier2' | 'protocols' | null;
 type QuickdrawNavId = 'my_contracts' | 'listed_contracts' | 'working_contracts' | 'escrow_history' | 'find_contracts' | 'contract_radar';
-type GameStoreSection = 'store' | 'new_trending' | 'top_sellers' | 'recently_updated' | 'library';
+type GameStoreSection = 'store' | 'new_trending' | 'top_sellers' | 'recently_updated' | 'library' | 'wishlist';
 
 interface QuickdrawContractDraft {
   id: string;
@@ -175,6 +178,24 @@ function formatDateTime(value: string | null | undefined): string {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return 'N/A';
   return parsed.toLocaleString();
+}
+
+function formatRelativeTime(value: string | null | undefined): string {
+  const raw = String(value || '').trim();
+  if (!raw) return 'just now';
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return 'just now';
+  const deltaMs = Date.now() - parsed.getTime();
+  const minutes = Math.max(Math.floor(deltaMs / 60000), 0);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
 }
 
 function isInvalidJwtMessage(value: unknown): boolean {
@@ -298,6 +319,18 @@ async function openCheckoutUrl(checkoutUrl: string): Promise<void> {
   });
 }
 
+async function openInstallerUrl(installerUrl: string): Promise<void> {
+  const normalized = normalizeExternalHttpUrl(installerUrl, 'installer URL');
+  await safeOpenExternalUrl(normalized, {
+    trustedDomains: ['nyptidindustries.com', 'ncore.nyptidindustries.com', 'cdn.discordapp.com'],
+  });
+}
+
+async function openReferenceUrl(referenceUrl: string, label = 'reference URL'): Promise<void> {
+  const normalized = normalizeExternalHttpUrl(referenceUrl, label);
+  await safeOpenExternalUrl(normalized);
+}
+
 export function MarketplacePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -348,8 +381,14 @@ export function MarketplacePage() {
   const [quickdrawNavId, setQuickdrawNavId] = useState<QuickdrawNavId>('my_contracts');
   const [quickdrawBriefingId, setQuickdrawBriefingId] = useState<QuickdrawBriefingId>(null);
   const [quickdrawSearch, setQuickdrawSearch] = useState('');
+  const [quickdrawSavedIds, setQuickdrawSavedIds] = useState<string[]>([]);
+  const [quickdrawSavedOnly, setQuickdrawSavedOnly] = useState(false);
+  const [quickdrawAlertEnabled, setQuickdrawAlertEnabled] = useState(false);
+  const [quickdrawFilterCategory, setQuickdrawFilterCategory] = useState<string>('all');
+  const [showQuickdrawFilters, setShowQuickdrawFilters] = useState(false);
   const [gamesSearch, setGamesSearch] = useState('');
   const [gameStoreSection, setGameStoreSection] = useState<GameStoreSection>('store');
+  const [wishlistedGameIds, setWishlistedGameIds] = useState<string[]>([]);
   const [showIssueContractModal, setShowIssueContractModal] = useState(false);
   const [issueContractTitle, setIssueContractTitle] = useState('');
   const [issueContractDescription, setIssueContractDescription] = useState('');
@@ -360,6 +399,8 @@ export function MarketplacePage() {
   const [issueContractAcknowledged, setIssueContractAcknowledged] = useState(false);
   const [quickdrawContractDrafts, setQuickdrawContractDrafts] = useState<QuickdrawContractDraft[]>([]);
   const [cosmeticRotationClock, setCosmeticRotationClock] = useState(() => Date.now());
+  const [selectedServiceListing, setSelectedServiceListing] = useState<MarketplaceServiceListing | null>(null);
+  const [selectedGameListing, setSelectedGameListing] = useState<MarketplaceGameListing | null>(null);
   const marketplaceLocked = !capabilities.canUseMarketplace;
   const marketplaceLockReason = getCapabilityLockReason('can_use_marketplace', contract.unlock_source);
 
@@ -448,6 +489,14 @@ export function MarketplacePage() {
     () => gameOrders.filter((order) => String(order.buyer_id) === String(profile?.id || '')),
     [gameOrders, profile?.id],
   );
+  const quickdrawSavedIdSet = useMemo(
+    () => new Set(quickdrawSavedIds.map((id) => String(id || '').trim()).filter(Boolean)),
+    [quickdrawSavedIds],
+  );
+  const wishlistedGameIdSet = useMemo(
+    () => new Set(wishlistedGameIds.map((id) => String(id || '').trim()).filter(Boolean)),
+    [wishlistedGameIds],
+  );
   const quickdrawNavItems = useMemo(() => (
     quickdrawRoleView === 'hiring'
       ? [
@@ -468,8 +517,14 @@ export function MarketplacePage() {
   );
   const searchedServiceListings = useMemo(() => {
     const needle = quickdrawSearch.trim().toLowerCase();
-    if (!needle) return serviceListings;
-    return serviceListings.filter((listing) => {
+    const filteredByCategory = quickdrawFilterCategory === 'all'
+      ? serviceListings
+      : serviceListings.filter((listing) => String(listing.category?.slug || listing.category_id || '').trim() === quickdrawFilterCategory);
+    const filteredBySaved = quickdrawSavedOnly
+      ? filteredByCategory.filter((listing) => quickdrawSavedIdSet.has(String(listing.id)))
+      : filteredByCategory;
+    if (!needle) return filteredBySaved;
+    return filteredBySaved.filter((listing) => {
       const haystack = [
         listing.title,
         listing.description,
@@ -482,7 +537,7 @@ export function MarketplacePage() {
         .toLowerCase();
       return haystack.includes(needle);
     });
-  }, [quickdrawSearch, serviceListings]);
+  }, [quickdrawFilterCategory, quickdrawSavedIdSet, quickdrawSavedOnly, quickdrawSearch, serviceListings]);
   const visibleServiceListings = useMemo(() => {
     if (quickdrawRoleView === 'hiring') {
       if (quickdrawNavId === 'working_contracts' || quickdrawNavId === 'escrow_history' || quickdrawNavId === 'listed_contracts') {
@@ -537,6 +592,11 @@ export function MarketplacePage() {
   );
   const filteredGameListings = useMemo(() => {
     const working = [...searchedGameListings];
+    if (gameStoreSection === 'wishlist') {
+      return working
+        .filter((listing) => wishlistedGameIdSet.has(String(listing.id)))
+        .sort((a, b) => Date.parse(String(b.updated_at || '')) - Date.parse(String(a.updated_at || '')));
+    }
     if (gameStoreSection === 'library') {
       return working
         .filter((listing) => purchasedGameListingIds.has(String(listing.id)))
@@ -557,7 +617,7 @@ export function MarketplacePage() {
       });
     }
     return working;
-  }, [gameOrderCountsByListingId, gameStoreSection, purchasedGameListingIds, searchedGameListings]);
+  }, [gameOrderCountsByListingId, gameStoreSection, purchasedGameListingIds, searchedGameListings, wishlistedGameIdSet]);
   const activeServiceOrdersForRole = useMemo(() => {
     const roleOrders = quickdrawRoleView === 'hiring' ? myServiceOrdersAsBuyer : myServiceOrdersAsSeller;
     return roleOrders.filter((order) => ['funded', 'in_progress', 'delivered'].includes(String(order.status || '').toLowerCase()));
@@ -567,6 +627,8 @@ export function MarketplacePage() {
     return roleOrders.filter((order) => !['funded', 'in_progress', 'delivered'].includes(String(order.status || '').toLowerCase()));
   }, [myServiceOrdersAsBuyer, myServiceOrdersAsSeller, quickdrawRoleView]);
   const featuredGameListing = filteredGameListings[0] || null;
+  const secondaryGameListings = filteredGameListings.slice(1, 5);
+  const quickdrawSpotlightListings = visibleServiceListings.slice(0, 8);
   const hasApprovedClearance = String(sellerProfile?.clearance_status || '').toLowerCase() === 'approved';
   const clearanceLevel = String(sellerProfile?.clearance_level || '').toLowerCase();
   const hasTierIiClearance = hasApprovedClearance && (clearanceLevel === 'level_ii' || clearanceLevel === 'level_iii');
@@ -738,6 +800,38 @@ export function MarketplacePage() {
       setQuickdrawContractDrafts([]);
     }
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setQuickdrawSavedIds([]);
+      setWishlistedGameIds([]);
+      setQuickdrawAlertEnabled(false);
+      return;
+    }
+    try {
+      const savedContractsRaw = window.localStorage.getItem(`ncore.marketplace.quickdraw.saved.${profile.id}`);
+      const savedGamesRaw = window.localStorage.getItem(`ncore.marketplace.games.wishlist.${profile.id}`);
+      const alertsRaw = window.localStorage.getItem(`ncore.marketplace.quickdraw.alerts.${profile.id}`);
+      setQuickdrawSavedIds(Array.isArray(savedContractsRaw ? JSON.parse(savedContractsRaw) : []) ? JSON.parse(savedContractsRaw || '[]') : []);
+      setWishlistedGameIds(Array.isArray(savedGamesRaw ? JSON.parse(savedGamesRaw) : []) ? JSON.parse(savedGamesRaw || '[]') : []);
+      setQuickdrawAlertEnabled(alertsRaw === '1');
+    } catch {
+      setQuickdrawSavedIds([]);
+      setWishlistedGameIds([]);
+      setQuickdrawAlertEnabled(false);
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      window.localStorage.setItem(`ncore.marketplace.quickdraw.saved.${profile.id}`, JSON.stringify(quickdrawSavedIds.slice(0, 100)));
+      window.localStorage.setItem(`ncore.marketplace.games.wishlist.${profile.id}`, JSON.stringify(wishlistedGameIds.slice(0, 200)));
+      window.localStorage.setItem(`ncore.marketplace.quickdraw.alerts.${profile.id}`, quickdrawAlertEnabled ? '1' : '0');
+    } catch {
+      // best-effort local marketplace state
+    }
+  }, [profile?.id, quickdrawAlertEnabled, quickdrawSavedIds, wishlistedGameIds]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -1470,6 +1564,26 @@ export function MarketplacePage() {
     resetIssueContractDraftComposer();
   }
 
+  function toggleQuickdrawSavedListing(listingId: string) {
+    const normalizedId = String(listingId || '').trim();
+    if (!normalizedId) return;
+    setQuickdrawSavedIds((prev) => (
+      prev.includes(normalizedId)
+        ? prev.filter((entry) => entry !== normalizedId)
+        : [normalizedId, ...prev].slice(0, 100)
+    ));
+  }
+
+  function toggleGameWishlist(listingId: string) {
+    const normalizedId = String(listingId || '').trim();
+    if (!normalizedId) return;
+    setWishlistedGameIds((prev) => (
+      prev.includes(normalizedId)
+        ? prev.filter((entry) => entry !== normalizedId)
+        : [normalizedId, ...prev].slice(0, 200)
+    ));
+  }
+
   return (
     <AppShell showChannelSidebar={false} title="NCore Marketplace">
       <div className={`h-full overflow-y-auto ${isOpsExperience ? 'ncore-marketplace-ops' : ''}`}>
@@ -1886,181 +2000,320 @@ export function MarketplacePage() {
             </div>
           )}
                     {activeTrack === 'quickdraw' && (
-            <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
-              <aside className="nyptid-card p-4 h-fit xl:sticky xl:top-5 space-y-4">
+            <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5">
+              <aside className="h-fit space-y-4 rounded-[28px] border border-surface-700 bg-[#0b1723] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)] xl:sticky xl:top-5">
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-surface-400 mb-2">Quickdraw Command</div>
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => setQuickdrawRoleView('specialist')}
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        quickdrawRoleView === 'specialist'
-                          ? 'border-nyptid-300/45 bg-nyptid-300/10 text-nyptid-100'
-                          : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
-                      }`}
-                    >
-                      <div className="font-semibold">Find Contracts</div>
-                      <div className="text-[11px] text-surface-500 mt-0.5">Being hired view</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setQuickdrawRoleView('hiring')}
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        quickdrawRoleView === 'hiring'
-                          ? 'border-nyptid-300/45 bg-nyptid-300/10 text-nyptid-100'
-                          : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
-                      }`}
-                    >
-                      <div className="font-semibold">Deploy</div>
-                      <div className="text-[11px] text-surface-500 mt-0.5">Hiring view</div>
-                    </button>
+                  <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">QuickDraw Command</div>
+                  <div className="rounded-[22px] border border-surface-700 bg-surface-950/45 p-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setQuickdrawRoleView('specialist')}
+                        className={`rounded-2xl px-3 py-3 text-left text-sm transition-colors ${
+                          quickdrawRoleView === 'specialist'
+                            ? 'bg-[#13283d] text-white shadow-[0_0_0_1px_rgba(255,196,79,0.08)]'
+                            : 'bg-transparent text-surface-400 hover:bg-surface-900/60 hover:text-surface-200'
+                        }`}
+                      >
+                        <div className="font-semibold">Find Contracts</div>
+                        <div className="mt-1 text-[11px] text-surface-500">Specialist view</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickdrawRoleView('hiring')}
+                        className={`rounded-2xl px-3 py-3 text-left text-sm transition-colors ${
+                          quickdrawRoleView === 'hiring'
+                            ? 'bg-[#13283d] text-white shadow-[0_0_0_1px_rgba(255,196,79,0.08)]'
+                            : 'bg-transparent text-surface-400 hover:bg-surface-900/60 hover:text-surface-200'
+                        }`}
+                      >
+                        <div className="font-semibold">Deploy</div>
+                        <div className="mt-1 text-[11px] text-surface-500">Founder view</div>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-surface-400 mb-2">
-                    {quickdrawRoleView === 'hiring' ? 'Deploy Terminal' : 'Specialist Console'}
+                  <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">
+                    {quickdrawRoleView === 'hiring' ? 'Founder Command' : 'Specialist Desk'}
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {quickdrawNavItems.map((item) => (
                       <button
                         key={item.id}
                         type="button"
                         onClick={() => setQuickdrawNavId(item.id)}
-                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        className={`w-full rounded-[20px] border px-4 py-3 text-left text-sm transition-colors ${
                           quickdrawNavId === item.id
-                            ? 'border-nyptid-300/35 bg-nyptid-300/10 text-nyptid-100'
-                            : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
+                            ? 'border-[#264969] bg-[#13283d] text-white'
+                            : 'border-surface-700 bg-surface-950/45 text-surface-300 hover:border-surface-600 hover:bg-surface-900/70'
                         }`}
                       >
                         <div className="font-semibold">{item.label}</div>
-                        <div className="text-[11px] text-surface-500 mt-0.5">{item.subtitle}</div>
+                        <div className="mt-1 text-[11px] text-surface-500">{item.subtitle}</div>
                       </button>
                     ))}
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-surface-400 mb-2">Briefings</div>
+                  <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">Briefings</div>
                   <div className="space-y-2">
-                    <button type="button" onClick={() => setQuickdrawBriefingId('terms')} className="w-full rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 text-left text-sm text-surface-200 hover:border-surface-600 transition-colors">
-                      <div className="flex items-center gap-2"><FileText size={14} className="text-nyptid-300" />Terms of Engagement</div>
+                    <button type="button" onClick={() => setQuickdrawBriefingId('terms')} className="flex w-full items-center gap-2 rounded-[18px] border border-surface-700 bg-surface-950/45 px-4 py-3 text-left text-sm text-surface-200 transition-colors hover:border-surface-600 hover:bg-surface-900/60">
+                      <FileText size={14} className="text-nyptid-300" />
+                      Terms of Engagement
                     </button>
-                    <button type="button" onClick={() => setQuickdrawBriefingId('tier2')} className="w-full rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 text-left text-sm text-surface-200 hover:border-surface-600 transition-colors">
-                      <div className="flex items-center gap-2"><BadgeCheck size={14} className="text-nyptid-300" />Tier II Clearance</div>
+                    <button type="button" onClick={() => setQuickdrawBriefingId('tier2')} className="flex w-full items-center gap-2 rounded-[18px] border border-surface-700 bg-surface-950/45 px-4 py-3 text-left text-sm text-surface-200 transition-colors hover:border-surface-600 hover:bg-surface-900/60">
+                      <BadgeCheck size={14} className="text-nyptid-300" />
+                      Tier II Clearance
                     </button>
-                    <button type="button" onClick={() => setQuickdrawBriefingId('protocols')} className="w-full rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 text-left text-sm text-surface-200 hover:border-surface-600 transition-colors">
-                      <div className="flex items-center gap-2"><BookOpen size={14} className="text-nyptid-300" />Operational Protocols</div>
+                    <button type="button" onClick={() => setQuickdrawBriefingId('protocols')} className="flex w-full items-center gap-2 rounded-[18px] border border-surface-700 bg-surface-950/45 px-4 py-3 text-left text-sm text-surface-200 transition-colors hover:border-surface-600 hover:bg-surface-900/60">
+                      <BookOpen size={14} className="text-nyptid-300" />
+                      Operational Protocols
                     </button>
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2.5 text-xs">
+                <div className="rounded-[20px] border border-surface-700 bg-surface-950/55 px-4 py-4 text-xs">
                   <div className="text-surface-500">Clearance status</div>
-                  <div className="text-sm font-semibold text-surface-100 mt-1">{sellerProfile?.clearance_status || 'pending'}</div>
-                  <div className="text-surface-500 mt-2">Level</div>
-                  <div className="text-sm font-semibold text-surface-100 mt-1">{sellerProfile?.clearance_level || 'none'}</div>
+                  <div className="mt-1 text-sm font-semibold text-surface-100">{sellerProfile?.clearance_status || 'pending'}</div>
+                  <div className="mt-3 text-surface-500">Level</div>
+                  <div className="mt-1 text-sm font-semibold text-surface-100">{sellerProfile?.clearance_level || 'none'}</div>
+                  <div className="mt-3 rounded-2xl border border-surface-700 bg-[#102234] px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-wide text-surface-500">Wallet Snapshot</div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[11px] text-surface-500">Available</div>
+                        <div className="text-lg font-black text-surface-100">{formatUsdFromCents(walletAccount?.available_balance_cents || 0)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-surface-500">Pending</div>
+                        <div className="text-lg font-black text-surface-100">{formatUsdFromCents(walletAccount?.pending_balance_cents || 0)}</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </aside>
 
               <div className="space-y-5">
-                <div className="nyptid-card p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-lg font-black text-surface-100">{activeQuickdrawNav?.label || 'Contract Grid'}</div>
-                      <div className="text-sm text-surface-500">
-                        {quickdrawRoleView === 'hiring'
-                          ? (quickdrawNavId === 'listed_contracts'
-                            ? 'Track your drafted and staged contracts before they move into escrow.'
-                            : quickdrawNavId === 'working_contracts'
-                              ? 'Monitor active escrow-backed orders currently in execution.'
+                <div className="overflow-hidden rounded-[30px] border border-surface-700 bg-[#0d1b29] shadow-[0_24px_70px_rgba(0,0,0,0.3)]">
+                  <div className="border-b border-surface-800 bg-[#102132] px-5 py-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="max-w-3xl">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">
+                          {quickdrawRoleView === 'hiring' ? 'Founder Command Center' : 'Contract Grid'}
+                        </div>
+                        <div className="mt-3 text-4xl font-black leading-none text-white">
+                          {activeQuickdrawNav?.label || 'Contract Grid'}
+                        </div>
+                        <div className="mt-3 text-sm text-surface-400">
+                          {quickdrawRoleView === 'hiring'
+                            ? (quickdrawNavId === 'listed_contracts'
+                              ? 'Review every live bounty, drafted contract, and active operation from a single terminal.'
+                              : quickdrawNavId === 'working_contracts'
+                                ? 'Monitor progress on your hired projects and track escrow-backed execution.'
+                                : quickdrawNavId === 'escrow_history'
+                                  ? 'Review finished hiring activity and lifetime capital deployed.'
+                                  : 'Deploy capital to scale and issue contracts to cleared specialists.')
+                            : (quickdrawNavId === 'contract_radar'
+                              ? 'Monitor category momentum and newest contract demand across the grid.'
                               : quickdrawNavId === 'escrow_history'
-                                ? 'Review historical orders, releases, and closed disputes.'
-                                : 'Browse specialist contracts and issue escrow-backed hires.')
-                          : (quickdrawNavId === 'contract_radar'
-                            ? 'Live specialist demand radar with newest contracts and category momentum.'
-                            : quickdrawNavId === 'escrow_history'
-                              ? 'Review your completed deliveries and settlement outcomes.'
-                              : 'Manage your specialist profile, listings, and active contract flow.')}
+                                ? 'Review your finished deliveries, escrow outcomes, and dispute history.'
+                                : 'Browse open missions, keep your profile cleared, and move faster inside QuickDraw.')}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
+                          <button
+                            type="button"
+                            onClick={() => setShowIssueContractModal(true)}
+                            className="nyptid-btn-primary text-xs px-3 py-2"
+                          >
+                            <Plus size={13} />
+                            Issue New Contract
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => setShowIssueContractModal(true)}
-                          className="nyptid-btn-primary text-xs px-3 py-2"
+                          onClick={() => setShowQuickdrawFilters((prev) => !prev)}
+                          className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                            showQuickdrawFilters
+                              ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                              : 'border-surface-700 bg-surface-950/55 text-surface-300 hover:border-surface-600 hover:text-surface-100'
+                          }`}
                         >
-                          <Plus size={13} />
-                          Issue New Contract
+                          Filters
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => setQuickdrawSavedOnly((prev) => !prev)}
+                          className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                            quickdrawSavedOnly
+                              ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                              : 'border-surface-700 bg-surface-950/55 text-surface-300 hover:border-surface-600 hover:text-surface-100'
+                          }`}
+                        >
+                          Saved {quickdrawSavedIds.length > 0 ? `(${quickdrawSavedIds.length})` : ''}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickdrawAlertEnabled((prev) => !prev);
+                            setQuickdrawMessage(`Contract alerts ${quickdrawAlertEnabled ? 'disabled' : 'enabled'} for your QuickDraw surface.`);
+                          }}
+                          className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                            quickdrawAlertEnabled
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                              : 'border-surface-700 bg-surface-950/55 text-surface-300 hover:border-surface-600 hover:text-surface-100'
+                          }`}
+                        >
+                          Alert {quickdrawAlertEnabled ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center">
+                      <div className="flex flex-1 items-center gap-2 rounded-[20px] border border-surface-700 bg-surface-950/65 px-4 py-3">
+                        <Search size={16} className="text-surface-500" />
+                        <input
+                          value={quickdrawSearch}
+                          onChange={(event) => setQuickdrawSearch(event.target.value)}
+                          placeholder={
+                            quickdrawNavId === 'contract_radar'
+                              ? 'Search contracts, categories, specialists, or demand lanes...'
+                              : quickdrawNavId === 'listed_contracts'
+                                ? 'Search your listed contracts and drafts...'
+                                : 'Search contracts, categories, specialists...'
+                          }
+                          className="w-full bg-transparent border-0 outline-none text-sm text-surface-200 placeholder:text-surface-600"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={() => { void reloadMarketplacePanels(); }}
-                        className="nyptid-btn-secondary text-xs px-3 py-2"
+                        className="rounded-[20px] border border-surface-700 bg-surface-950/55 px-4 py-3 text-sm font-semibold text-surface-200 transition-colors hover:border-surface-600 hover:text-surface-100"
                       >
                         Refresh
                       </button>
                     </div>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
-                    <Search size={14} className="text-surface-500" />
-                    <input
-                      value={quickdrawSearch}
-                      onChange={(event) => setQuickdrawSearch(event.target.value)}
-                      placeholder={
-                        quickdrawNavId === 'contract_radar'
-                          ? 'Scan radar by category, contract type, specialist...'
-                          : quickdrawNavId === 'listed_contracts'
-                            ? 'Search your listed contracts and drafts...'
-                            : 'Search contracts, categories, specialists...'
-                      }
-                      className="w-full bg-transparent border-0 outline-none text-sm text-surface-200 placeholder:text-surface-600"
-                    />
-                  </div>
-                  {quickdrawRoleView === 'hiring' && (quickdrawNavId === 'my_contracts' || quickdrawNavId === 'listed_contracts') && (
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Contracts Tracked</div>
-                        <div className="mt-1 text-xl font-black text-surface-100">{hiringContractDrafts.length + queuedContractDrafts.length}</div>
+
+                    {showQuickdrawFilters && (
+                      <div className="mt-4 rounded-[22px] border border-surface-700 bg-surface-950/55 p-4">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-surface-500">Contract Filters</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setQuickdrawFilterCategory('all')}
+                            className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                              quickdrawFilterCategory === 'all'
+                                ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                                : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
+                            }`}
+                          >
+                            All categories
+                          </button>
+                          {serviceCategories.map((category) => (
+                            <button
+                              key={`quickdraw-filter-${category.id}`}
+                              type="button"
+                              onClick={() => setQuickdrawFilterCategory(category.slug)}
+                              className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                                quickdrawFilterCategory === category.slug
+                                  ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                                  : 'border-surface-700 bg-surface-900/60 text-surface-300 hover:border-surface-600'
+                              }`}
+                            >
+                              {category.name}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Drafted Contracts</div>
-                        <div className="mt-1 text-xl font-black text-surface-100">{hiringContractDrafts.length}</div>
+                    )}
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-[22px] border border-surface-700 bg-surface-950/55 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Live Contracts</div>
+                        <div className="mt-2 text-3xl font-black text-surface-100">{visibleServiceListings.length}</div>
+                        <div className="mt-1 text-xs text-surface-500">currently visible on the grid</div>
                       </div>
-                      <div className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-surface-500">Queued for Funding</div>
-                        <div className="mt-1 text-xl font-black text-surface-100">{queuedContractDrafts.length}</div>
+                      <div className="rounded-[22px] border border-surface-700 bg-surface-950/55 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Draft Queue</div>
+                        <div className="mt-2 text-3xl font-black text-surface-100">{hiringContractDrafts.length}</div>
+                        <div className="mt-1 text-xs text-surface-500">contracts still in draft</div>
+                      </div>
+                      <div className="rounded-[22px] border border-surface-700 bg-surface-950/55 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Queued Funding</div>
+                        <div className="mt-2 text-3xl font-black text-surface-100">{queuedContractDrafts.length}</div>
+                        <div className="mt-1 text-xs text-surface-500">staged for escrow funding</div>
+                      </div>
+                      <div className="rounded-[22px] border border-surface-700 bg-surface-950/55 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Active Orders</div>
+                        <div className="mt-2 text-3xl font-black text-surface-100">{activeServiceOrdersForRole.length}</div>
+                        <div className="mt-1 text-xs text-surface-500">currently executing</div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
 
-                <div className="space-y-3">
-                  {visibleServiceListings.map((listing) => {
+                <div className="space-y-4">
+                  {quickdrawSpotlightListings.map((listing) => {
                     const loadingKey = `svc-buy:${listing.id}`;
                     const sellerLabel = listing.seller_profile?.display_name || listing.seller_profile?.username || 'Verified specialist';
+                    const isSavedListing = quickdrawSavedIdSet.has(String(listing.id));
                     return (
-                      <div key={listing.id} className="nyptid-card p-4">
+                      <div key={listing.id} className="rounded-[24px] border border-[#27445e] bg-[#0e2233] px-5 py-5 shadow-[0_14px_40px_rgba(0,0,0,0.18)]">
                         <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div className="min-w-0 flex-1">
-                            <div className="text-lg font-bold text-surface-100">{listing.title}</div>
-                            <div className="text-sm text-surface-300 mt-2 line-clamp-3">
-                              {listing.description || 'No description yet.'}
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{listing.category?.name || 'Service'}</span>
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{sellerLabel}</span>
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{listing.delivery_days} day delivery</span>
+                          <div className="flex min-w-0 flex-1 items-start gap-4">
+                            <Avatar
+                              src={listing.seller_profile?.avatar_url || null}
+                              name={sellerLabel}
+                              size="lg"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                  <div className="truncate text-2xl font-black text-white">{listing.title}</div>
+                                  <div className="mt-1 text-sm text-surface-300">by {sellerLabel}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleQuickdrawSavedListing(String(listing.id))}
+                                  className={`rounded-2xl border p-2 transition-colors ${
+                                    isSavedListing
+                                      ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-200'
+                                      : 'border-surface-700 bg-surface-950/50 text-surface-400 hover:border-surface-600 hover:text-nyptid-200'
+                                  }`}
+                                  title={isSavedListing ? 'Remove from saved contracts' : 'Save contract'}
+                                >
+                                  <Bookmark size={15} />
+                                </button>
+                              </div>
+                              <div className="mt-4 text-base leading-7 text-surface-200">
+                                {listing.description || 'No description yet.'}
+                              </div>
+                              <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
+                                <span className="rounded-full border border-surface-700 bg-surface-950/60 px-3 py-1 text-surface-300">{listing.category?.name || 'Service'}</span>
+                                <span className="rounded-full border border-surface-700 bg-surface-950/60 px-3 py-1 text-surface-300">{listing.delivery_days} day delivery</span>
+                                <span className="rounded-full border border-surface-700 bg-surface-950/60 px-3 py-1 text-surface-300">Escrow-backed</span>
+                                <span className="rounded-full border border-surface-700 bg-surface-950/60 px-3 py-1 text-surface-300">Posted {formatRelativeTime(listing.created_at)}</span>
+                              </div>
                             </div>
                           </div>
-                          <div className="text-right min-w-[170px]">
-                            <div className="text-xl font-black text-surface-100">{formatUsdFromCents(listing.base_price_cents)}</div>
-                            <div className="text-xs text-surface-500 mt-1">Escrow-backed</div>
-                            <div className="mt-3 flex items-center justify-end gap-2">
-                              <button type="button" className="nyptid-btn-secondary text-xs px-3 py-2">
+                          <div className="min-w-[220px] max-w-[240px] rounded-[22px] border border-surface-700 bg-surface-950/55 px-4 py-4 text-right">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-surface-500">Contract Value</div>
+                            <div className="mt-2 text-3xl font-black text-white">{formatUsdFromCents(listing.base_price_cents)}</div>
+                            <div className="mt-1 inline-flex items-center gap-1 text-xs text-surface-500">
+                              <Clock3 size={12} />
+                              {listing.delivery_days} day execution
+                            </div>
+                            <div className="mt-4 flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedServiceListing(listing)}
+                                className="rounded-2xl border border-surface-700 bg-surface-950/60 px-3 py-2 text-xs font-semibold text-surface-200 transition-colors hover:border-surface-600 hover:text-white"
+                              >
                                 View Details
                               </button>
                               <button
@@ -2075,7 +2328,7 @@ export function MarketplacePage() {
                                 disabled={checkoutLoadingKey !== null || marketplaceLocked}
                                 className="nyptid-btn-primary text-xs px-3 py-2"
                               >
-                                {checkoutLoadingKey === loadingKey ? 'Opening...' : (quickdrawRoleView === 'hiring' ? 'Hire' : 'Bid')}
+                                {checkoutLoadingKey === loadingKey ? 'Opening...' : (quickdrawRoleView === 'hiring' ? 'Deploy Hire' : 'Submit Bid')}
                               </button>
                             </div>
                           </div>
@@ -2083,8 +2336,8 @@ export function MarketplacePage() {
                       </div>
                     );
                   })}
-                  {!loadingQuickdraw && visibleServiceListings.length === 0 && (
-                    <div className="nyptid-card p-4 text-sm text-surface-500">
+                  {!loadingQuickdraw && quickdrawSpotlightListings.length === 0 && (
+                    <div className="rounded-[24px] border border-dashed border-surface-700 bg-surface-950/45 px-5 py-8 text-center text-sm text-surface-500">
                       {quickdrawNavId === 'listed_contracts'
                         ? 'No listed contracts found yet. Use Issue New Contract to stage your first contract.'
                         : quickdrawNavId === 'working_contracts'
@@ -2480,35 +2733,37 @@ export function MarketplacePage() {
                     {activeTrack === 'games' && (
             <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
               <div className="space-y-5">
-                <div className="nyptid-card p-5 overflow-hidden">
-                  <div className="text-xs font-bold uppercase tracking-wider text-surface-500">NCore Marketplace - Games</div>
-                  <div className="mt-1 text-2xl font-black text-surface-100">Storefront + library delivery</div>
-                  <div className="text-sm text-surface-400 mt-2 max-w-3xl">
-                    Steam-style browsing surface with featured capsules, publisher cards, and direct installer delivery from purchase history.
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                <div className="overflow-hidden rounded-[30px] border border-surface-700 bg-[#111b28] shadow-[0_24px_70px_rgba(0,0,0,0.3)]">
+                  <div className="bg-gradient-to-r from-[#193049] via-[#153b57] to-[#1a2030] px-5 py-5">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">NCore Marketplace - Games</div>
+                    <div className="mt-2 text-4xl font-black text-white">Download-ready game storefront</div>
+                    <div className="mt-3 max-w-3xl text-sm text-white/75">
+                      Steam-style browsing surface with featured capsules, storefront tabs, and direct installer delivery from your order history.
+                    </div>
+                    <div className="mt-5 flex flex-wrap gap-2">
                     {[
                       { id: 'store' as GameStoreSection, label: 'Store' },
                       { id: 'new_trending' as GameStoreSection, label: 'New & Trending' },
                       { id: 'top_sellers' as GameStoreSection, label: 'Top Sellers' },
                       { id: 'recently_updated' as GameStoreSection, label: 'Recently Updated' },
+                      { id: 'wishlist' as GameStoreSection, label: 'Wishlist' },
                       { id: 'library' as GameStoreSection, label: 'Your Library' },
                     ].map((chip) => (
                       <button
                         key={chip.id}
                         type="button"
                         onClick={() => setGameStoreSection(chip.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] border transition-colors ${
+                        className={`px-3 py-1.5 rounded-full text-[11px] border transition-colors ${
                           gameStoreSection === chip.id
                             ? 'border-nyptid-300/40 bg-nyptid-300/15 text-nyptid-100'
-                            : 'border-surface-700 bg-surface-900/70 text-surface-300 hover:border-surface-600'
+                            : 'border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white'
                         }`}
                       >
                         {chip.label}
                       </button>
                     ))}
-                  </div>
-                  <div className="mt-4 flex items-center gap-2 rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2">
+                    </div>
+                    <div className="mt-5 flex items-center gap-2 rounded-[20px] border border-white/10 bg-black/20 px-4 py-3">
                     <Search size={14} className="text-surface-500" />
                     <input
                       value={gamesSearch}
@@ -2516,47 +2771,60 @@ export function MarketplacePage() {
                       placeholder="Search games, publishers, or slugs..."
                       className="w-full bg-transparent border-0 outline-none text-sm text-surface-200 placeholder:text-surface-600"
                     />
+                    </div>
                   </div>
 
                   {featuredGameListing && (
-                    <div className="mt-4 rounded-xl border border-surface-700 bg-surface-900/70 overflow-hidden">
-                      <div
-                        className="h-48 bg-cover bg-center"
-                        style={{
-                          backgroundImage: featuredGameListing.cover_url
-                            ? `linear-gradient(140deg, rgba(4,10,22,0.55), rgba(4,10,22,0.85)), url(${featuredGameListing.cover_url})`
-                            : 'linear-gradient(135deg, rgba(24,70,141,0.5), rgba(11,33,69,0.8))',
-                        }}
-                      />
-                      <div className="p-4">
-                        <div className="text-xs uppercase tracking-wide text-nyptid-200 font-bold">Featured</div>
-                        <div className="text-lg font-bold text-surface-100 mt-1">{featuredGameListing.title}</div>
-                        <div className="text-sm text-surface-400 mt-1 line-clamp-2">{featuredGameListing.description || 'No description yet.'}</div>
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-[11px] text-surface-300">
-                            {featuredGameListing.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-[11px] text-surface-300">
-                            {featuredGameListing.seller_profile?.display_name || featuredGameListing.seller_profile?.username || 'Game publisher'}
-                          </span>
-                          <span className="ml-auto text-xl font-black text-surface-100">{formatUsdFromCents(featuredGameListing.price_cents)}</span>
+                    <div className="grid gap-4 px-5 py-5 lg:grid-cols-[1.15fr_0.85fr]">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedGameListing(featuredGameListing)}
+                        className="overflow-hidden rounded-[26px] border border-surface-700 bg-surface-900/70 text-left transition-transform hover:-translate-y-0.5"
+                      >
+                        <div
+                          className="h-64 bg-cover bg-center"
+                          style={{
+                            backgroundImage: featuredGameListing.cover_url
+                              ? `linear-gradient(145deg, rgba(8,14,24,0.2), rgba(8,14,24,0.7)), url(${featuredGameListing.cover_url})`
+                              : 'linear-gradient(135deg, rgba(24,70,141,0.5), rgba(11,33,69,0.8))',
+                          }}
+                        />
+                        <div className="p-5">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-nyptid-200">Featured Capsule</div>
+                          <div className="mt-2 text-3xl font-black text-surface-100">{featuredGameListing.title}</div>
+                          <div className="mt-2 line-clamp-3 text-sm leading-6 text-surface-400">{featuredGameListing.description || 'No description yet.'}</div>
+                          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px]">
+                            <span className="rounded-full border border-surface-600 bg-surface-950/65 px-3 py-1 text-surface-300">
+                              {featuredGameListing.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}
+                            </span>
+                            <span className="rounded-full border border-surface-600 bg-surface-950/65 px-3 py-1 text-surface-300">
+                              {featuredGameListing.seller_profile?.display_name || featuredGameListing.seller_profile?.username || 'Game publisher'}
+                            </span>
+                            <span className="ml-auto text-2xl font-black text-surface-100">{formatUsdFromCents(featuredGameListing.price_cents)}</span>
+                          </div>
                         </div>
-                        <div className="mt-3">
+                      </button>
+
+                      <div className="space-y-3">
+                        {secondaryGameListings.map((game) => (
                           <button
+                            key={game.id}
                             type="button"
-                            onClick={() => {
-                              void startMarketplaceCheckout(
-                                'marketplace_game_purchase',
-                                { gameListingId: featuredGameListing.id },
-                                `game-buy:${featuredGameListing.id}`,
-                              );
-                            }}
-                            disabled={checkoutLoadingKey !== null || marketplaceLocked}
-                            className="nyptid-btn-primary text-xs px-3 py-2"
+                            onClick={() => setSelectedGameListing(game)}
+                            className="flex w-full items-center gap-3 rounded-[24px] border border-surface-700 bg-surface-900/70 p-3 text-left transition-colors hover:border-surface-600 hover:bg-surface-900"
                           >
-                            {checkoutLoadingKey === `game-buy:${featuredGameListing.id}` ? 'Opening...' : 'Play Now'}
+                            <div
+                              className="h-20 w-32 flex-shrink-0 rounded-[18px] border border-surface-700 bg-cover bg-center"
+                              style={{ backgroundImage: game.cover_url ? `url(${game.cover_url})` : undefined }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-base font-bold text-surface-100">{game.title}</div>
+                              <div className="mt-1 text-xs text-surface-500">{formatRelativeTime(game.updated_at)} • {game.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Publisher Direct'}</div>
+                              <div className="mt-2 line-clamp-2 text-sm text-surface-400">{game.description || 'Store page ready for preview.'}</div>
+                            </div>
+                            <ChevronRight size={18} className="text-surface-500" />
                           </button>
-                        </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -2566,26 +2834,44 @@ export function MarketplacePage() {
                   {filteredGameListings.map((game) => {
                     const loadingKey = `game-buy:${game.id}`;
                     const sellerLabel = game.seller_profile?.display_name || game.seller_profile?.username || 'Game publisher';
+                    const isWishlisted = wishlistedGameIdSet.has(String(game.id));
                     return (
-                      <div key={game.id} className="nyptid-card p-4 hover:border-nyptid-300/40 transition-colors">
+                      <div key={game.id} className="rounded-[24px] border border-surface-700 bg-[#121f2d] p-4 shadow-[0_12px_35px_rgba(0,0,0,0.18)] transition-colors hover:border-nyptid-300/35">
                         <div className="flex flex-wrap items-start gap-4">
                           <div
-                            className="h-24 w-44 rounded-lg border border-surface-700 bg-surface-900/70 bg-cover bg-center flex-shrink-0"
+                            className="h-24 w-44 rounded-[18px] border border-surface-700 bg-surface-900/70 bg-cover bg-center flex-shrink-0"
                             style={{ backgroundImage: game.cover_url ? `url(${game.cover_url})` : undefined }}
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="text-lg font-bold text-surface-100">{game.title}</div>
+                            <div className="text-xl font-black text-surface-100">{game.title}</div>
                             <div className="text-sm text-surface-400 mt-1 line-clamp-2">{game.description || 'No description yet.'}</div>
                             <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{sellerLabel}</span>
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">{game.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}</span>
-                              <span className="px-2 py-0.5 rounded-md border border-surface-600 bg-surface-900/70 text-surface-300">Store slug: {game.slug}</span>
+                              <span className="rounded-full border border-surface-600 bg-surface-900/70 px-3 py-1 text-surface-300">{sellerLabel}</span>
+                              <span className="rounded-full border border-surface-600 bg-surface-900/70 px-3 py-1 text-surface-300">{game.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}</span>
+                              <span className="rounded-full border border-surface-600 bg-surface-900/70 px-3 py-1 text-surface-300">Updated {formatRelativeTime(game.updated_at)}</span>
                             </div>
                           </div>
                           <div className="text-right min-w-[180px]">
-                            <div className="text-xl font-black text-surface-100">{formatUsdFromCents(game.price_cents)}</div>
+                            <div className="text-2xl font-black text-surface-100">{formatUsdFromCents(game.price_cents)}</div>
                             <div className="mt-3 flex items-center justify-end gap-2">
-                              <button type="button" className="nyptid-btn-secondary text-xs px-3 py-2">View Store Page</button>
+                              <button
+                                type="button"
+                                onClick={() => toggleGameWishlist(String(game.id))}
+                                className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition-colors ${
+                                  isWishlisted
+                                    ? 'border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                                    : 'border-surface-700 bg-surface-900/65 text-surface-300 hover:border-surface-600 hover:text-surface-100'
+                                }`}
+                              >
+                                {isWishlisted ? 'Wishlisted' : 'Wishlist'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedGameListing(game)}
+                                className="nyptid-btn-secondary text-xs px-3 py-2"
+                              >
+                                View Store Page
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2602,14 +2888,13 @@ export function MarketplacePage() {
                               </button>
                             </div>
                             {game.installer_url && (
-                              <a
-                                href={game.installer_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] text-nyptid-200 mt-2 hover:text-nyptid-100"
+                              <button
+                                type="button"
+                                onClick={() => { void openInstallerUrl(game.installer_url || ''); }}
+                                className="mt-2 inline-flex items-center gap-1 text-[11px] text-nyptid-200 hover:text-nyptid-100"
                               >
                                 <ExternalLink size={12} />Installer URL
-                              </a>
+                              </button>
                             )}
                           </div>
                         </div>
@@ -2620,6 +2905,8 @@ export function MarketplacePage() {
                     <div className="nyptid-card p-4 text-sm text-surface-500">
                       {gameStoreSection === 'library'
                         ? 'No purchases in your library yet. Buy a game to unlock direct installer access here.'
+                        : gameStoreSection === 'wishlist'
+                          ? 'Your wishlist is empty. Add titles you want to track before buying them.'
                         : 'No approved game listings found for this filter.'}
                     </div>
                   )}
@@ -2765,14 +3052,13 @@ export function MarketplacePage() {
                             </div>
                           </div>
                           {order.game?.installer_url && ['paid', 'fulfilled'].includes(String(order.status || '').toLowerCase()) && (
-                            <a
-                              href={order.game.installer_url}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => { void openInstallerUrl(order.game?.installer_url || ''); }}
                               className="nyptid-btn-secondary text-[11px] px-2 py-1"
                             >
                               Download Installer
-                            </a>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -2785,6 +3071,210 @@ export function MarketplacePage() {
               </div>
             </div>
           )}
+
+          <Modal
+            isOpen={Boolean(selectedServiceListing)}
+            onClose={() => setSelectedServiceListing(null)}
+            title={selectedServiceListing?.title || 'Contract Details'}
+            size="xl"
+            className="max-w-4xl"
+          >
+            {selectedServiceListing && (
+              <div className="space-y-5">
+                <div className="rounded-[24px] border border-surface-700 bg-[#0f2234] p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                      <Avatar
+                        src={selectedServiceListing.seller_profile?.avatar_url || null}
+                        name={selectedServiceListing.seller_profile?.display_name || selectedServiceListing.seller_profile?.username || 'Verified specialist'}
+                        size="xl"
+                      />
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-nyptid-200">QuickDraw Contract</div>
+                        <div className="mt-2 text-3xl font-black text-surface-100">{selectedServiceListing.title}</div>
+                        <div className="mt-2 text-sm text-surface-400">
+                          by {selectedServiceListing.seller_profile?.display_name || selectedServiceListing.seller_profile?.username || 'Verified specialist'}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                          <span className="rounded-full border border-surface-600 bg-surface-950/65 px-3 py-1 text-surface-300">{selectedServiceListing.category?.name || 'Service'}</span>
+                          <span className="rounded-full border border-surface-600 bg-surface-950/65 px-3 py-1 text-surface-300">Escrow-backed</span>
+                          <span className="rounded-full border border-surface-600 bg-surface-950/65 px-3 py-1 text-surface-300">Posted {formatRelativeTime(selectedServiceListing.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-[20px] border border-surface-700 bg-surface-950/65 px-4 py-4 text-right">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-surface-500">Starting Price</div>
+                      <div className="mt-2 text-3xl font-black text-surface-100">{formatUsdFromCents(selectedServiceListing.base_price_cents)}</div>
+                      <div className="mt-1 text-xs text-surface-500">{selectedServiceListing.delivery_days} day delivery</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                  <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-5">
+                    <div className="text-xs font-bold uppercase tracking-[0.26em] text-surface-500">Contract Summary</div>
+                    <div className="mt-4 text-sm leading-7 text-surface-300">
+                      {selectedServiceListing.description || 'No long-form description has been provided yet for this contract.'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-5">
+                      <div className="text-xs font-bold uppercase tracking-[0.26em] text-surface-500">Execution</div>
+                      <div className="mt-4 space-y-3 text-sm text-surface-300">
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Delivery window</span>
+                          <span className="font-semibold text-surface-100">{selectedServiceListing.delivery_days} days</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Escrow mode</span>
+                          <span className="font-semibold text-surface-100">Guaranteed capital</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Posted</span>
+                          <span className="font-semibold text-surface-100">{formatDateTime(selectedServiceListing.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedServiceListing.portfolio_url && (
+                      <button
+                        type="button"
+                        onClick={() => { void openReferenceUrl(selectedServiceListing.portfolio_url || '', 'portfolio URL'); }}
+                        className="nyptid-btn-secondary w-full justify-center text-sm"
+                      >
+                        <ExternalLink size={14} />
+                        View Proof / Portfolio
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3">
+                  <button type="button" onClick={() => setSelectedServiceListing(null)} className="nyptid-btn-secondary text-sm">
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void startMarketplaceCheckout(
+                        'marketplace_service_order',
+                        { serviceListingId: selectedServiceListing.id },
+                        `svc-buy:${selectedServiceListing.id}`,
+                      );
+                    }}
+                    disabled={checkoutLoadingKey !== null || marketplaceLocked}
+                    className="nyptid-btn-primary text-sm"
+                  >
+                    {checkoutLoadingKey === `svc-buy:${selectedServiceListing.id}` ? 'Opening...' : (quickdrawRoleView === 'hiring' ? 'Hire Specialist' : 'Submit Bid')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </Modal>
+
+          <Modal
+            isOpen={Boolean(selectedGameListing)}
+            onClose={() => setSelectedGameListing(null)}
+            title={selectedGameListing?.title || 'Store Page'}
+            size="xl"
+            className="max-w-5xl"
+          >
+            {selectedGameListing && (
+              <div className="space-y-5">
+                <div className="overflow-hidden rounded-[26px] border border-surface-700 bg-surface-900/75">
+                  <div
+                    className="h-72 bg-cover bg-center"
+                    style={{
+                      backgroundImage: selectedGameListing.cover_url
+                        ? `linear-gradient(160deg, rgba(12,18,29,0.15), rgba(12,18,29,0.78)), url(${selectedGameListing.cover_url})`
+                        : 'linear-gradient(135deg, rgba(32,73,132,0.8), rgba(15,24,37,0.95))',
+                    }}
+                  />
+                  <div className="p-5">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-nyptid-200">Store Page</div>
+                    <div className="mt-2 text-4xl font-black text-surface-100">{selectedGameListing.title}</div>
+                    <div className="mt-3 max-w-3xl text-sm leading-7 text-surface-300">
+                      {selectedGameListing.description || 'No long-form description has been provided for this game yet.'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                  <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-5">
+                    <div className="text-xs font-bold uppercase tracking-[0.26em] text-surface-500">Game Details</div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/65 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Publisher</div>
+                        <div className="mt-1 text-sm font-semibold text-surface-100">
+                          {selectedGameListing.seller_profile?.display_name || selectedGameListing.seller_profile?.username || 'Game publisher'}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/65 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Provenance</div>
+                        <div className="mt-1 text-sm font-semibold text-surface-100">
+                          {selectedGameListing.provenance_type === 'steam_authorized' ? 'Steam Authorized' : 'Self Developed'}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/65 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Store slug</div>
+                        <div className="mt-1 text-sm font-semibold text-surface-100">{selectedGameListing.slug}</div>
+                      </div>
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/65 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-wide text-surface-500">Updated</div>
+                        <div className="mt-1 text-sm font-semibold text-surface-100">{formatDateTime(selectedGameListing.updated_at)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-5">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-surface-500">Purchase</div>
+                      <div className="mt-3 text-4xl font-black text-surface-100">{formatUsdFromCents(selectedGameListing.price_cents)}</div>
+                      <div className="mt-2 text-sm text-surface-400">One-time purchase. Approved installers remain available from your library after checkout.</div>
+                      <div className="mt-4 space-y-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleGameWishlist(String(selectedGameListing.id))}
+                          className={`w-full justify-center text-sm ${
+                            wishlistedGameIdSet.has(String(selectedGameListing.id))
+                              ? 'nyptid-btn-secondary border-nyptid-300/40 bg-nyptid-300/10 text-nyptid-100'
+                              : 'nyptid-btn-secondary'
+                          }`}
+                        >
+                          {wishlistedGameIdSet.has(String(selectedGameListing.id)) ? 'Remove From Wishlist' : 'Add To Wishlist'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void startMarketplaceCheckout(
+                              'marketplace_game_purchase',
+                              { gameListingId: selectedGameListing.id },
+                              `game-buy:${selectedGameListing.id}`,
+                            );
+                          }}
+                          disabled={checkoutLoadingKey !== null || marketplaceLocked}
+                          className="nyptid-btn-primary w-full justify-center text-sm"
+                        >
+                          {checkoutLoadingKey === `game-buy:${selectedGameListing.id}` ? 'Opening...' : 'Buy Game'}
+                        </button>
+                        {selectedGameListing.installer_url && (
+                          <button
+                            type="button"
+                            onClick={() => { void openInstallerUrl(selectedGameListing.installer_url || ''); }}
+                            className="nyptid-btn-secondary w-full justify-center text-sm"
+                          >
+                            <Download size={14} />
+                            Preview Installer Link
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Modal>
 
           <Modal
             isOpen={showIssueContractModal}
@@ -2978,5 +3468,6 @@ export function MarketplacePage() {
     </AppShell>
   );
 }
+
 
 

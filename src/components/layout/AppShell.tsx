@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ServerRail } from './ServerRail';
 import { ChannelSidebar } from './ChannelSidebar';
@@ -9,14 +9,17 @@ import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
 import { trackGrowthEvent } from '../../lib/growthEvents';
+import { buildCommunityInviteLink } from '../../lib/inviteLinks';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, Profile, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
 import {
-  type CommunityTemplateId,
+  COMMUNITY_BLUEPRINT_OPTIONS,
   detectCommunityTemplate,
   getCommunityBlueprint,
+  normalizeCommunityTemplateId,
+  type CommunityTemplateId,
 } from '../../lib/communityBlueprints';
 
 interface AppShellProps {
@@ -55,10 +58,6 @@ const DEFAULT_FORM: CreateCommunityForm = {
   templateId: 'standard',
 };
 
-function normalizeTemplateId(value: string): CommunityTemplateId {
-  return value === 'animehub' ? 'animehub' : 'standard';
-}
-
 export function AppShell({
   children, title, subtitle, topBarActions,
   activeCommunityId, activeChannelId, showChannelSidebar = true, suppressPersistentVoiceBar = false,
@@ -89,6 +88,7 @@ export function AppShell({
   const [newCommunity, setNewCommunity] = useState<CreateCommunityForm>(DEFAULT_FORM);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [joinInviteCode, setJoinInviteCode] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteCandidates, setInviteCandidates] = useState<InviteCandidate[]>([]);
   const [inviteSearch, setInviteSearch] = useState('');
@@ -98,6 +98,12 @@ export function AppShell({
   const [inviteActionUserId, setInviteActionUserId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState('');
   const [featureNotice, setFeatureNotice] = useState<{ title: string; body: string } | null>(null);
+  const [showCreateEventModal, setShowCreateEventModal] = useState(false);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventStartsAt, setEventStartsAt] = useState('');
+  const [eventLocation, setEventLocation] = useState('');
+  const [eventDescription, setEventDescription] = useState('');
+  const [creatingEvent, setCreatingEvent] = useState(false);
   const communitiesCacheKey = profile ? `ncore.cache.communities.${profile.id}` : null;
   const hasActiveServerVoice = voiceSession.phase !== 'idle' && Boolean(voiceSession.channelId);
   const sidebarVoiceChannelIds = useMemo(
@@ -144,8 +150,17 @@ export function AppShell({
     return `${token}${stamp}`.toUpperCase();
   }
 
+  function createDefaultEventStartValue(): string {
+    const now = new Date();
+    now.setMinutes(0, 0, 0);
+    now.setHours(now.getHours() + 2);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
+
   function buildInviteLink(communityId: string, code: string): string {
-    return `${window.location.origin}/app/community/${communityId}?invite=${encodeURIComponent(code)}`;
+    if (!communityId) return '';
+    return buildCommunityInviteLink(code);
   }
 
   async function ensureDirectConversation(targetUserId: string): Promise<string | null> {
@@ -1081,16 +1096,14 @@ export function AppShell({
   }
 
   function handleTemplateChange(rawTemplateId: string) {
-    const templateId = normalizeTemplateId(rawTemplateId);
+    const templateId = normalizeCommunityTemplateId(rawTemplateId);
     const blueprint = getCommunityBlueprint(templateId);
     setNewCommunity((prev) => ({
       ...prev,
       templateId,
       name: prev.name || blueprint.recommendedName || prev.name,
       description: prev.description || blueprint.recommendedDescription || prev.description,
-      category: templateId === 'animehub'
-        ? (blueprint.recommendedCategory || prev.category)
-        : prev.category,
+      category: blueprint.recommendedCategory || prev.category,
     }));
   }
 
@@ -1109,10 +1122,10 @@ export function AppShell({
     setCreating(true);
     setCreateError('');
     void trackGrowthEvent('server_create_started', {
-      template_id: normalizeTemplateId(newCommunity.templateId),
+      template_id: normalizeCommunityTemplateId(newCommunity.templateId),
       visibility: newCommunity.visibility,
     }, { userId: profile.id });
-    const templateId = normalizeTemplateId(newCommunity.templateId);
+    const templateId = normalizeCommunityTemplateId(newCommunity.templateId);
     const slug = generateSlug(newCommunity.name);
     const { data: community, error } = await supabase
       .from('communities')
@@ -1168,6 +1181,147 @@ export function AppShell({
     navigate(`/app/community/${community.id}`);
   }
 
+  function handleJoinCommunityFromInvite() {
+    const normalizedCode = String(joinInviteCode || '').trim();
+    if (!normalizedCode) {
+      setCreateError('Paste an invite code or ncore.gg link first.');
+      return;
+    }
+    const codeOnly = normalizedCode.replace(/^https?:\/\/ncore\.gg\//i, '').replace(/^ncore\.gg\//i, '').replace(/^\/+/, '').trim();
+    if (!codeOnly) {
+      setCreateError('Paste a valid invite code or ncore.gg link.');
+      return;
+    }
+    setShowCreateCommunity(false);
+    setCreateError('');
+    setJoinInviteCode('');
+    navigate(`/invite/${encodeURIComponent(codeOnly)}`);
+  }
+
+  async function resolveEventAnnouncementChannelId(): Promise<string | null> {
+    const existingAnnouncementChannel = categories
+      .flatMap((category) => category.channels || [])
+      .find((channel) => ['announcement', 'text'].includes(String(channel.channel_type || '').toLowerCase()));
+    if (existingAnnouncementChannel?.id) {
+      return String(existingAnnouncementChannel.id);
+    }
+
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return null;
+
+    let targetCategoryId = categories[0]?.id ? String(categories[0].id) : '';
+    if (!targetCategoryId) {
+      const { data: createdCategory, error: categoryError } = await supabase
+        .from('channel_categories')
+        .insert({
+          server_id: activeServerId,
+          name: 'EVENTS',
+          order_index: categories.length,
+        } as any)
+        .select('*')
+        .maybeSingle();
+
+      if (categoryError || !(createdCategory as any)?.id) {
+        return null;
+      }
+
+      const nextCategory = { ...(createdCategory as any), channels: [] } as ChannelCategory;
+      targetCategoryId = String(nextCategory.id);
+      setCategories((prev) => [...prev, nextCategory]);
+    }
+
+    const targetCategory = categories.find((category) => String(category.id) === targetCategoryId);
+    const nextOrderIndex = (targetCategory?.channels || []).length;
+    const { data: createdChannel, error: channelError } = await supabase
+      .from('channels')
+      .insert({
+        server_id: activeServerId,
+        category_id: targetCategoryId,
+        name: 'events',
+        channel_type: 'announcement',
+        order_index: nextOrderIndex,
+      } as any)
+      .select('*')
+      .maybeSingle();
+
+    if (channelError || !(createdChannel as any)?.id) {
+      return null;
+    }
+
+    const nextChannel = createdChannel as any;
+    setCategories((prev) => prev.map((category) => (
+      String(category.id) === targetCategoryId
+        ? { ...category, channels: [...(category.channels || []), nextChannel] }
+        : category
+    )));
+    return String(nextChannel.id);
+  }
+
+  async function handleCreateEvent() {
+    if (!profile?.id || !activeCommunity || !activeCommunityId || !isCommunityAdmin(activeCommunity)) return;
+    const normalizedTitle = eventTitle.trim();
+    if (!normalizedTitle) {
+      setFeatureNotice({
+        title: 'Event title required',
+        body: 'Add an event title before publishing the event into the server.',
+      });
+      return;
+    }
+
+    setCreatingEvent(true);
+    try {
+      const channelId = await resolveEventAnnouncementChannelId();
+      if (!channelId) {
+        setFeatureNotice({
+          title: 'Could not create event',
+          body: 'NCore could not find or create an announcement channel for this server.',
+        });
+        return;
+      }
+
+      const parsedStart = eventStartsAt ? new Date(eventStartsAt) : null;
+      const formattedStart = parsedStart && !Number.isNaN(parsedStart.getTime())
+        ? parsedStart.toLocaleString()
+        : 'Time not specified';
+      const detailLines = [
+        `ðŸ“… **${normalizedTitle}**`,
+        `Starts: ${formattedStart}`,
+        eventLocation.trim() ? `Location: ${eventLocation.trim()}` : '',
+        eventDescription.trim() ? '' : '',
+        eventDescription.trim(),
+      ].filter(Boolean);
+
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          channel_id: channelId,
+          author_id: profile.id,
+          content: detailLines.join('\n'),
+          parent_message_id: null,
+        } as any);
+
+      if (error) {
+        setFeatureNotice({
+          title: 'Could not create event',
+          body: error.message || 'The event announcement could not be posted right now.',
+        });
+        return;
+      }
+
+      setShowCreateEventModal(false);
+      setEventTitle('');
+      setEventStartsAt(createDefaultEventStartValue());
+      setEventLocation('');
+      setEventDescription('');
+      navigate(`/app/community/${activeCommunityId}/channel/${channelId}`);
+      setFeatureNotice({
+        title: 'Event created',
+        body: 'The event announcement was posted to your server. Open the announcement channel to review and pin it if needed.',
+      });
+    } finally {
+      setCreatingEvent(false);
+    }
+  }
+
   return (
     <div className={`flex h-[100dvh] overflow-hidden bg-surface-950 ${isMobileRail ? 'pb-[calc(4.25rem+env(safe-area-inset-bottom))]' : ''}`}>
       {!isMobileRail && (
@@ -1194,6 +1348,10 @@ export function AppShell({
             onDeleteChannel={handleDeleteChannel}
             onQuickCreateChannel={handleQuickCreateChannel}
             onOpenInviteModal={() => setShowInviteModal(true)}
+            onOpenCreateEventModal={() => {
+              setEventStartsAt((prev) => prev || createDefaultEventStartValue());
+              setShowCreateEventModal(true);
+            }}
             onOpenFeatureNotice={(title, body) => setFeatureNotice({ title, body })}
             onLeaveCommunity={handleLeaveCommunity}
             onClose={() => setSidebarOpen(false)}
@@ -1223,6 +1381,10 @@ export function AppShell({
                 onDeleteChannel={handleDeleteChannel}
                 onQuickCreateChannel={handleQuickCreateChannel}
                 onOpenInviteModal={() => setShowInviteModal(true)}
+                onOpenCreateEventModal={() => {
+                  setEventStartsAt((prev) => prev || createDefaultEventStartValue());
+                  setShowCreateEventModal(true);
+                }}
                 onOpenFeatureNotice={(title, body) => setFeatureNotice({ title, body })}
                 onLeaveCommunity={handleLeaveCommunity}
                 onClose={() => setSidebarOpen(false)}
@@ -1276,11 +1438,12 @@ export function AppShell({
         onClose={() => {
           setShowCreateCommunity(false);
           setCreateError('');
+          setJoinInviteCode('');
         }}
-        title="Create a Community"
-        size="md"
+        title="Create Your Server"
+        size="xl"
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
           {createError && (
             <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
               <span className="mt-0.5 flex-shrink-0">!</span>
@@ -1288,76 +1451,167 @@ export function AppShell({
             </div>
           )}
 
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-surface-300">Preset</label>
-            <select
-              value={newCommunity.templateId}
-              onChange={(event) => handleTemplateChange(event.target.value)}
-              className="nyptid-input"
+          <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-4">
+            <div className="text-sm text-surface-300">
+              Your server is where you and your friends hang out. Start from a template or build it from zero.
+            </div>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="space-y-3">
+              <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500">Start From A Template</div>
+              <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
+                {COMMUNITY_BLUEPRINT_OPTIONS.map((blueprint) => {
+                  const selected = newCommunity.templateId === blueprint.id;
+                  return (
+                    <button
+                      key={blueprint.id}
+                      type="button"
+                      onClick={() => handleTemplateChange(blueprint.id)}
+                      className={`w-full rounded-[22px] border px-4 py-3 text-left transition-all ${
+                        selected
+                          ? 'border-nyptid-300/50 bg-nyptid-300/12 shadow-[0_0_0_1px_rgba(255,180,71,0.12)]'
+                          : 'border-surface-700 bg-surface-950/70 hover:border-surface-500 hover:bg-surface-900/70'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl border border-surface-700 bg-surface-900 text-lg">
+                          {blueprint.icon}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-base font-bold text-surface-100">{blueprint.label}</div>
+                              <div className="text-xs text-surface-500 mt-0.5">{blueprint.createModeLabel}</div>
+                            </div>
+                            {selected && (
+                              <span className="rounded-full border border-nyptid-300/40 bg-nyptid-300/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-nyptid-100">
+                                Selected
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 text-sm text-surface-300">{blueprint.templatePitch}</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div
+                className="rounded-[26px] border border-surface-700 p-5"
+                style={{
+                  background: `linear-gradient(155deg, ${getCommunityBlueprint(newCommunity.templateId).gradientStart}, ${getCommunityBlueprint(newCommunity.templateId).gradientEnd})`,
+                }}
+              >
+                <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">Server Blueprint</div>
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-[18px] border border-white/10 bg-black/15 text-2xl shadow-inner">
+                    {getCommunityBlueprint(newCommunity.templateId).icon}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xl font-black text-white">{getCommunityBlueprint(newCommunity.templateId).label}</div>
+                    <div className="mt-1 text-sm text-white/75">{getCommunityBlueprint(newCommunity.templateId).serverTagline}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-surface-700 bg-surface-950/70 p-4 space-y-4">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-surface-300">Server name</label>
+                  <input
+                    type="text"
+                    value={newCommunity.name}
+                    onChange={(event) => setNewCommunity((prev) => ({ ...prev, name: event.target.value }))}
+                    className="nyptid-input"
+                    placeholder={getCommunityBlueprint(newCommunity.templateId).recommendedName || 'My Awesome Server'}
+                    maxLength={50}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-surface-300">Description</label>
+                  <textarea
+                    value={newCommunity.description}
+                    onChange={(event) => setNewCommunity((prev) => ({ ...prev, description: event.target.value }))}
+                    className="nyptid-input resize-none"
+                    placeholder={getCommunityBlueprint(newCommunity.templateId).recommendedDescription || 'What is this server about?'}
+                    rows={3}
+                    maxLength={300}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-surface-300">Category</label>
+                    <select
+                      value={newCommunity.category}
+                      onChange={(event) => setNewCommunity((prev) => ({ ...prev, category: event.target.value }))}
+                      className="nyptid-input"
+                    >
+                      {COMMUNITY_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-surface-300">Visibility</label>
+                    <select
+                      value={newCommunity.visibility}
+                      onChange={(event) => setNewCommunity((prev) => ({
+                        ...prev,
+                        visibility: event.target.value === 'private' ? 'private' : 'public',
+                      }))}
+                      className="nyptid-input"
+                    >
+                      <option value="public">Public</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-surface-700 bg-surface-900/70 px-3 py-3">
+                  <div className="text-xs font-bold uppercase tracking-[0.26em] text-surface-500">Launch Preview</div>
+                  <div className="mt-3 text-sm text-surface-200">
+                    {getCommunityBlueprint(newCommunity.templateId).categories.length} starter categories •{' '}
+                    {getCommunityBlueprint(newCommunity.templateId).categories.reduce((sum, category) => sum + category.channels.length, 0)} starter channels
+                  </div>
+                  <div className="mt-2 text-xs text-surface-500">
+                    {getCommunityBlueprint(newCommunity.templateId).onboardingSteps.join(' • ')}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-surface-700 bg-surface-950/75 p-4">
+            <div className="text-xl font-black text-surface-100 text-center">Have an invite already?</div>
+            <div className="mt-2 text-sm text-surface-500 text-center">Join a server instantly with an ncore.gg code or invite link.</div>
+            <div className="mt-4 flex gap-3">
+              <input
+                type="text"
+                value={joinInviteCode}
+                onChange={(event) => setJoinInviteCode(event.target.value)}
+                className="nyptid-input flex-1"
+                placeholder="ncore.gg/ABC123 or paste invite code"
+              />
+              <button type="button" onClick={handleJoinCommunityFromInvite} className="nyptid-btn-secondary px-5">
+                Join Server
+              </button>
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              onClick={() => {
+                setShowCreateCommunity(false);
+                setCreateError('');
+                setJoinInviteCode('');
+              }}
+              className="nyptid-btn-secondary flex-1"
             >
-              <option value="standard">Standard Server</option>
-              <option value="animehub">AnimeHub Preset</option>
-            </select>
-            <p className="mt-1.5 text-xs text-surface-500">
-              AnimeHub preset creates the full anime fan server structure with Owner, Mod, Server Booster, and Member labels.
-            </p>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-surface-300">Community name</label>
-            <input
-              type="text"
-              value={newCommunity.name}
-              onChange={(event) => setNewCommunity((prev) => ({ ...prev, name: event.target.value }))}
-              className="nyptid-input"
-              placeholder="My Awesome Community"
-              maxLength={50}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-surface-300">Description</label>
-            <textarea
-              value={newCommunity.description}
-              onChange={(event) => setNewCommunity((prev) => ({ ...prev, description: event.target.value }))}
-              className="nyptid-input resize-none"
-              placeholder="What is this community about?"
-              rows={3}
-              maxLength={300}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-surface-300">Category</label>
-              <select
-                value={newCommunity.category}
-                onChange={(event) => setNewCommunity((prev) => ({ ...prev, category: event.target.value }))}
-                className="nyptid-input"
-              >
-                {COMMUNITY_CATEGORIES.map((category) => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-surface-300">Visibility</label>
-              <select
-                value={newCommunity.visibility}
-                onChange={(event) => setNewCommunity((prev) => ({
-                  ...prev,
-                  visibility: event.target.value === 'private' ? 'private' : 'public',
-                }))}
-                className="nyptid-input"
-              >
-                <option value="public">Public</option>
-                <option value="private">Private</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <button onClick={() => setShowCreateCommunity(false)} className="nyptid-btn-secondary flex-1">
               Cancel
             </button>
             <button
@@ -1365,7 +1619,7 @@ export function AppShell({
               className="nyptid-btn-primary flex-1"
               disabled={creating || !newCommunity.name.trim()}
             >
-              {creating ? 'Creating...' : 'Create Community'}
+              {creating ? 'Creating...' : 'Create Server'}
             </button>
           </div>
         </div>
@@ -1381,29 +1635,36 @@ export function AppShell({
         title={activeCommunity ? `Invite friends to ${activeCommunity.name}` : 'Invite to Server'}
         size="xl"
       >
-        <div className="space-y-4">
-          <div className="text-sm text-surface-400">
-            Recipients will land in {activeChannelName ? `#${activeChannelName}` : 'the server'}.
+        <div className="space-y-5">
+          <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-4">
+            <div className="text-sm text-surface-300">
+              Recipients will land in <span className="font-semibold text-surface-100">{activeChannelName ? `#${activeChannelName}` : activeCommunity?.name || 'the server'}</span>.
+            </div>
           </div>
-          <input
-            type="text"
-            value={inviteSearch}
-            onChange={(event) => setInviteSearch(event.target.value)}
-            placeholder="Search for friends"
-            className="nyptid-input"
-          />
+
+          <div className="relative">
+            <input
+              type="text"
+              value={inviteSearch}
+              onChange={(event) => setInviteSearch(event.target.value)}
+              placeholder="Search for friends"
+              className="nyptid-input"
+            />
+          </div>
+
           {inviteMessage && (
-            <div className="rounded-xl border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-surface-300">
+            <div className="rounded-2xl border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-surface-300">
               {inviteMessage}
             </div>
           )}
-          <div className="max-h-[48vh] overflow-y-auto rounded-2xl border border-surface-700 bg-surface-900/60">
+
+          <div className="max-h-[46vh] overflow-y-auto rounded-[24px] border border-surface-700 bg-surface-900/60">
             {inviteLoading ? (
               <div className="px-4 py-8 text-center text-sm text-surface-500">Loading your friends...</div>
             ) : filteredInviteCandidates.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-surface-500">No friends match that search yet.</div>
             ) : filteredInviteCandidates.map((candidate) => (
-              <div key={candidate.id} className="flex items-center gap-3 border-b border-surface-800/80 px-4 py-3 last:border-b-0">
+              <div key={candidate.id} className="flex items-center gap-3 border-b border-surface-800/80 px-4 py-3.5 last:border-b-0">
                 <Avatar
                   src={candidate.avatar_url}
                   name={candidate.display_name || candidate.username}
@@ -1425,21 +1686,95 @@ export function AppShell({
               </div>
             ))}
           </div>
-          <div className="rounded-2xl border border-surface-700 bg-surface-900/60 p-4">
+          <div className="rounded-[24px] border border-surface-700 bg-surface-900/60 p-4">
             <div className="text-sm font-semibold text-surface-100">Or, send a server invite link</div>
+            <div className="mt-1 text-xs text-surface-500">NCore invite links now use the short-link format.</div>
             <div className="mt-3 flex gap-2">
               <input
                 type="text"
                 readOnly
                 value={inviteLink}
                 className="nyptid-input flex-1"
-                placeholder="Creating invite link..."
+                placeholder="Creating ncore.gg invite..."
               />
               <button type="button" onClick={() => void handleCopyInviteLink()} className="nyptid-btn-primary px-4">
                 Copy
               </button>
             </div>
+            {inviteCode && (
+              <div className="mt-3 rounded-2xl border border-surface-700 bg-surface-950/65 px-3 py-3">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Invite Code</div>
+                <div className="mt-1 text-base font-bold text-surface-100">{inviteCode}</div>
+              </div>
+            )}
             <div className="mt-2 text-xs text-surface-500">Invite links expire in 7 days by default.</div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showCreateEventModal}
+        onClose={() => setShowCreateEventModal(false)}
+        title="Create Event"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-surface-400">
+            Publish a server event announcement with the time, location, and briefing so members can find it inside the server.
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-surface-300">Event title</label>
+            <input
+              type="text"
+              value={eventTitle}
+              onChange={(event) => setEventTitle(event.target.value)}
+              className="nyptid-input"
+              placeholder="Weekly operator briefing"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-surface-300">Starts at</label>
+              <input
+                type="datetime-local"
+                value={eventStartsAt}
+                onChange={(event) => setEventStartsAt(event.target.value)}
+                className="nyptid-input"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-surface-300">Location / voice room</label>
+              <input
+                type="text"
+                value={eventLocation}
+                onChange={(event) => setEventLocation(event.target.value)}
+                className="nyptid-input"
+                placeholder="General Voice"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-surface-300">Briefing</label>
+            <textarea
+              value={eventDescription}
+              onChange={(event) => setEventDescription(event.target.value)}
+              className="nyptid-input resize-none"
+              rows={4}
+              placeholder="Tell members what this event covers, what to prepare, and how to join."
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={() => setShowCreateEventModal(false)} className="nyptid-btn-secondary flex-1">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => { void handleCreateEvent(); }}
+              disabled={creatingEvent || !eventTitle.trim()}
+              className="nyptid-btn-primary flex-1"
+            >
+              {creatingEvent ? 'Publishing...' : 'Publish Event'}
+            </button>
           </div>
         </div>
       </Modal>
@@ -1455,3 +1790,4 @@ export function AppShell({
     </div>
   );
 }
+

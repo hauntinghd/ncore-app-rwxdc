@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   AlertCircle,
@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { consumePendingInviteCode } from '../lib/inviteLinks';
 import { supabase } from '../lib/supabase';
 
 interface GlobalStats {
@@ -192,6 +193,7 @@ function AuthShell({
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -210,7 +212,8 @@ export function LoginPage() {
       return;
     }
 
-    navigate('/app');
+    const inviteCode = String(searchParams.get('invite') || consumePendingInviteCode() || '').trim();
+    navigate(inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app');
   }
 
   return (
@@ -273,7 +276,7 @@ export function LoginPage() {
           Don&apos;t have an account?{' '}
           <button
             type="button"
-            onClick={() => navigate('/signup')}
+            onClick={() => navigate(`/signup${window.location.search || ''}`)}
             className="text-nyptid-200 hover:text-nyptid-100 font-semibold"
           >
             Create one free
@@ -286,6 +289,7 @@ export function LoginPage() {
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signUp } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -318,7 +322,8 @@ export function SignupPage() {
 
     const { data } = await supabase.auth.getSession();
     if (data.session) {
-      navigate('/onboarding');
+      const inviteCode = String(searchParams.get('invite') || consumePendingInviteCode() || '').trim();
+      navigate(inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/onboarding');
       return;
     }
 
@@ -408,7 +413,7 @@ export function SignupPage() {
           Already have an account?{' '}
           <button
             type="button"
-            onClick={() => navigate('/login')}
+            onClick={() => navigate(`/login${window.location.search || ''}`)}
             className="text-nyptid-200 hover:text-nyptid-100 font-semibold"
           >
             Sign in

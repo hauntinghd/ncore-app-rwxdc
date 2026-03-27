@@ -45,6 +45,7 @@ interface ChannelSidebarProps {
   onDeleteChannel?: (channelId: string) => void;
   onQuickCreateChannel?: (type?: 'text' | 'voice') => void;
   onOpenInviteModal?: () => void;
+  onOpenCreateEventModal?: () => void;
   onOpenFeatureNotice?: (title: string, body: string) => void;
   onLeaveCommunity?: () => void;
   onClose?: () => void;
@@ -80,6 +81,7 @@ export function ChannelSidebar({
   onDeleteChannel,
   onQuickCreateChannel,
   onOpenInviteModal,
+  onOpenCreateEventModal,
   onOpenFeatureNotice,
   onLeaveCommunity,
   onClose,
@@ -290,7 +292,10 @@ export function ChannelSidebar({
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleFeatureNotice('Create Event', 'Scheduled community events are rolling out next. Server event creation will land in a follow-up patch.')}
+                    onClick={() => {
+                      onOpenCreateEventModal?.();
+                      closeMenus();
+                    }}
                     className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
                   >
                     <span>Create Event</span>
@@ -323,7 +328,7 @@ export function ChannelSidebar({
 
               <button
                 type="button"
-                onClick={() => handleFeatureNotice('App Directory', 'App Directory is being built out. This menu entry is wired now so it can go live without another shell overhaul.')}
+                onClick={() => handleServerMenuNavigation('/app/discover?tab=apps')}
                 className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
               >
                 <span>App Directory</span>
@@ -593,6 +598,17 @@ export function ChannelSidebar({
                     >
                       <FolderPlus size={13} />
                       Create Category
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenCreateEventModal?.();
+                        closeMenus();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
+                    >
+                      <CalendarPlus size={13} />
+                      Create Event
                     </button>
                   </>
                 )}

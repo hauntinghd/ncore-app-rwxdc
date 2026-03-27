@@ -5,6 +5,7 @@ import { LoadingScreen } from './components/ui/Spinner';
 import { probeRunPodBackend } from './lib/runpod';
 import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
 import { detectWebSurface, type WebSurface } from './lib/webSurface';
+import { readPendingInviteCode } from './lib/inviteLinks';
 import { createDurationTracker, queueRuntimeEvent, reportRuntimeError } from './lib/runtimeTelemetry';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
@@ -25,6 +26,7 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ defa
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
+const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, profileLoading } = useAuth();
@@ -40,9 +42,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, profileLoading } = useAuth();
+  const location = useLocation();
 
   if (loading || (user && profileLoading)) return <LoadingScreen />;
-  if (user && profile?.username) return <Navigate to="/app/dm" replace />;
+  if (user && profile?.username) {
+    const params = new URLSearchParams(location.search);
+    const inviteCode = String(params.get('invite') || readPendingInviteCode() || '').trim();
+    if (inviteCode) {
+      return <Navigate to={`/invite/${encodeURIComponent(inviteCode)}`} replace />;
+    }
+    return <Navigate to="/app/dm" replace />;
+  }
   if (user && !profile?.username) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
 }
@@ -68,6 +78,8 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
         <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/invite/:inviteCode" element={<InvitePage />} />
+        <Route path="/:inviteCode" element={<InvitePage />} />
         <Route
           path="/marketplace"
           element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}

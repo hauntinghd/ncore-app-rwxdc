@@ -3391,88 +3391,44 @@ export function SettingsPage() {
                 <div>
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Connections</h2>
                   <p className="text-surface-500 text-sm">
-                    Link your social and gaming accounts to show richer identity on your NCore profile.
+                    OAuth and identity connections are intentionally deferred until the revenue and trust rails are fully in place.
                   </p>
                 </div>
 
-                <div className="nyptid-card p-5">
-                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Add Connection</div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {CONNECTION_PROVIDERS.map((service) => {
-                      const isConnected = connectedProviders.includes(service.name);
-                      return (
-                      <button
-                        key={service.name}
-                        type="button"
-                        onClick={() => {
-                          if (service.comingSoon) {
-                            setError(`${service.name} connection flow is coming soon.`);
-                            return;
-                          }
-                          setError('');
-                          setConnectedProviders((prev) => (
-                            prev.includes(service.name)
-                              ? prev.filter((name) => name !== service.name)
-                              : [...prev, service.name]
-                          ));
-                        }}
-                        className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                          service.comingSoon
-                            ? 'border-surface-700 bg-surface-900/70'
-                            : isConnected
-                              ? 'border-nyptid-300/40 bg-nyptid-300/10'
-                              : 'border-surface-700 bg-surface-800/40 hover:bg-surface-700/40'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <BrandIconGlyph icon={service.icon} label={service.name} />
-                            <div className="text-sm text-surface-200 font-medium truncate">{service.name}</div>
-                          </div>
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
-                              service.comingSoon
-                                ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
-                                : isConnected
-                                  ? 'border-green-500/40 bg-green-500/10 text-green-300'
-                                  : 'border-surface-600 bg-surface-700 text-surface-300'
-                            }`}
-                          >
-                            {service.comingSoon ? 'SOON' : (isConnected ? 'CONNECTED' : 'CONNECT')}
-                          </span>
-                        </div>
-                      </button>
-                    )})}
-                  </div>
-                  <div className="text-xs text-surface-500 mt-3">
-                    OAuth slots are enabled for active providers. Upcoming provider cards are marked with a SOON badge.
+                <div className="rounded-[28px] border border-surface-700 bg-surface-900/80 p-6 shadow-[0_18px_50px_rgba(0,0,0,0.24)]">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">Coming Soon</div>
+                      <div className="mt-3 text-3xl font-black text-surface-100">Connections are staged, not live.</div>
+                      <div className="mt-3 text-sm leading-6 text-surface-400">
+                        Real account linking requires production-grade OAuth flows, token refresh, provider compliance, and moderation controls. The shell stays visible so the surface exists, but the actual provider connections are intentionally held until the monetization and trust systems are further along.
+                      </div>
+                    </div>
+                    <div className="grid min-w-[18rem] gap-3 sm:grid-cols-2 lg:w-[22rem] lg:grid-cols-1">
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/70 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Status</div>
+                        <div className="mt-2 text-lg font-bold text-surface-100">Deferred</div>
+                        <div className="mt-1 text-xs text-surface-500">Hidden behind the next account-linking rollout.</div>
+                      </div>
+                      <div className="rounded-2xl border border-surface-700 bg-surface-950/70 px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.24em] text-surface-500">Why</div>
+                        <div className="mt-2 text-sm font-semibold text-surface-100">Reduce integration debt first</div>
+                        <div className="mt-1 text-xs text-surface-500">Avoid half-built provider flows before revenue arrives.</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="nyptid-card p-5">
-                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Connected Accounts</div>
-                  {connectedProviders.length === 0 ? (
-                    <div className="text-sm text-surface-500">
-                      No linked accounts yet. Add one above to display it on your profile card.
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    'Profile badges and rich identity cards',
+                    'Verified gaming account ownership',
+                    'Creator payment / storefront proof rails',
+                  ].map((item) => (
+                    <div key={item} className="rounded-2xl border border-dashed border-surface-700 bg-surface-950/65 px-4 py-5 text-sm text-surface-400">
+                      {item}
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {connectedProviders.map((provider) => (
-                        <div key={provider} className="rounded-lg border border-surface-700 bg-surface-900/70 px-3 py-2 flex items-center justify-between gap-3">
-                          <div className="text-sm text-surface-200 font-medium">{provider}</div>
-                          <button
-                            type="button"
-                            className="text-xs text-red-300 hover:text-red-200"
-                            onClick={() => {
-                              setConnectedProviders((prev) => prev.filter((name) => name !== provider));
-                            }}
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  ))}
                 </div>
               </div>
             )}
