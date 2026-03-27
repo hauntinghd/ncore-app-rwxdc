@@ -12,6 +12,7 @@ import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenois
 import { loadCallSettings, saveCallSettings, type CallSettings } from './callSettings';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
+import { publishDirectCallShellState } from './directCallShell';
 import {
   buildLegacyCallStateUpdate,
   isCallsModernSchemaMissingError,
@@ -348,6 +349,16 @@ class DirectCallSessionStore {
 
   getState = () => this.state;
 
+  private syncShellState(nextState: DirectCallSessionState) {
+    publishDirectCallShellState({
+      phase: nextState.phase,
+      conversationId: nextState.conversationId,
+      callId: nextState.callId,
+      wantsVideo: nextState.wantsVideo,
+      startedAt: nextState.startedAt,
+    });
+  }
+
   private setState(patch: Partial<DirectCallSessionState>) {
     let changed = false;
     const nextState: DirectCallSessionState = { ...this.state };
@@ -360,6 +371,7 @@ class DirectCallSessionStore {
     });
     if (!changed) return;
     this.state = nextState;
+    this.syncShellState(nextState);
     this.listeners.forEach((listener) => listener());
   }
 
@@ -1641,6 +1653,13 @@ class DirectCallSessionStore {
 }
 
 export const directCallSession = new DirectCallSessionStore();
+publishDirectCallShellState({
+  phase: initialState.phase,
+  conversationId: initialState.conversationId,
+  callId: initialState.callId,
+  wantsVideo: initialState.wantsVideo,
+  startedAt: initialState.startedAt,
+});
 
 export function useDirectCallSession(): DirectCallSessionState {
   return useSyncExternalStore(

@@ -3,6 +3,7 @@ import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
 import { registerDeviceToken } from '../lib/push';
+import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 
 interface AuthContextType {
   user: User | null;
@@ -18,6 +19,63 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+const SIGNIN_THROTTLE_KEY = 'ncore.auth.signinThrottle';
+const SIGNIN_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const SIGNIN_THROTTLE_MS = 60 * 1000;
+const SIGNIN_FAILURE_LIMIT = 5;
+
+interface SignInThrottleState {
+  failures: number;
+  firstFailureAt: number;
+  blockedUntil: number;
+}
+
+function readSignInThrottleState(): SignInThrottleState {
+  if (typeof window === 'undefined') {
+    return { failures: 0, firstFailureAt: 0, blockedUntil: 0 };
+  }
+  try {
+    const raw = localStorage.getItem(SIGNIN_THROTTLE_KEY);
+    if (!raw) return { failures: 0, firstFailureAt: 0, blockedUntil: 0 };
+    const parsed = JSON.parse(raw) as Partial<SignInThrottleState>;
+    return {
+      failures: Number(parsed.failures || 0),
+      firstFailureAt: Number(parsed.firstFailureAt || 0),
+      blockedUntil: Number(parsed.blockedUntil || 0),
+    };
+  } catch {
+    return { failures: 0, firstFailureAt: 0, blockedUntil: 0 };
+  }
+}
+
+function writeSignInThrottleState(nextState: SignInThrottleState) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(SIGNIN_THROTTLE_KEY, JSON.stringify(nextState));
+  } catch {
+    // noop
+  }
+}
+
+function resetSignInThrottleState() {
+  writeSignInThrottleState({ failures: 0, firstFailureAt: 0, blockedUntil: 0 });
+}
+
+function getRemainingThrottleMs(state: SignInThrottleState): number {
+  return Math.max(0, Number(state.blockedUntil || 0) - Date.now());
+}
+
+function registerSignInFailure(): SignInThrottleState {
+  const now = Date.now();
+  const current = readSignInThrottleState();
+  const withinWindow = current.firstFailureAt > 0 && (now - current.firstFailureAt) <= SIGNIN_FAILURE_WINDOW_MS;
+  const failures = withinWindow ? current.failures + 1 : 1;
+  const firstFailureAt = withinWindow ? current.firstFailureAt : now;
+  const blockedUntil = failures >= SIGNIN_FAILURE_LIMIT ? now + SIGNIN_THROTTLE_MS : 0;
+  const nextState = { failures, firstFailureAt, blockedUntil };
+  writeSignInThrottleState(nextState);
+  return nextState;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -143,6 +201,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
 
       if (event === 'SIGNED_IN' && session?.user) {
+        resetSignInThrottleState();
+        queueRuntimeEvent('auth_signin_succeeded', {
+          user_id: session.user.id,
+          provider: String(session.user.app_metadata?.provider || 'password'),
+        }, { userId: session.user.id, sampleRate: 1 });
         const hasCachedProfile = primeProfileFromCache(session.user.id);
         setProfileLoading(!hasCachedProfile);
         setLoading(false);
@@ -152,6 +215,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         void registerDefaultDeviceTokenOnce();
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+        queueRuntimeEvent('auth_session_recovered', {
+          user_id: session.user.id,
+        }, { userId: session.user.id, sampleRate: 0.5 });
         // Keep profile fresh after token refresh without blocking navigation.
         void fetchProfile(session.user.id);
       } else if (event === 'SIGNED_OUT') {
@@ -191,7 +257,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const throttleState = readSignInThrottleState();
+    const remainingThrottleMs = getRemainingThrottleMs(throttleState);
+    if (remainingThrottleMs > 0) {
+      queueRuntimeEvent('auth_signin_throttled', {
+        email_hash_hint: normalizedEmail.slice(0, 3),
+        remaining_ms: remainingThrottleMs,
+      }, { sampleRate: 1 });
+      return {
+        error: new Error(`Too many failed sign-in attempts. Try again in ${Math.ceil(remainingThrottleMs / 1000)}s.`),
+      };
+    }
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      const nextState = registerSignInFailure();
+      queueRuntimeEvent('auth_signin_failed', {
+        email_hash_hint: normalizedEmail.slice(0, 3),
+        failures: nextState.failures,
+        blocked_until: nextState.blockedUntil || null,
+        message: String(error.message || 'Unknown sign-in error'),
+      }, { sampleRate: 1 });
+    } else {
+      resetSignInThrottleState();
+    }
     return { error: error as Error | null };
   }
 

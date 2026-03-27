@@ -29,10 +29,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { supabase } from '../lib/supabase';
 import { resolveBillingReturnUrl } from '../lib/billingUrl';
+import { getShieldProtectionItems } from '../lib/securityShield';
+import { safeOpenExternalUrl } from '../lib/safeExternal';
 import type { UserStatus, ServerProfile, AccountStandingEvent } from '../lib/types';
 import { formatFileSize, getRankInfo } from '../lib/utils';
 import { enumerateCallDevices, loadCallSettings, saveCallSettings, type MediaDeviceOption } from '../lib/callSettings';
-import { directCallSession } from '../lib/directCallSession';
+import { applyDirectCallSettings } from '../lib/directCallShell';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
 import {
   applyReleaseBadges,
@@ -885,19 +887,9 @@ function normalizeExternalHttpUrl(targetUrl: string, label: string): string {
 
 async function openExternalUrl(targetUrl: string): Promise<void> {
   const normalized = normalizeExternalHttpUrl(targetUrl, 'URL');
-
-  if (window.desktopBridge?.openExternalUrl) {
-    const result = await window.desktopBridge.openExternalUrl(normalized);
-    if (!result.ok) {
-      throw new Error(result.message || 'Could not open external URL.');
-    }
-    return;
-  }
-
-  const popup = window.open(normalized, '_blank', 'noopener,noreferrer');
-  if (!popup) {
-    window.location.assign(normalized);
-  }
+  await safeOpenExternalUrl(normalized, {
+    trustedDomains: ['nyptidindustries.com', 'ncore.nyptidindustries.com', 'stripe.com', 'supabase.co'],
+  });
 }
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -929,6 +921,7 @@ export function SettingsPage() {
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
   const {
     capabilities: growthCapabilities,
+    contract,
     loading: growthCapabilitiesLoading,
     refresh: refreshGrowthCapabilities,
   } = useGrowthCapabilities();
@@ -1041,6 +1034,7 @@ export function SettingsPage() {
   const [standingResourceModal, setStandingResourceModal] = useState<StandingResourceId | null>(null);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
   const comingSoonSection = rolledOutSection ? null : COMING_SOON_SECTION_CONTENT[activeSection];
+  const shieldProtectionItems = getShieldProtectionItems();
 
   function setRolloutToggle(key: string, value: boolean) {
     setRolloutSettings((prev) => ({ ...prev, [key]: value }));
@@ -1274,19 +1268,19 @@ export function SettingsPage() {
       key: 'can_create_server',
       label: 'Create Servers',
       enabled: growthCapabilities.canCreateServer,
-      reason: getCapabilityLockReason('can_create_server'),
+      reason: getCapabilityLockReason('can_create_server', contract.unlock_source),
     },
     {
       key: 'can_start_high_volume_calls',
       label: 'Start High-volume Calls',
       enabled: growthCapabilities.canStartHighVolumeCalls,
-      reason: getCapabilityLockReason('can_start_high_volume_calls'),
+      reason: getCapabilityLockReason('can_start_high_volume_calls', contract.unlock_source),
     },
     {
       key: 'can_use_marketplace',
       label: 'Use Marketplace',
       enabled: growthCapabilities.canUseMarketplace,
-      reason: getCapabilityLockReason('can_use_marketplace'),
+      reason: getCapabilityLockReason('can_use_marketplace', contract.unlock_source),
     },
   ];
   const updateAhead = compareSemver(latestFeedVersion, buildVersion) > 0;
@@ -1867,7 +1861,7 @@ export function SettingsPage() {
     setApplyingVoiceSettings(true);
     try {
       saveCallSettings(callSettings);
-      await directCallSession.applyCallSettings(callSettings);
+      await applyDirectCallSettings(callSettings);
       await refreshVoiceDeviceHealth();
       flashSavedNotice();
     } catch (err: unknown) {
@@ -3063,6 +3057,28 @@ export function SettingsPage() {
                 <div>
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Security</h2>
                   <p className="text-surface-500 text-sm">Manage your account security and authentication</p>
+                </div>
+
+                <div className="nyptid-card p-6">
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-xl bg-nyptid-300/10 border border-nyptid-300/20 flex items-center justify-center flex-shrink-0">
+                      <Shield size={18} className="text-nyptid-200" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">NCore Shield</div>
+                      <div className="text-sm text-surface-300 mt-1">
+                        Outbound token leak checks, phishing link screening, executable attachment warnings, and login abuse throttling are active in this build.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {shieldProtectionItems.map((item) => (
+                      <div key={item.label} className="rounded-xl border border-surface-700 bg-surface-900/60 px-4 py-3">
+                        <div className="text-sm font-semibold text-surface-100">{item.label}</div>
+                        <div className="text-xs text-surface-500 mt-1 leading-relaxed">{item.description}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="nyptid-card p-6 space-y-4">

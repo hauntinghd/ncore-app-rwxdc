@@ -305,6 +305,38 @@ export interface GrowthEventRow {
   created_at: string;
 }
 
+export interface AccountSecurityRiskSignal {
+  id: string;
+  user_id: string;
+  source_kind: 'channel_message' | 'direct_message' | 'growth_event' | 'admin_manual' | string;
+  source_ref: string;
+  signal_key: string;
+  risk_score: number;
+  risk_level: 'low' | 'medium' | 'high' | 'critical' | string;
+  excerpt: string | null;
+  metadata: Json;
+  created_at: string;
+}
+
+export interface AccountSecurityRiskCase {
+  user_id: string;
+  risk_level: 'none' | 'low' | 'medium' | 'high' | 'critical' | string;
+  risk_score: number;
+  containment_state: 'none' | 'observe' | 'limited_mode' | 'quarantined' | string;
+  auto_contained: boolean;
+  review_status: 'pending_review' | 'reviewed' | 'dismissed' | string;
+  previous_growth_contract: Json | null;
+  signal_summary: Json;
+  risk_factors: Json;
+  last_event_name: string | null;
+  last_event_at: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface OperatorDailyMetric {
   metric_date: string;
   source_channel: string;
@@ -642,6 +674,8 @@ export type Database = {
       growth_invite_codes: { Row: GrowthInviteCode; Insert: Omit<GrowthInviteCode, 'id' | 'created_at' | 'updated_at' | 'use_count'>; Update: Partial<GrowthInviteCode> };
       growth_referrals: { Row: GrowthReferral; Insert: Omit<GrowthReferral, 'id' | 'created_at' | 'updated_at'>; Update: Partial<GrowthReferral> };
       growth_events: { Row: GrowthEventRow; Insert: Omit<GrowthEventRow, 'id' | 'created_at'>; Update: Partial<GrowthEventRow> };
+      account_security_risk_signals: { Row: AccountSecurityRiskSignal; Insert: Omit<AccountSecurityRiskSignal, 'id'>; Update: Partial<AccountSecurityRiskSignal> };
+      account_security_risk_cases: { Row: AccountSecurityRiskCase; Insert: Omit<AccountSecurityRiskCase, 'created_at' | 'updated_at'>; Update: Partial<AccountSecurityRiskCase> };
       operator_daily_metrics: { Row: OperatorDailyMetric; Insert: Omit<OperatorDailyMetric, 'updated_at'>; Update: Partial<OperatorDailyMetric> };
       billing_subscriptions: { Row: BillingSubscription; Insert: Omit<BillingSubscription, 'id' | 'created_at' | 'updated_at'>; Update: Partial<BillingSubscription> };
       store_products: { Row: StoreProduct; Insert: Omit<StoreProduct, 'created_at' | 'updated_at'>; Update: Partial<StoreProduct> };

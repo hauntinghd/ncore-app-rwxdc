@@ -11,6 +11,8 @@ import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenoiser';
 import { createConfiguredLocalAudioTrack } from './callMedia';
 import { loadCallSettings, saveCallSettings } from './callSettings';
+import { queueRuntimeEvent } from './runtimeTelemetry';
+import { publishServerVoiceShellState } from './serverVoiceShell';
 import { supabase } from './supabase';
 import type { Channel, VoiceSession } from './types';
 
@@ -131,6 +133,19 @@ class ServerVoiceSessionStore {
   private dbSessionsChannel: any = null;
   private activeSpeakerKey = '';
 
+  private async configureRtcOptimizations(client: IAgoraRTCClient) {
+    try {
+      await client.enableDualStream();
+    } catch {
+      // noop
+    }
+    try {
+      await client.setStreamFallbackOption(2);
+    } catch {
+      // noop
+    }
+  }
+
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -172,6 +187,7 @@ class ServerVoiceSessionStore {
     ));
     if (shellChanged) {
       this.shellState = nextShellState;
+      publishServerVoiceShellState(nextShellState);
     }
     this.listeners.forEach((listener) => listener());
   }
@@ -405,11 +421,20 @@ class ServerVoiceSessionStore {
       const AgoraRTC = await getAgoraModule();
       const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
       this.client = client;
+      await this.configureRtcOptimizations(client);
       try {
         client.enableAudioVolumeIndicator();
       } catch {
         // ignore unsupported volume indicator environments
       }
+      client.on('connection-state-change', (curState, prevState, reason) => {
+        queueRuntimeEvent('server_voice_connection_state', {
+          channel_id: channelId,
+          current_state: String(curState || ''),
+          previous_state: String(prevState || ''),
+          reason: String(reason || ''),
+        }, { userId: profileId, sampleRate: 0.5 });
+      });
 
       client.on('volume-indicator', (volumes: Array<{ uid: UID; level: number }>) => {
         const active = (volumes || [])
@@ -494,6 +519,10 @@ class ServerVoiceSessionStore {
       }
       await client.join(AGORA_APP_ID, channelId, token, this.localUid);
       rtcJoined = true;
+      queueRuntimeEvent('server_voice_joined', {
+        channel_id: channelId,
+        has_agora: true,
+      }, { userId: profileId, sampleRate: 1 });
       if (joinToken !== this.lifecycleToken) {
         try {
           await client.leave();
@@ -569,6 +598,10 @@ class ServerVoiceSessionStore {
     } catch (error) {
       console.error('Failed to join server voice channel:', error);
       await this.disposeAudioDenoiser();
+      queueRuntimeEvent('server_voice_join_failed', {
+        channel_id: channelId,
+        error: describeAgoraJoinFailure(error),
+      }, { userId: profileId, sampleRate: 1 });
       this.setState({
         phase: 'idle',
         isConnected: false,
@@ -674,6 +707,9 @@ class ServerVoiceSessionStore {
     }
 
     if (leaveToken !== this.lifecycleToken) return;
+    queueRuntimeEvent('server_voice_left', {
+      channel_id: currentChannelId,
+    }, { userId: currentProfileId, sampleRate: 1 });
   }
 
   async toggleMute() {
@@ -859,6 +895,15 @@ class ServerVoiceSessionStore {
 }
 
 export const serverVoiceSession = new ServerVoiceSessionStore();
+publishServerVoiceShellState({
+  phase: initialState.phase,
+  communityId: initialState.communityId,
+  channelId: initialState.channelId,
+  channelName: initialState.channelName,
+  isMuted: initialState.isMuted,
+  isDeafened: initialState.isDeafened,
+  isCameraOn: initialState.isCameraOn,
+});
 
 export function useServerVoiceSession(): ServerVoiceSessionState {
   return useSyncExternalStore(

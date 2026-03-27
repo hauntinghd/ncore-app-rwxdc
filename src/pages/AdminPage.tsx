@@ -12,6 +12,8 @@ import { Modal, ConfirmModal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type {
+  AccountSecurityRiskCase,
+  AccountSecurityRiskSignal,
   Profile,
   Community,
   PlatformBan,
@@ -26,11 +28,20 @@ import { formatRelativeTime } from '../lib/utils';
 
 const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: TrendingUp },
+  { id: 'security', label: 'Security Ops', icon: Shield },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'communities', label: 'Communities', icon: Globe },
   { id: 'bans', label: 'Platform Bans', icon: Ban },
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag },
 ];
+
+interface SecurityEventRow {
+  id: string;
+  event_name: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  user_id?: string | null;
+}
 
 function detectMobileAdminLayout(): boolean {
   if (typeof window === 'undefined') return false;
@@ -70,6 +81,17 @@ function isMissingDisputesTableError(error: unknown): boolean {
   );
 }
 
+function isMissingTableError(error: unknown, tableName: string): boolean {
+  const code = String((error as any)?.code || '').toUpperCase();
+  const message = String((error as any)?.message || '').toLowerCase();
+  const normalizedTableName = String(tableName || '').trim().toLowerCase();
+  return (
+    code === 'PGRST205'
+    || (normalizedTableName !== '' && message.includes(normalizedTableName) && message.includes('schema cache'))
+    || (normalizedTableName !== '' && message.includes(`public.${normalizedTableName}`))
+  );
+}
+
 export function AdminPage() {
   const { profile: currentProfile } = useAuth();
   const navigate = useNavigate();
@@ -98,6 +120,21 @@ export function AdminPage() {
   const [marketplaceProfileMap, setMarketplaceProfileMap] = useState<Record<string, Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>>>({});
   const [operatorRevenueRows, setOperatorRevenueRows] = useState<OperatorRevenue30d[]>([]);
   const [operatorCheckoutFailureReasons, setOperatorCheckoutFailureReasons] = useState<Array<{ reason: string; count: number }>>([]);
+  const [riskCases, setRiskCases] = useState<AccountSecurityRiskCase[]>([]);
+  const [riskSignals, setRiskSignals] = useState<AccountSecurityRiskSignal[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEventRow[]>([]);
+  const [riskActionLoading, setRiskActionLoading] = useState<string | null>(null);
+  const [securitySummary, setSecuritySummary] = useState({
+    shieldBlocked: 0,
+    shieldWarned: 0,
+    authFailures: 0,
+    authThrottles: 0,
+    runtimeErrors: 0,
+    voiceJoinFailures: 0,
+    activeRiskCases: 0,
+    pendingRiskReview: 0,
+    containedAccounts: 0,
+  });
 
   useEffect(() => {
     if (currentProfile?.platform_role !== 'owner' && currentProfile?.platform_role !== 'admin') {
@@ -141,7 +178,17 @@ export function AdminPage() {
   async function loadData() {
     setLoading(true);
     const sinceIso = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)).toISOString();
-    const [usersRes, commRes, bansRes, msgsRes, operatorRevenueRes, checkoutFailuresRes] = await Promise.all([
+    const [
+      usersRes,
+      commRes,
+      bansRes,
+      msgsRes,
+      operatorRevenueRes,
+      checkoutFailuresRes,
+      riskCasesRes,
+      riskSignalsRes,
+      securityEventsRes,
+    ] = await Promise.all([
       supabase.from('profiles').select('*').order('created_at', { ascending: false }),
       supabase.from('communities').select('*').order('member_count', { ascending: false }),
       supabase.from('platform_bans').select('*, user:profiles!platform_bans_user_id_fkey(*), banner:profiles!platform_bans_banned_by_fkey(*)'),
@@ -153,6 +200,32 @@ export function AdminPage() {
         .in('event_name', ['checkout_failed', 'marketplace_checkout_failed', 'boost_checkout_failed'])
         .gte('created_at', sinceIso)
         .limit(4000),
+      (supabase as any)
+        .from('account_security_risk_cases')
+        .select('*')
+        .order('risk_score', { ascending: false })
+        .order('last_event_at', { ascending: false })
+        .limit(80),
+      (supabase as any)
+        .from('account_security_risk_signals')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(120),
+      (supabase as any)
+        .from('growth_events')
+        .select('id, event_name, payload, created_at, user_id')
+        .in('event_name', [
+          'shield_message_blocked',
+          'shield_message_warned',
+          'auth_signin_failed',
+          'auth_signin_throttled',
+          'window_error',
+          'unhandled_rejection',
+          'server_voice_join_failed',
+        ])
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(200),
     ]);
     const visibleUsers = ((usersRes.data || []) as Profile[]).filter(
       (user) => (user.username || '').toLowerCase() !== 'omatic657',
@@ -180,6 +253,58 @@ export function AdminPage() {
       );
     } else {
       setOperatorCheckoutFailureReasons([]);
+    }
+
+    const riskCasesMissing = isMissingTableError(riskCasesRes.error, 'account_security_risk_cases');
+    if (!riskCasesRes.error || riskCasesMissing) {
+      const rows = riskCasesMissing ? [] : ((riskCasesRes.data || []) as AccountSecurityRiskCase[]);
+      setRiskCases(rows);
+      setSecuritySummary((prev) => ({
+        ...prev,
+        activeRiskCases: rows.filter((row) => String(row.risk_level) !== 'none').length,
+        pendingRiskReview: rows.filter((row) => String(row.review_status) === 'pending_review').length,
+        containedAccounts: rows.filter((row) => String(row.containment_state) !== 'none').length,
+      }));
+    } else {
+      setRiskCases([]);
+      setSecuritySummary((prev) => ({
+        ...prev,
+        activeRiskCases: 0,
+        pendingRiskReview: 0,
+        containedAccounts: 0,
+      }));
+    }
+
+    const riskSignalsMissing = isMissingTableError(riskSignalsRes.error, 'account_security_risk_signals');
+    if (!riskSignalsRes.error || riskSignalsMissing) {
+      setRiskSignals(riskSignalsMissing ? [] : ((riskSignalsRes.data || []) as AccountSecurityRiskSignal[]));
+    } else {
+      setRiskSignals([]);
+    }
+
+    if (!securityEventsRes.error) {
+      const rows = (securityEventsRes.data || []) as SecurityEventRow[];
+      setSecurityEvents(rows);
+      setSecuritySummary((prev) => ({
+        ...prev,
+        shieldBlocked: rows.filter((row) => row.event_name === 'shield_message_blocked').length,
+        shieldWarned: rows.filter((row) => row.event_name === 'shield_message_warned').length,
+        authFailures: rows.filter((row) => row.event_name === 'auth_signin_failed').length,
+        authThrottles: rows.filter((row) => row.event_name === 'auth_signin_throttled').length,
+        runtimeErrors: rows.filter((row) => row.event_name === 'window_error' || row.event_name === 'unhandled_rejection').length,
+        voiceJoinFailures: rows.filter((row) => row.event_name === 'server_voice_join_failed').length,
+      }));
+    } else {
+      setSecurityEvents([]);
+      setSecuritySummary((prev) => ({
+        ...prev,
+        shieldBlocked: 0,
+        shieldWarned: 0,
+        authFailures: 0,
+        authThrottles: 0,
+        runtimeErrors: 0,
+        voiceJoinFailures: 0,
+      }));
     }
 
     setStats({
@@ -452,6 +577,44 @@ export function AdminPage() {
     showToast(community.is_featured ? 'Community unfeatured' : 'Community featured');
   }
 
+  async function reviewRiskCase(userId: string, options: { reviewStatus: 'reviewed' | 'dismissed'; releaseContainment?: boolean }) {
+    const key = `risk:${userId}:${options.reviewStatus}:${options.releaseContainment ? 'release' : 'keep'}`;
+    setRiskActionLoading(key);
+    const promptLabel = options.releaseContainment
+      ? 'Review note / release reason:'
+      : 'Review note:';
+    const note = window.prompt(promptLabel, '') || '';
+    const { error } = await (supabase as any).rpc('admin_review_account_security_risk', {
+      p_user_id: userId,
+      p_review_status: options.reviewStatus,
+      p_review_note: String(note || '').trim() || null,
+      p_release_containment: Boolean(options.releaseContainment),
+    });
+    if (error) {
+      showToast(error.message || 'Could not update the security risk case.');
+    } else {
+      showToast(options.releaseContainment ? 'Containment released.' : 'Security case reviewed.');
+      await loadData();
+    }
+    setRiskActionLoading(null);
+  }
+
+  async function refreshRiskCases(userId?: string) {
+    const key = userId ? `refresh-risk:${userId}` : 'refresh-risk:all';
+    setRiskActionLoading(key);
+    const { data, error } = await (supabase as any).rpc('admin_refresh_account_security_risk', {
+      p_user_id: userId || null,
+      p_limit: userId ? 1 : 100,
+    });
+    if (error) {
+      showToast(error.message || 'Could not refresh security risk cases.');
+    } else {
+      showToast(`Security classifier refreshed for ${Number(data || 0)} account(s).`);
+      await loadData();
+    }
+    setRiskActionLoading(null);
+  }
+
   const filteredUsers = users.filter(u =>
     u.username.includes(search.toLowerCase()) ||
     (u.display_name?.toLowerCase().includes(search.toLowerCase()))
@@ -462,9 +625,80 @@ export function AdminPage() {
   );
 
   function resolveProfileLabel(userId: string): string {
-    const profile = marketplaceProfileMap[String(userId)];
+    const profile = marketplaceProfileMap[String(userId)] || users.find((entry) => String(entry.id) === String(userId));
     if (!profile) return `@${String(userId).slice(0, 8)}`;
     return profile.display_name || profile.username || `@${String(userId).slice(0, 8)}`;
+  }
+
+  function describeSecurityEvent(event: SecurityEventRow): { label: string; detail: string } {
+    const payload = event.payload || {};
+    switch (event.event_name) {
+      case 'shield_message_blocked':
+        return {
+          label: 'Shield blocked outbound content',
+          detail: `${String(payload.scope || 'unknown')} scope • findings: ${Array.isArray(payload.findings) ? payload.findings.join(', ') : 'n/a'}`,
+        };
+      case 'shield_message_warned':
+        return {
+          label: 'Shield warned on outbound content',
+          detail: `${String(payload.scope || 'unknown')} scope • findings: ${Array.isArray(payload.findings) ? payload.findings.join(', ') : 'n/a'}`,
+        };
+      case 'auth_signin_failed':
+        return {
+          label: 'Sign-in failure',
+          detail: String(payload.message || 'Failed password sign-in attempt.'),
+        };
+      case 'auth_signin_throttled':
+        return {
+          label: 'Sign-in throttled',
+          detail: `Cooldown remaining: ${Math.ceil(Number(payload.remaining_ms || 0) / 1000)}s`,
+        };
+      case 'server_voice_join_failed':
+        return {
+          label: 'Server voice join failed',
+          detail: String(payload.error || 'Voice session could not be established.'),
+        };
+      case 'window_error':
+      case 'unhandled_rejection':
+        return {
+          label: 'Runtime error',
+          detail: String(payload.message || payload.stack || 'Unhandled client-side error'),
+        };
+      default:
+        return {
+          label: event.event_name,
+          detail: JSON.stringify(payload).slice(0, 160),
+        };
+    }
+  }
+
+  function describeRiskFactors(value: AccountSecurityRiskCase['risk_factors']): string {
+    if (!Array.isArray(value)) return 'No structured evidence yet.';
+    const details = (value as Array<Record<string, unknown>>)
+      .slice(0, 3)
+      .map((factor) => {
+        const key = String(factor.signal_key || factor.source_kind || 'signal').replaceAll('_', ' ');
+        const excerpt = String(factor.excerpt || '').trim();
+        if (!excerpt) return key;
+        return `${key}: ${excerpt}`;
+      })
+      .filter(Boolean);
+    return details.length > 0 ? details.join(' | ') : 'No structured evidence yet.';
+  }
+
+  function riskLevelClasses(level: string): string {
+    switch (String(level || '').toLowerCase()) {
+      case 'critical':
+        return 'bg-red-500/15 text-red-300 border-red-500/30';
+      case 'high':
+        return 'bg-orange-500/15 text-orange-300 border-orange-500/30';
+      case 'medium':
+        return 'bg-yellow-500/15 text-yellow-200 border-yellow-500/30';
+      case 'low':
+        return 'bg-blue-500/15 text-blue-200 border-blue-500/30';
+      default:
+        return 'bg-surface-700/60 text-surface-300 border-surface-600';
+    }
   }
 
   const operatorTotals = operatorRevenueRows.reduce((acc, row) => {
@@ -722,6 +956,184 @@ export function AdminPage() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {section === 'security' && (
+              <div className="space-y-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-black text-surface-100 mb-1">Security Ops</h2>
+                    <p className="text-surface-500 text-sm">Client shield remains first-line defense. Server-side risk classification now scores suspicious accounts, queues them for review, and auto-contains high-risk accounts through the growth capability gates.</p>
+                  </div>
+                  <button
+                    onClick={() => { void refreshRiskCases(); }}
+                    className="nyptid-btn-secondary text-xs px-3 py-2"
+                    disabled={riskActionLoading !== null}
+                  >
+                    {riskActionLoading === 'refresh-risk:all' ? 'Refreshing...' : 'Re-run Classifier'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {[
+                    { label: 'Shield Blocks', value: securitySummary.shieldBlocked, color: 'text-red-400', bg: 'bg-red-500/10' },
+                    { label: 'Shield Warnings', value: securitySummary.shieldWarned, color: 'text-yellow-300', bg: 'bg-yellow-500/10' },
+                    { label: 'Auth Failures', value: securitySummary.authFailures, color: 'text-orange-300', bg: 'bg-orange-500/10' },
+                    { label: 'Auth Throttles', value: securitySummary.authThrottles, color: 'text-nyptid-300', bg: 'bg-nyptid-300/10' },
+                    { label: 'Runtime Errors', value: securitySummary.runtimeErrors, color: 'text-blue-300', bg: 'bg-blue-500/10' },
+                    { label: 'Voice Join Failures', value: securitySummary.voiceJoinFailures, color: 'text-purple-300', bg: 'bg-purple-500/10' },
+                    { label: 'Active Risk Cases', value: securitySummary.activeRiskCases, color: 'text-red-300', bg: 'bg-red-500/10' },
+                    { label: 'Pending Review', value: securitySummary.pendingRiskReview, color: 'text-yellow-200', bg: 'bg-yellow-500/10' },
+                    { label: 'Contained Accounts', value: securitySummary.containedAccounts, color: 'text-orange-200', bg: 'bg-orange-500/10' },
+                  ].map((stat) => (
+                    <div key={stat.label} className="nyptid-card p-5">
+                      <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center mb-3`}>
+                        <Shield size={18} className={stat.color} />
+                      </div>
+                      <div className="text-2xl font-black text-surface-100">{stat.value.toLocaleString()}</div>
+                      <div className="text-xs uppercase tracking-wider text-surface-500 mt-1">{stat.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="nyptid-card p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <h3 className="font-bold text-surface-100">Account Risk Queue</h3>
+                        <p className="text-xs text-surface-500 mt-1">High-risk accounts are auto-contained server-side until reviewed.</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 max-h-[30rem] overflow-y-auto pr-1">
+                      {riskCases.length === 0 && (
+                        <div className="text-xs text-surface-500">No security risk cases yet. Apply the new migration to activate server-side review queues.</div>
+                      )}
+                      {riskCases.map((riskCase) => {
+                        const reviewKey = `risk:${riskCase.user_id}:reviewed:keep`;
+                        const releaseKey = `risk:${riskCase.user_id}:reviewed:release`;
+                        const dismissKey = `risk:${riskCase.user_id}:dismissed:${String(riskCase.containment_state) !== 'none' ? 'release' : 'keep'}`;
+                        return (
+                          <div key={riskCase.user_id} className="rounded-xl border border-surface-700 bg-surface-800/45 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-sm font-semibold text-surface-100">{resolveProfileLabel(String(riskCase.user_id))}</div>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${riskLevelClasses(String(riskCase.risk_level))}`}>
+                                    {String(riskCase.risk_level || 'none')}
+                                  </span>
+                                  <span className="rounded-full border border-surface-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-surface-300">
+                                    score {Number(riskCase.risk_score || 0)}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-surface-500 mt-1">
+                                  Containment: {String(riskCase.containment_state || 'none')} | Review: {String(riskCase.review_status || 'pending_review')}
+                                  {riskCase.last_event_at ? ` | ${formatRelativeTime(riskCase.last_event_at)}` : ''}
+                                </div>
+                                <div className="text-[11px] text-surface-300 mt-2 break-words">
+                                  {describeRiskFactors(riskCase.risk_factors)}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => { void refreshRiskCases(riskCase.user_id); }}
+                                className="nyptid-btn-ghost text-[11px] px-2 py-1"
+                                disabled={riskActionLoading !== null}
+                              >
+                                {riskActionLoading === `refresh-risk:${riskCase.user_id}` ? 'Refreshing...' : 'Refresh'}
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mt-3">
+                              <button
+                                onClick={() => { void reviewRiskCase(riskCase.user_id, { reviewStatus: 'reviewed' }); }}
+                                className="nyptid-btn-secondary text-[11px] px-2 py-1"
+                                disabled={riskActionLoading !== null}
+                              >
+                                {riskActionLoading === reviewKey ? 'Saving...' : 'Mark Reviewed'}
+                              </button>
+                              {String(riskCase.containment_state) !== 'none' && (
+                                <button
+                                  onClick={() => { void reviewRiskCase(riskCase.user_id, { reviewStatus: 'reviewed', releaseContainment: true }); }}
+                                  className="nyptid-btn-secondary text-[11px] px-2 py-1"
+                                  disabled={riskActionLoading !== null}
+                                >
+                                  {riskActionLoading === releaseKey ? 'Saving...' : 'Release Containment'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => { void reviewRiskCase(riskCase.user_id, { reviewStatus: 'dismissed', releaseContainment: String(riskCase.containment_state) !== 'none' }); }}
+                                className="nyptid-btn-ghost text-[11px] px-2 py-1"
+                                disabled={riskActionLoading !== null}
+                              >
+                                {riskActionLoading === dismissKey ? 'Saving...' : 'Dismiss'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="nyptid-card p-4">
+                    <h3 className="font-bold text-surface-100 mb-3">Recent Risk Signals</h3>
+                    <div className="space-y-2 max-h-[30rem] overflow-y-auto pr-1">
+                      {riskSignals.length === 0 && (
+                        <div className="text-xs text-surface-500">No stored server-side risk signals yet.</div>
+                      )}
+                      {riskSignals.map((signal) => (
+                        <div key={signal.id} className="rounded-xl border border-surface-700 bg-surface-800/45 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-surface-100">{resolveProfileLabel(String(signal.user_id))}</div>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${riskLevelClasses(String(signal.risk_level))}`}>
+                                  {String(signal.risk_level)}
+                                </span>
+                                <span className="text-[11px] text-surface-400">{String(signal.source_kind).replaceAll('_', ' ')}</span>
+                              </div>
+                              <div className="text-[11px] text-surface-500 mt-1">
+                                {String(signal.signal_key).replaceAll('_', ' ')} | score {Number(signal.risk_score || 0)} | {formatRelativeTime(signal.created_at)}
+                              </div>
+                              {signal.excerpt && (
+                                <div className="text-[11px] text-surface-300 mt-2 break-words">
+                                  {signal.excerpt}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-4">
+                  <h3 className="font-bold text-surface-100 mb-3">Recent Security Events</h3>
+                  <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+                    {securityEvents.length === 0 && (
+                      <div className="text-xs text-surface-500">No recent security telemetry in the last 30 days.</div>
+                    )}
+                    {securityEvents.map((event) => {
+                      const meta = describeSecurityEvent(event);
+                      return (
+                        <div key={event.id} className="rounded-xl border border-surface-700 bg-surface-800/45 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-surface-100">{meta.label}</div>
+                              <div className="text-[11px] text-surface-400 mt-1 break-words">{meta.detail}</div>
+                              <div className="text-[11px] text-surface-500 mt-1.5">
+                                {event.user_id ? `User: ${resolveProfileLabel(String(event.user_id))} • ` : ''}
+                                {formatRelativeTime(event.created_at)}
+                              </div>
+                            </div>
+                            <div className="text-[10px] uppercase tracking-wider text-surface-500">
+                              {String(event.event_name).replaceAll('_', ' ')}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

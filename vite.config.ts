@@ -43,9 +43,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('agora-rtc-sdk-ng') || id.includes('agora-rtc-react')) {
-              return 'vendor-agora';
-            }
             if (id.includes('@supabase/supabase-js')) {
               return 'vendor-supabase';
             }

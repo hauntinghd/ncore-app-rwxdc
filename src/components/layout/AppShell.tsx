@@ -8,7 +8,7 @@ import { Modal } from '../ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
 import { trackGrowthEvent } from '../../lib/growthEvents';
-import { serverVoiceSession, useServerVoiceSessionShell } from '../../lib/serverVoiceSession';
+import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
@@ -53,10 +53,10 @@ export function AppShell({
   activeCommunityId, activeChannelId, showChannelSidebar = true,
 }: AppShellProps) {
   const { profile } = useAuth();
-  const { capabilities } = useGrowthCapabilities();
+  const { capabilities, contract } = useGrowthCapabilities();
   const navigate = useNavigate();
   const location = useLocation();
-  const voiceSession = useServerVoiceSessionShell();
+  const voiceSession = useServerVoiceShellState();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
@@ -828,7 +828,7 @@ export function AppShell({
   async function handleCreateCommunity() {
     if (!profile || !newCommunity.name.trim()) return;
     if (!capabilities.canCreateServer) {
-      const reason = getCapabilityLockReason('can_create_server');
+      const reason = getCapabilityLockReason('can_create_server', contract.unlock_source);
       setCreateError(reason);
       void trackGrowthEvent('capability_gate_blocked', {
         gate: 'can_create_server',
@@ -975,10 +975,10 @@ export function AppShell({
             isMuted={voiceSession.isMuted}
             isDeafened={voiceSession.isDeafened}
             isCameraOn={voiceSession.isCameraOn}
-            onToggleMute={() => void serverVoiceSession.toggleMute()}
-            onToggleDeafen={() => void serverVoiceSession.toggleDeafen()}
-            onToggleCamera={() => void serverVoiceSession.toggleCamera()}
-            onLeave={() => void serverVoiceSession.leave()}
+            onToggleMute={() => void runServerVoiceAction('toggleMute')}
+            onToggleDeafen={() => void runServerVoiceAction('toggleDeafen')}
+            onToggleCamera={() => void runServerVoiceAction('toggleCamera')}
+            onLeave={() => void runServerVoiceAction('leave')}
           />
         )}
       </div>

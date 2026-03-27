@@ -1,10 +1,11 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, Suspense, lazy } from 'react';
+import { useEffect, Suspense, lazy, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoadingScreen } from './components/ui/Spinner';
 import { probeRunPodBackend } from './lib/runpod';
 import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
 import { detectWebSurface, type WebSurface } from './lib/webSurface';
+import { createDurationTracker, queueRuntimeEvent, reportRuntimeError } from './lib/runtimeTelemetry';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
@@ -124,7 +125,43 @@ function RealtimeBridge() {
     typeof window !== 'undefined' && (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
   const { session, profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const shouldProbeRunPod = import.meta.env.DEV || String(import.meta.env.VITE_ENABLE_RUNPOD_PROBE || '').trim() === '1';
+  const routeTrackerRef = useRef(createDurationTracker('route_transition_duration_ms', { sampleRate: 0.35 }));
+  const previousRouteRef = useRef<string>('');
+
+  useEffect(() => {
+    const onWindowError = (event: ErrorEvent) => {
+      reportRuntimeError('window_error', event.error || event.message, {
+        filename: event.filename || '',
+        lineno: Number(event.lineno || 0),
+        colno: Number(event.colno || 0),
+      }, { userId: profile?.id, sampleRate: 1 });
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      reportRuntimeError('unhandled_rejection', event.reason, {}, { userId: profile?.id, sampleRate: 1 });
+    };
+    window.addEventListener('error', onWindowError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', onWindowError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    const routeKey = `${location.pathname}${location.search}`;
+    const previousRoute = previousRouteRef.current;
+    const end = routeTrackerRef.current.start({
+      route: routeKey,
+      from_route: previousRoute || null,
+    });
+    const rafId = window.requestAnimationFrame(() => {
+      end({ route: routeKey });
+    });
+    previousRouteRef.current = routeKey;
+    return () => window.cancelAnimationFrame(rafId);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!shouldProbeRunPod) return;
@@ -246,6 +283,14 @@ function RealtimeBridge() {
       console.warn('desktopBridge.realtimeSetStatus failed', err);
     }
   }, [isElectron, session, profile?.status, profile?.id]);
+
+  useEffect(() => {
+    queueRuntimeEvent('session_bridge_ready', {
+      is_electron: isElectron,
+      has_session: Boolean(session),
+      route: `${location.pathname}${location.search}`,
+    }, { userId: profile?.id, sampleRate: 0.2 });
+  }, [isElectron, location.pathname, location.search, profile?.id, session]);
 
   return null;
 }

@@ -48,7 +48,13 @@ function normalizeContract(raw: unknown): GrowthCapabilityContract {
   };
 }
 
-export function getCapabilityLockReason(capability: keyof GrowthCapabilityContract['capabilities']): string {
+export function getCapabilityLockReason(
+  capability: keyof GrowthCapabilityContract['capabilities'],
+  unlockSource?: string | null,
+): string {
+  if (String(unlockSource || '').trim().toLowerCase() === 'security_contained') {
+    return 'This account is temporarily contained by NCore Shield pending admin review. Restricted actions stay locked until the containment is released.';
+  }
   if (capability === 'can_create_server') {
     return 'Server creation is locked in Limited Mode. Unlock via trusted invite, admin approval, or trust-tier promotion.';
   }
@@ -118,4 +124,3 @@ export function useGrowthCapabilities() {
     refresh,
   };
 }
-

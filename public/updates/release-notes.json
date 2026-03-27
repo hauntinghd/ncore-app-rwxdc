@@ -1,9 +1,24 @@
 {
     "releases": [
         {
+            "version": "11.7.84",
+            "date": "2026-03-27",
+            "badge": "Current Build",
+            "improvements": [
+                "Added a server-side phishing and account-risk classifier that scores suspicious channel messages, direct messages, and shield/auth security events inside Supabase.",
+                "Wired security risk cases into Admin Security Ops with refresh, review, dismissal, and containment-release controls using the existing NCore capability gate system.",
+                "Removed the remaining startup penalty from the common app shell by keeping the Agora voice/call runtime out of the initial entry bundle and loading it only on demand."
+            ],
+            "bugFixes": [
+                "Automated containment now restricts risky non-admin accounts without impacting owner/admin accounts, while preserving the prior growth-capability contract for safe release by an admin.",
+                "Capability lock messaging now clearly explains when an account is temporarily contained by NCore Shield pending admin review.",
+                "Build output no longer preloads the Agora SDK on normal app startup, reducing the main-path jitter caused by the previous chunking configuration."
+            ]
+        },
+        {
             "version": "11.7.83",
             "date": "2026-03-26",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "Typing @ in server channels, 1:1 DMs, and group DMs now opens a real participant picker with avatar, display name, @username, and keyboard selection support.",
                 "Mention insertion now uses the live conversation member list so @selection is resolved from the people actually in the current server or DM context.",

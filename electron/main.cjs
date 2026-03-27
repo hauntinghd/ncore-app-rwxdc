@@ -746,6 +746,18 @@ function normalizeUpdateFeedUrl(rawUrl) {
   return normalizedPath;
 }
 
+function isPrivateIpv4Host(hostname) {
+  const match = String(hostname || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!match) return false;
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  if (first === 10 || first === 127) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 169 && second === 254) return true;
+  return false;
+}
+
 function registerDesktopActions() {
   ipcMain.handle('authStorage:getItem', async (_event, payload) => {
     try {
@@ -797,6 +809,13 @@ function registerDesktopActions() {
       const parsed = new URL(rawUrl);
       if (!['https:', 'http:'].includes(parsed.protocol)) {
         return { ok: false, message: 'Only http/https URLs are allowed.' };
+      }
+      if (parsed.username || parsed.password) {
+        return { ok: false, message: 'Credential-style URLs are blocked.' };
+      }
+      const hostname = String(parsed.hostname || '').trim().toLowerCase();
+      if (hostname === 'localhost' || isPrivateIpv4Host(hostname)) {
+        return { ok: false, message: 'Private or local network links are blocked.' };
       }
       await shell.openExternal(parsed.toString());
       return { ok: true };

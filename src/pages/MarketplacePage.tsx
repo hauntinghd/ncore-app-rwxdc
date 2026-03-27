@@ -35,6 +35,7 @@ import {
 } from '../lib/cosmetics';
 import { supabase } from '../lib/supabase';
 import { resolveBillingReturnUrl } from '../lib/billingUrl';
+import { safeOpenExternalUrl } from '../lib/safeExternal';
 import { useAuth } from '../contexts/AuthContext';
 import type {
   MarketplaceGameOrder,
@@ -292,19 +293,9 @@ function normalizeExternalHttpUrl(targetUrl: string, label: string): string {
 
 async function openCheckoutUrl(checkoutUrl: string): Promise<void> {
   const normalized = normalizeExternalHttpUrl(checkoutUrl, 'checkout URL');
-
-  if (window.desktopBridge?.openExternalUrl) {
-    const result = await window.desktopBridge.openExternalUrl(normalized);
-    if (!result.ok) {
-      throw new Error(result.message || 'Could not open Stripe checkout.');
-    }
-    return;
-  }
-
-  const popup = window.open(normalized, '_blank', 'noopener,noreferrer');
-  if (!popup) {
-    window.location.assign(normalized);
-  }
+  await safeOpenExternalUrl(normalized, {
+    trustedDomains: ['stripe.com', 'checkout.stripe.com', 'nyptidindustries.com', 'ncore.nyptidindustries.com'],
+  });
 }
 
 export function MarketplacePage() {
@@ -313,7 +304,7 @@ export function MarketplacePage() {
   const routeTrack = useMemo(() => getTrackFromPath(location.pathname), [location.pathname]);
   const isOpsExperience = routeTrack === 'quickdraw' || routeTrack === 'games';
   const { profile } = useAuth();
-  const { capabilities } = useGrowthCapabilities();
+  const { capabilities, contract } = useGrowthCapabilities();
   const growthSourceChannel = resolveGrowthSourceChannel();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
   const [activeTrack, setActiveTrack] = useState<MarketplaceTrack>(routeTrack);
@@ -370,7 +361,7 @@ export function MarketplacePage() {
   const [quickdrawContractDrafts, setQuickdrawContractDrafts] = useState<QuickdrawContractDraft[]>([]);
   const [cosmeticRotationClock, setCosmeticRotationClock] = useState(() => Date.now());
   const marketplaceLocked = !capabilities.canUseMarketplace;
-  const marketplaceLockReason = getCapabilityLockReason('can_use_marketplace');
+  const marketplaceLockReason = getCapabilityLockReason('can_use_marketplace', contract.unlock_source);
 
   const ownedSkus = useMemo(() => new Set(entitlements.ownedSkus || []), [entitlements.ownedSkus]);
   const cosmeticRotation = useMemo(

@@ -28,6 +28,8 @@ import {
   splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
+import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
+import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
@@ -60,6 +62,14 @@ interface MessageContextMenuState {
   x: number;
   y: number;
   message: Message;
+}
+
+interface LightweightMessageReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at?: string;
 }
 
 function renderMessageContent(content: string) {
@@ -260,6 +270,57 @@ function groupMessages(messages: Message[]): Message[][] {
   return groups;
 }
 
+function buildChannelMessageAuthorMap(members: ChatMember[], currentProfile: any) {
+  const map = new Map<string, any>();
+  for (const member of members) {
+    const profile = member.profile;
+    const id = String(profile?.id || '').trim();
+    if (!id) continue;
+    map.set(id, profile);
+  }
+  const currentId = String(currentProfile?.id || '').trim();
+  if (currentId) {
+    map.set(currentId, {
+      id: currentId,
+      username: currentProfile?.username || '',
+      display_name: currentProfile?.display_name || null,
+      avatar_url: currentProfile?.avatar_url || null,
+      status: currentProfile?.status || null,
+      custom_status: currentProfile?.custom_status || null,
+      custom_status_emoji: currentProfile?.custom_status_emoji || null,
+      banner_url: currentProfile?.banner_url || null,
+      bio: currentProfile?.bio || null,
+      platform_role: currentProfile?.platform_role || null,
+      rank: currentProfile?.rank || null,
+      xp: currentProfile?.xp || 0,
+    });
+  }
+  return map;
+}
+
+function buildRealtimeChannelMessage(row: any, authorMap: Map<string, any>): Message {
+  const authorId = String(row?.author_id || '').trim();
+  return {
+    id: String(row?.id || ''),
+    channel_id: String(row?.channel_id || ''),
+    author_id: authorId,
+    content: String(row?.content || ''),
+    is_edited: Boolean(row?.is_edited),
+    is_pinned: Boolean(row?.is_pinned),
+    parent_message_id: row?.parent_message_id ? String(row.parent_message_id) : null,
+    created_at: String(row?.created_at || new Date().toISOString()),
+    updated_at: String(row?.updated_at || row?.created_at || new Date().toISOString()),
+    author: (authorMap.get(authorId) || {
+      id: authorId,
+      username: 'unknown',
+      display_name: 'Unknown',
+      avatar_url: null,
+    }) as any,
+    reactions: [],
+    attachments: [],
+  };
+}
+
 function isAuthOrJwtError(error: any): boolean {
   const message = String(error?.message || '').toLowerCase();
   const code = String(error?.code || '').toUpperCase();
@@ -324,6 +385,11 @@ export function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
+  function getMessagesCacheKey(targetChannelId?: string) {
+    if (!profile?.id || !targetChannelId) return null;
+    return `ncore.channel.cache.messages.${profile.id}.${targetChannelId}`;
+  }
+
   const isNearBottom = useCallback(() => {
     const container = messageScrollRef.current;
     if (!container) return true;
@@ -342,11 +408,13 @@ export function ChatPage() {
       const next = [...prev];
       const existingIndex = next.findIndex((entry) => entry.id === message.id);
       if (existingIndex >= 0) {
+        const incomingAttachments = Array.isArray(message.attachments) ? message.attachments : [];
+        const incomingReactions = Array.isArray(message.reactions) ? message.reactions : [];
         next[existingIndex] = {
           ...next[existingIndex],
           ...message,
-          attachments: (message.attachments || next[existingIndex].attachments || []),
-          reactions: (message.reactions || next[existingIndex].reactions || []),
+          attachments: incomingAttachments.length > 0 ? incomingAttachments : (next[existingIndex].attachments || []),
+          reactions: incomingReactions.length > 0 ? incomingReactions : (next[existingIndex].reactions || []),
         };
       } else {
         next.push(message);
@@ -366,6 +434,10 @@ export function ChatPage() {
   const pinnedMessages = useMemo(
     () => messages.filter((message) => Boolean(message.is_pinned)),
     [messages],
+  );
+  const authorMap = useMemo(
+    () => buildChannelMessageAuthorMap(members, profile),
+    [members, profile],
   );
   const messageGroups = useMemo(() => groupMessages(messages), [messages]);
   const mentionTargets = useMemo(() => {
@@ -531,6 +603,30 @@ export function ChatPage() {
     loadMessages();
   }, [channelId]);
 
+  useEffect(() => {
+    const cacheKey = getMessagesCacheKey(channelId);
+    if (!cacheKey) return;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (!raw) return;
+      const cached = JSON.parse(raw) as Message[];
+      if (!Array.isArray(cached) || cached.length === 0) return;
+      setMessages((prev) => (prev.length > 0 ? prev : cached));
+    } catch {
+      // Ignore malformed cache and continue with live fetch.
+    }
+  }, [channelId, profile?.id]);
+
+  useEffect(() => {
+    const cacheKey = getMessagesCacheKey(channelId);
+    if (!cacheKey || messages.length === 0) return;
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(messages.slice(-250)));
+    } catch {
+      // best-effort cache
+    }
+  }, [channelId, messages, profile?.id]);
+
   async function loadMessages() {
     setLoading(true);
     const { data } = await supabase
@@ -540,7 +636,18 @@ export function ChatPage() {
       .order('created_at', { ascending: true })
       .limit(100);
 
-    if (data) setMessages(data as Message[]);
+    if (data) {
+      const hydrated = data as Message[];
+      setMessages(hydrated);
+      const cacheKey = getMessagesCacheKey(channelId || undefined);
+      if (cacheKey && hydrated.length > 0) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(hydrated.slice(-250)));
+        } catch {
+          // best-effort cache
+        }
+      }
+    }
     setLoading(false);
     scrollToBottom('auto');
   }
@@ -554,19 +661,20 @@ export function ChatPage() {
         schema: 'public',
         table: 'messages',
         filter: `channel_id=eq.${channelId}`,
-      }, async (payload) => {
+      }, (payload) => {
         const shouldStickToBottom = isNearBottom();
-        const { data } = await supabase
-          .from('messages')
-          .select('*, author:profiles(*), reactions:message_reactions(*), attachments:message_attachments(*)')
-          .eq('id', payload.new.id)
-          .maybeSingle();
-        if (data) {
-          upsertMessage(data as Message);
-          if (shouldStickToBottom) {
-            scrollToBottom('auto');
-          }
+        upsertMessage(buildRealtimeChannelMessage(payload.new, authorMap));
+        if (shouldStickToBottom) {
+          scrollToBottom('auto');
         }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `channel_id=eq.${channelId}`,
+      }, (payload) => {
+        upsertMessage(buildRealtimeChannelMessage(payload.new, authorMap));
       })
       .on('postgres_changes', {
         event: 'DELETE',
@@ -592,10 +700,35 @@ export function ChatPage() {
           };
         }));
       })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'message_reactions',
+      }, (payload) => {
+        const reaction = payload.new as LightweightMessageReaction;
+        setMessages((prev) => prev.map((message) => {
+          if (message.id !== reaction.message_id) return message;
+          const existing = message.reactions || [];
+          if (existing.some((entry) => entry.id === reaction.id)) return message;
+          return { ...message, reactions: [...existing, reaction as any] };
+        }));
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'message_reactions',
+      }, (payload) => {
+        const reaction = payload.old as LightweightMessageReaction;
+        setMessages((prev) => prev.map((message) => (
+          message.id === reaction.message_id
+            ? { ...message, reactions: (message.reactions || []).filter((entry) => entry.id !== reaction.id) }
+            : message
+        )));
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [channelId, isNearBottom, scrollToBottom, upsertMessage]);
+  }, [authorMap, channelId, isNearBottom, scrollToBottom, upsertMessage]);
 
   function queueSelectedFiles(fileList: FileList | File[] | null | undefined) {
     if (!fileList) return;
@@ -685,6 +818,31 @@ export function ChatPage() {
 
     if (!hasText && !hasFiles) return;
 
+    const shieldAssessment = analyzeMessageShield({
+      text: content,
+      fileNames: filesToSend.map((file) => file.name),
+      trustedDomains: ['nyptidindustries.com', 'ncore.nyptidindustries.com', 'stripe.com', 'supabase.co'],
+    });
+    if (shieldAssessment.action === 'block') {
+      const detail = describeShieldAssessment(shieldAssessment);
+      setComposerError(detail);
+      queueRuntimeEvent('shield_message_blocked', {
+        scope: 'channel',
+        severity: shieldAssessment.severity,
+        findings: shieldAssessment.findings.map((finding) => finding.code),
+      }, { userId: profile.id, sampleRate: 1 });
+      return;
+    }
+    if (shieldAssessment.action === 'warn') {
+      const detail = describeShieldAssessment(shieldAssessment);
+      setComposerError(detail);
+      queueRuntimeEvent('shield_message_warned', {
+        scope: 'channel',
+        severity: shieldAssessment.severity,
+        findings: shieldAssessment.findings.map((finding) => finding.code),
+      }, { userId: profile.id, sampleRate: 1 });
+    }
+
     setInput('');
     setPendingFiles([]);
     setSending(true);
@@ -739,22 +897,27 @@ export function ChatPage() {
 
     if (filesToSend.length > 0) {
       await uploadMessageAttachments(String(insertedMessage.id), filesToSend);
-      await loadMessages();
     }
     setReplyTo(null);
 
     try {
       const targetCommunityId = String((channel as any)?.community_id || communityId || '').trim();
       if (targetCommunityId) {
-        const { data: memberRows } = await supabase
-          .from('community_members')
-          .select('user_id')
-          .eq('community_id', targetCommunityId)
-          .neq('user_id', profile.id);
-
-        const recipientIds = Array.from(
-          new Set((memberRows || []).map((row: any) => String(row.user_id || '')).filter(Boolean)),
-        ) as string[];
+        let recipientIds = Array.from(new Set(
+          members
+            .map((member) => String(member.profile?.id || '').trim())
+            .filter((memberId) => memberId && memberId !== profile.id),
+        ));
+        if (recipientIds.length === 0) {
+          const { data: memberRows } = await supabase
+            .from('community_members')
+            .select('user_id')
+            .eq('community_id', targetCommunityId)
+            .neq('user_id', profile.id);
+          recipientIds = Array.from(
+            new Set((memberRows || []).map((row: any) => String(row.user_id || '')).filter(Boolean)),
+          ) as string[];
+        }
         const localMentionTargets = members
           .map((member) => ({
             id: String(member.profile?.id || '').trim(),
@@ -819,6 +982,13 @@ export function ChatPage() {
     } catch {
       // XP is best-effort.
     }
+
+    queueRuntimeEvent('channel_message_sent', {
+      channel_id: channelId,
+      has_files: filesToSend.length > 0,
+      mention_count: Array.from(resolveMentionTargetIds(content, mentionTargets, true)).length,
+      risk_severity: shieldAssessment.severity,
+    }, { userId: profile.id, sampleRate: 0.35 });
 
     setSending(false);
     inputRef.current?.focus();

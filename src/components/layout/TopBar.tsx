@@ -8,7 +8,7 @@ import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { directCallSession, useDirectCallSession } from '../../lib/directCallSession';
+import { hangupDirectCall, useDirectCallShellState } from '../../lib/directCallShell';
 import type { Notification } from '../../lib/types';
 import { formatRelativeTime } from '../../lib/utils';
 import { playNotificationSound, primeNotificationAudio, startIncomingCallRing, stopIncomingCallRing, type NotificationSoundKind } from '../../lib/notificationSound';
@@ -102,7 +102,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const callSession = useDirectCallSession();
+  const callSession = useDirectCallShellState();
   const useMainProcessDesktopNotifications = typeof window !== 'undefined' && Boolean(window.desktopBridge?.realtimeStart);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
@@ -535,7 +535,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       navigate(`/app/dm/${targetConversationId}`, { replace: true });
     }
     window.setTimeout(() => {
-      void directCallSession.hangup({ signalEnded: canEndForEveryone });
+      void hangupDirectCall({ signalEnded: canEndForEveryone });
     }, 0);
   }
 

@@ -40,6 +40,8 @@ import {
   splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
+import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
+import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import type { DirectConversation, DirectMessage, DirectMessageAttachment, Profile } from '../lib/types';
 import { formatFileSize, formatRelativeTime } from '../lib/utils';
 
@@ -72,6 +74,60 @@ const DM_LIST_PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, 
 const MAX_BOOTSTRAP_DM_CONVERSATIONS = 80;
 const MAX_ACTIVE_CALL_SYNC_CONVERSATIONS = 40;
 
+interface LightweightDirectMessageAuthor {
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  status?: string | null;
+}
+
+function buildDirectMessageAuthorMap(conversation: DirectConversation | null, currentProfile: Profile | null) {
+  const map = new Map<string, LightweightDirectMessageAuthor>();
+  for (const member of conversation?.members || []) {
+    const id = String(member?.user_id || '').trim();
+    if (!id) continue;
+    map.set(id, {
+      id,
+      username: member?.profile?.username || null,
+      display_name: member?.profile?.display_name || null,
+      avatar_url: member?.profile?.avatar_url || null,
+      status: member?.profile?.status || null,
+    });
+  }
+  const currentId = String(currentProfile?.id || '').trim();
+  if (currentId) {
+    map.set(currentId, {
+      id: currentId,
+      username: currentProfile?.username || null,
+      display_name: currentProfile?.display_name || null,
+      avatar_url: currentProfile?.avatar_url || null,
+      status: currentProfile?.status || null,
+    });
+  }
+  return map;
+}
+
+function buildRealtimeDirectMessage(row: any, authorMap: Map<string, LightweightDirectMessageAuthor>): DirectMessage {
+  const authorId = String(row?.author_id || '').trim();
+  return {
+    id: String(row?.id || ''),
+    conversation_id: String(row?.conversation_id || ''),
+    author_id: authorId,
+    content: String(row?.content || ''),
+    is_edited: Boolean(row?.is_edited),
+    created_at: String(row?.created_at || new Date().toISOString()),
+    updated_at: String(row?.updated_at || row?.created_at || new Date().toISOString()),
+    author: (authorMap.get(authorId) || {
+      id: authorId,
+      username: 'unknown',
+      display_name: 'Unknown',
+      avatar_url: null,
+    }) as any,
+    attachments: [],
+  };
+}
+
 function renderDirectMessageContent(content: string) {
   return splitMentionText(content).map((segment, index) => (
     segment.isMention ? (
@@ -94,7 +150,7 @@ function isUuid(value: unknown): boolean {
 export function DirectMessagePage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { profile } = useAuth();
-  const { capabilities } = useGrowthCapabilities();
+  const { capabilities, contract } = useGrowthCapabilities();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
   const maxUploadBytes = entitlements.uploadBytesCap;
@@ -210,6 +266,10 @@ export function DirectMessagePage() {
 
     return Array.from(deduped.values());
   }, [activeConversation?.members, profile?.id]);
+  const dmAuthorMap = useMemo(
+    () => buildDirectMessageAuthorMap(activeConversation, profile || null),
+    [activeConversation, profile],
+  );
   const activeMentionQuery = useMemo(
     () => getActiveMentionQuery(input, composerSelectionStart),
     [composerSelectionStart, input],
@@ -241,10 +301,11 @@ export function DirectMessagePage() {
       const next = [...prev];
       const existingIndex = next.findIndex((entry) => entry.id === message.id);
       if (existingIndex >= 0) {
+        const incomingAttachments = Array.isArray(message.attachments) ? message.attachments : [];
         next[existingIndex] = {
           ...next[existingIndex],
           ...message,
-          attachments: message.attachments || next[existingIndex].attachments || [],
+          attachments: incomingAttachments.length > 0 ? incomingAttachments : (next[existingIndex].attachments || []),
         };
       } else {
         next.push(message);
@@ -739,15 +800,20 @@ export function DirectMessagePage() {
         schema: 'public',
         table: 'direct_messages',
         filter: `conversation_id=eq.${conversationId}`,
-      }, async (payload) => {
+      }, (payload) => {
         const shouldStickToBottom = isNearBottom();
-        const hydrated = await fetchHydratedDirectMessage(String(payload.new.id));
-        if (hydrated) {
-          upsertDirectMessage(hydrated);
-          if (shouldStickToBottom) {
-            scrollToBottom('auto');
-          }
+        upsertDirectMessage(buildRealtimeDirectMessage(payload.new, dmAuthorMap));
+        if (shouldStickToBottom) {
+          scrollToBottom('auto');
         }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'direct_messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, (payload) => {
+        upsertDirectMessage(buildRealtimeDirectMessage(payload.new, dmAuthorMap));
       })
       .on('postgres_changes', {
         event: 'INSERT',
@@ -768,9 +834,17 @@ export function DirectMessagePage() {
           return next;
         });
       })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'direct_messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, (payload) => {
+        setMessages((prev) => prev.filter((message) => message.id !== String(payload.old.id)));
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [conversationId, isNearBottom, scrollToBottom, upsertDirectMessage]);
+  }, [conversationId, dmAuthorMap, isNearBottom, scrollToBottom, upsertDirectMessage]);
 
   useEffect(() => {
     if (!profile) return;
@@ -1704,6 +1778,30 @@ export function DirectMessagePage() {
     const hasFiles = filesToSend.length > 0;
     if (!hasText && !hasFiles) return;
 
+    const shieldAssessment = analyzeMessageShield({
+      text: content,
+      fileNames: filesToSend.map((file) => file.name),
+      trustedDomains: ['nyptidindustries.com', 'ncore.nyptidindustries.com', 'stripe.com', 'supabase.co'],
+    });
+    if (shieldAssessment.action === 'block') {
+      const detail = describeShieldAssessment(shieldAssessment);
+      setErrorMessage(detail);
+      queueRuntimeEvent('shield_message_blocked', {
+        scope: 'dm',
+        severity: shieldAssessment.severity,
+        findings: shieldAssessment.findings.map((finding) => finding.code),
+      }, { userId: profile.id, sampleRate: 1 });
+      return;
+    }
+    if (shieldAssessment.action === 'warn') {
+      setErrorMessage(describeShieldAssessment(shieldAssessment));
+      queueRuntimeEvent('shield_message_warned', {
+        scope: 'dm',
+        severity: shieldAssessment.severity,
+        findings: shieldAssessment.findings.map((finding) => finding.code),
+      }, { userId: profile.id, sampleRate: 1 });
+    }
+
     setInput('');
     setPendingFiles([]);
     setSending(true);
@@ -1750,19 +1848,24 @@ export function DirectMessagePage() {
 
     if (filesToSend.length > 0) {
       await uploadPendingFilesForMessage(String(insertedMessage.id), filesToSend);
-      await loadMessages(conversationId);
     }
 
     try {
-      const { data: memberRows } = await supabase
-        .from('direct_conversation_members')
-        .select('user_id')
-        .eq('conversation_id', conversationId)
-        .neq('user_id', profile.id);
-
-      const recipientIds = Array.from(
-        new Set((memberRows || []).map((row: any) => String(row.user_id)).filter(Boolean)),
-      ) as string[];
+      let recipientIds = Array.from(new Set(
+        (activeConversation?.members || [])
+          .map((member: any) => String(member?.user_id || '').trim())
+          .filter((userId) => userId && userId !== profile.id),
+      ));
+      if (recipientIds.length === 0) {
+        const { data: memberRows } = await supabase
+          .from('direct_conversation_members')
+          .select('user_id')
+          .eq('conversation_id', conversationId)
+          .neq('user_id', profile.id);
+        recipientIds = Array.from(
+          new Set((memberRows || []).map((row: any) => String(row.user_id)).filter(Boolean)),
+        ) as string[];
+      }
       if (recipientIds.length > 0) {
         const senderName = profile.display_name || profile.username || 'Someone';
         const messagePreview = content || (filesToSend.length > 0 ? `Sent ${filesToSend.length} attachment${filesToSend.length > 1 ? 's' : ''}` : 'Sent a message');
@@ -1773,16 +1876,12 @@ export function DirectMessagePage() {
         }
 
         if (content.includes('@') || content.includes('<@')) {
-          const { data: recipientProfiles } = await supabase
-            .from('profiles')
-            .select('id, username, display_name')
-            .in('id', recipientIds);
           const resolvedMentionTargets = resolveMentionTargetIds(
             content,
-            ((recipientProfiles || []) as any[]).map((row) => ({
-              id: String(row?.id || '').trim(),
-              username: row?.username || null,
-              display_name: row?.display_name || null,
+            dmMentionTargets.map((target) => ({
+              id: target.id,
+              username: target.username || null,
+              display_name: target.display_name || null,
             })),
             false,
           );
@@ -1825,6 +1924,13 @@ export function DirectMessagePage() {
     } catch {
       // XP is best-effort; message send should still succeed.
     }
+
+    queueRuntimeEvent('direct_message_sent', {
+      conversation_id: conversationId,
+      has_files: filesToSend.length > 0,
+      mention_count: Array.from(resolveMentionTargetIds(content, dmMentionTargets, false)).length,
+      risk_severity: shieldAssessment.severity,
+    }, { userId: profile.id, sampleRate: 0.35 });
 
     setSending(false);
     if (dmPresenceChannelRef.current) {
@@ -1971,7 +2077,7 @@ export function DirectMessagePage() {
       }, { userId: profile.id });
 
       if (recipientCount > 2 && !capabilities.canStartHighVolumeCalls) {
-        const reason = getCapabilityLockReason('can_start_high_volume_calls');
+        const reason = getCapabilityLockReason('can_start_high_volume_calls', contract.unlock_source);
         setErrorMessage(reason);
         void trackGrowthEvent('capability_gate_blocked', {
           gate: 'can_start_high_volume_calls',
