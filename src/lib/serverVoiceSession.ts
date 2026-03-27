@@ -5,6 +5,7 @@ import type {
   ILocalVideoTrack,
   IRemoteAudioTrack,
   IRemoteVideoTrack,
+  ScreenVideoTrackInitConfig,
   UID,
 } from 'agora-rtc-sdk-ng';
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
@@ -35,6 +36,8 @@ export interface ScreenSourceOption {
   name: string;
   type: 'screen' | 'window';
 }
+
+type ScreenShareQuality = '720p30' | '1080p120' | '4k60';
 
 export interface ServerVoiceSessionState {
   phase: 'idle' | 'connecting' | 'active';
@@ -122,6 +125,65 @@ function formatRtcError(error: unknown): string {
     .join(' | ');
 }
 
+function screenShareQualityRank(quality: ScreenShareQuality): number {
+  if (quality === '4k60') return 3;
+  if (quality === '1080p120') return 2;
+  return 1;
+}
+
+function buildScreenConfig(quality: ScreenShareQuality): ScreenVideoTrackInitConfig {
+  if (quality === '4k60') {
+    return {
+      encoderConfig: {
+        width: 3840,
+        height: 2160,
+        frameRate: 60,
+      },
+      optimizationMode: 'detail',
+    };
+  }
+  if (quality === '1080p120') {
+    return {
+      encoderConfig: {
+        width: 1920,
+        height: 1080,
+        frameRate: 120,
+      },
+      optimizationMode: 'detail',
+    };
+  }
+  return {
+    encoderConfig: {
+      width: 1280,
+      height: 720,
+      frameRate: 30,
+    },
+    optimizationMode: 'detail',
+  };
+}
+
+function buildDisplayMediaVideoConstraints(quality: ScreenShareQuality): MediaTrackConstraints {
+  if (quality === '4k60') {
+    return {
+      width: { ideal: 3840, max: 3840 },
+      height: { ideal: 2160, max: 2160 },
+      frameRate: { ideal: 60, max: 60 },
+    };
+  }
+  if (quality === '1080p120') {
+    return {
+      width: { ideal: 1920, max: 1920 },
+      height: { ideal: 1080, max: 1080 },
+      frameRate: { ideal: 120, max: 120 },
+    };
+  }
+  return {
+    width: { ideal: 1280, max: 1280 },
+    height: { ideal: 720, max: 720 },
+    frameRate: { ideal: 30, max: 30 },
+  };
+}
+
 class ServerVoiceSessionStore {
   private listeners = new Set<Listener>();
   private state: ServerVoiceSessionState = { ...initialState };
@@ -149,7 +211,10 @@ class ServerVoiceSessionStore {
   private localVideoTrack: ILocalVideoTrack | null = null;
   private localAudioTrack: ILocalAudioTrack | null = null;
   private audioDenoiserBinding: AIDenoiserBinding | null = null;
+  private screenClient: IAgoraRTCClient | null = null;
+  private screenUid: string | null = null;
   private screenTrack: ILocalVideoTrack | null = null;
+  private screenAudioTrack: ILocalAudioTrack | null = null;
   private remoteVideoTracks = new Map<string, IRemoteVideoTrack>();
   private remoteAudioTracks = new Map<string, IRemoteAudioTrack>();
   private remoteVideoContainers = new Map<string, HTMLDivElement | null>();
@@ -402,6 +467,155 @@ class ServerVoiceSessionStore {
       await binding.teardown();
     } catch {
       // noop
+    }
+  }
+
+  private bindScreenTrackEnded(track: ILocalVideoTrack | null) {
+    const trackAny = track as any;
+    if (!trackAny || typeof trackAny.on !== 'function') return;
+    trackAny.on('track-ended', () => {
+      if (!this.state.isScreenSharing) return;
+      void this.stopScreenShare();
+    });
+  }
+
+  private getPreferredScreenShareQuality(): ScreenShareQuality {
+    const quality = loadCallSettings().screenShareQuality;
+    if (quality === '4k60' || quality === '1080p120' || quality === '720p30') {
+      return quality;
+    }
+    return '720p30';
+  }
+
+  private getScreenShareAttemptOrder(requested: ScreenShareQuality): ScreenShareQuality[] {
+    if (requested === '4k60') return ['4k60', '1080p120', '720p30'];
+    if (requested === '1080p120') return ['1080p120', '720p30'];
+    return ['720p30'];
+  }
+
+  private async createAgoraScreenTracks(
+    quality: ScreenShareQuality,
+    audioMode: 'enable' | 'disable',
+  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
+    const AgoraRTC = await getAgoraModule();
+    const created = await AgoraRTC.createScreenVideoTrack(buildScreenConfig(quality), audioMode);
+    if (Array.isArray(created)) {
+      return {
+        videoTrack: created[0],
+        audioTrack: created[1] || null,
+      };
+    }
+    return {
+      videoTrack: created,
+      audioTrack: null,
+    };
+  }
+
+  private async createNativeScreenTracks(
+    quality: ScreenShareQuality,
+    withAudio: boolean,
+  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      throw new Error('getDisplayMedia is not available in this runtime');
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: buildDisplayMediaVideoConstraints(quality),
+        audio: withAudio,
+      });
+    } catch (primaryError) {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: withAudio,
+      }).catch(() => {
+        throw primaryError;
+      });
+    }
+
+    const mediaVideoTrack = stream.getVideoTracks()[0];
+    if (!mediaVideoTrack) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error('Display capture returned no video track');
+    }
+
+    const AgoraRTC = await getAgoraModule();
+    const videoTrack = AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: mediaVideoTrack });
+    const mediaAudioTrack = stream.getAudioTracks()[0];
+    const audioTrack = mediaAudioTrack ? AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: mediaAudioTrack }) : null;
+
+    return { videoTrack, audioTrack };
+  }
+
+  private disposeScreenTracks() {
+    if (this.screenTrack) {
+      try {
+        this.screenTrack.stop();
+        this.screenTrack.close();
+      } catch {
+        // noop
+      }
+      this.screenTrack = null;
+    }
+    if (this.screenAudioTrack) {
+      try {
+        this.screenAudioTrack.stop();
+        this.screenAudioTrack.close();
+      } catch {
+        // noop
+      }
+      this.screenAudioTrack = null;
+    }
+  }
+
+  private async stopScreenShare(syncDb = true) {
+    if (!this.state.isScreenSharing && !this.screenClient && !this.screenTrack && !this.screenAudioTrack) {
+      return;
+    }
+
+    const activeScreenClient = this.screenClient;
+    this.screenClient = null;
+    this.screenUid = null;
+
+    const toUnpublish: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+    if (this.screenTrack) toUnpublish.push(this.screenTrack);
+    if (this.screenAudioTrack) toUnpublish.push(this.screenAudioTrack);
+
+    if (activeScreenClient && toUnpublish.length) {
+      try {
+        await activeScreenClient.unpublish(toUnpublish);
+      } catch {
+        // noop
+      }
+    }
+
+    if (activeScreenClient) {
+      try {
+        activeScreenClient.removeAllListeners();
+      } catch {
+        // noop
+      }
+      try {
+        await activeScreenClient.leave();
+      } catch (error) {
+        console.warn('Failed leaving screen-share client:', error);
+      }
+    }
+
+    this.disposeScreenTracks();
+    this.setState({
+      isScreenSharing: false,
+      connectionError: '',
+    });
+    this.attachActiveLocalVideoTrack();
+
+    if (syncDb && this.state.channelId && this.localProfileId) {
+      await supabase
+        .from('voice_sessions')
+        .update({ is_screen_sharing: false })
+        .eq('channel_id', this.state.channelId)
+        .eq('user_id', this.localProfileId);
     }
   }
 
@@ -741,6 +955,7 @@ class ServerVoiceSessionStore {
     const activeRemoteVideoTracks = Array.from(this.remoteVideoTracks.values());
 
     this.stopStatsPolling();
+    await this.stopScreenShare(false);
 
     this.client = null;
     this.dbSessionsChannel = null;
@@ -773,14 +988,6 @@ class ServerVoiceSessionStore {
       // noop
     }
     this.localAudioTrack = null;
-
-    try {
-      this.screenTrack?.stop();
-      this.screenTrack?.close();
-    } catch {
-      // noop
-    }
-    this.screenTrack = null;
 
     activeRemoteVideoTracks.forEach((track) => {
       try {
@@ -858,6 +1065,7 @@ class ServerVoiceSessionStore {
       this.localVideoTrack.close();
       this.localVideoTrack = null;
       this.setState({ isCameraOn: nextCameraOn });
+      this.attachActiveLocalVideoTrack();
     } else {
       const AgoraRTC = await getAgoraModule();
       const videoTrack = await AgoraRTC.createCameraVideoTrack();
@@ -875,72 +1083,100 @@ class ServerVoiceSessionStore {
   }
 
   async toggleScreenShare() {
-    if (!this.client || !this.state.channelId || !this.localProfileId) return;
-    if (this.state.isScreenSharing && this.screenTrack) {
-      await this.client.unpublish(this.screenTrack);
-      this.screenTrack.stop();
-      this.screenTrack.close();
-      this.screenTrack = null;
-      this.setState({ isScreenSharing: false });
-      this.attachActiveLocalVideoTrack();
-      await supabase
-        .from('voice_sessions')
-        .update({ is_screen_sharing: false })
-        .eq('channel_id', this.state.channelId)
-        .eq('user_id', this.localProfileId);
+    if (!this.client || !this.state.channelId || !this.localProfileId || !this.localUid || !AGORA_APP_ID) return;
+    if (this.state.isScreenSharing) {
+      await this.stopScreenShare();
       return;
     }
 
+    const requestedQuality = this.getPreferredScreenShareQuality();
+    const qualityAttemptOrder = this.getScreenShareAttemptOrder(requestedQuality);
+    const attemptErrors: string[] = [];
+
     try {
-      const AgoraRTC = await getAgoraModule();
       this.setState({ connectionError: '' });
       if (this.state.selectedScreenSourceId && window.desktopBridge?.setPreferredDesktopCaptureSource) {
         await window.desktopBridge.setPreferredDesktopCaptureSource(this.state.selectedScreenSourceId);
       }
 
-      let track: ILocalVideoTrack | null = null;
-      try {
-        track = await AgoraRTC.createScreenVideoTrack({}, 'disable') as ILocalVideoTrack;
-      } catch (agoraError) {
-        if (!navigator.mediaDevices?.getDisplayMedia) {
-          throw agoraError;
+      let activeQuality: ScreenShareQuality | null = null;
+      for (const quality of qualityAttemptOrder) {
+        const attemptFns: Array<{
+          label: string;
+          run: () => Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }>;
+        }> = [
+          {
+            label: `${quality}:agora:audio-on`,
+            run: () => this.createAgoraScreenTracks(quality, 'enable'),
+          },
+          {
+            label: `${quality}:agora:audio-off`,
+            run: () => this.createAgoraScreenTracks(quality, 'disable'),
+          },
+          {
+            label: `${quality}:native:audio-on`,
+            run: () => this.createNativeScreenTracks(quality, true),
+          },
+          {
+            label: `${quality}:native:audio-off`,
+            run: () => this.createNativeScreenTracks(quality, false),
+          },
+        ];
+
+        for (const attempt of attemptFns) {
+          try {
+            const created = await attempt.run();
+            this.screenTrack = created.videoTrack;
+            this.screenAudioTrack = created.audioTrack;
+            this.bindScreenTrackEnded(this.screenTrack);
+
+            const AgoraRTC = await getAgoraModule();
+            this.screenClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+            await this.configureRtcOptimizations(this.screenClient);
+            this.screenUid = `${this.localUid}::screen`;
+            const token = await resolveAgoraJoinToken(this.state.channelId, this.screenUid);
+            await this.screenClient.join(AGORA_APP_ID, this.state.channelId, token, this.screenUid);
+
+            const publishTracks: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+            if (this.screenTrack) publishTracks.push(this.screenTrack);
+            if (this.screenAudioTrack) publishTracks.push(this.screenAudioTrack);
+            if (publishTracks.length) {
+              await this.screenClient.publish(publishTracks);
+            }
+
+            activeQuality = quality;
+            break;
+          } catch (error) {
+            attemptErrors.push(`${attempt.label}: ${formatRtcError(error)}`);
+            if (this.screenClient) {
+              try {
+                this.screenClient.removeAllListeners();
+              } catch {
+                // noop
+              }
+              try {
+                await this.screenClient.leave();
+              } catch {
+                // noop
+              }
+              this.screenClient = null;
+            }
+            this.screenUid = null;
+            this.disposeScreenTracks();
+          }
         }
-        let displayStream: MediaStream;
-        try {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-              frameRate: { ideal: 60, max: 120 },
-            },
-            audio: false,
-          });
-        } catch {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-        }
-        const mediaVideoTrack = displayStream.getVideoTracks()[0];
-        if (!mediaVideoTrack) {
-          displayStream.getTracks().forEach((entry) => entry.stop());
-          throw agoraError;
-        }
-        track = AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: mediaVideoTrack });
+
+        if (activeQuality) break;
       }
 
-      if (!track) {
-        throw new Error('No screen track available');
+      if (!activeQuality || !this.screenTrack || !this.screenClient) {
+        throw new Error(attemptErrors.join(' || ') || 'No supported screen capture method succeeded.');
       }
 
-      const trackAny = track as any;
-      if (typeof trackAny.on === 'function') {
-        trackAny.on('track-ended', () => {
-          if (!this.state.isScreenSharing) return;
-          void this.toggleScreenShare();
-        });
-      }
-
-      this.screenTrack = track;
-      await this.client.publish(track);
-      this.setState({ isScreenSharing: true });
+      this.setState({
+        isScreenSharing: true,
+        connectionError: '',
+      });
       this.attachActiveLocalVideoTrack();
       await supabase
         .from('voice_sessions')
@@ -949,6 +1185,11 @@ class ServerVoiceSessionStore {
         .eq('user_id', this.localProfileId);
     } catch (error) {
       console.error('Screen share error:', error);
+      queueRuntimeEvent('server_voice_screen_share_failed', {
+        channel_id: this.state.channelId,
+        error: formatRtcError(error),
+      }, { userId: this.localProfileId, sampleRate: 1 });
+      await this.stopScreenShare(false);
       this.setState({ connectionError: `Could not start screen sharing: ${formatRtcError(error)}` });
     }
   }

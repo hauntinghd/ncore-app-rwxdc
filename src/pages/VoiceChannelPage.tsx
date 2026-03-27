@@ -56,7 +56,9 @@ function RemoteParticipantCard({
   isSpeaking: boolean;
 }) {
   const profile = (session as any)?.profile;
-  const name = profile?.display_name || profile?.username || `User ${uid.slice(0, 6)}`;
+  const isScreenShareStream = uid.includes('::screen');
+  const baseName = profile?.display_name || profile?.username || `User ${uid.slice(0, 6)}`;
+  const name = isScreenShareStream ? `${baseName} (Screen)` : baseName;
 
   return (
     <div className={`voice-participant-card ${isSpeaking ? 'speaking' : ''}`}>
@@ -74,6 +76,11 @@ function RemoteParticipantCard({
           {session?.is_muted && (
             <div className="flex items-center gap-1 text-xs text-red-400">
               <MicOff size={12} /> Muted
+            </div>
+          )}
+          {isScreenShareStream && (
+            <div className="flex items-center gap-1 text-xs text-blue-300">
+              <Monitor size={12} /> Screen share
             </div>
           )}
         </div>
@@ -135,6 +142,13 @@ export function VoiceChannelPage() {
   const localName = profile?.display_name || profile?.username || 'You';
   const remoteParticipantUids = session.remoteParticipantUids.filter((uid) => uid !== localSpeakerUid);
 
+  function resolveVoiceSessionForUid(uid: string): VoiceSession | undefined {
+    const normalizedUid = String(uid || '').trim();
+    if (!normalizedUid) return undefined;
+    const baseUid = normalizedUid.replace(/::screen$/, '');
+    return dbSessionByUserId.get(normalizedUid) || dbSessionByUserId.get(baseUid);
+  }
+
   async function handleLeave() {
     await serverVoiceSession.leave();
     navigate(`/app/community/${communityId}`);
@@ -191,11 +205,13 @@ export function VoiceChannelPage() {
                 </div>
               ) : (
                 <div className="p-4 grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-                  {session.isCameraOn && profile && (
+                  {(session.isCameraOn || session.isScreenSharing) && profile && (
                     <div className={`voice-participant-card ${isLocalSpeaking ? 'speaking' : ''}`}>
                       <LocalVideoMount />
                       <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1">
-                        <span className="text-xs text-white font-medium">{localName} (You)</span>
+                        <span className="text-xs text-white font-medium">
+                          {session.isScreenSharing ? `${localName} (You • Screen)` : `${localName} (You)`}
+                        </span>
                         {session.isMuted && <MicOff size={10} className="text-red-400" />}
                       </div>
                     </div>
@@ -205,7 +221,7 @@ export function VoiceChannelPage() {
                     <RemoteParticipantCard
                       key={uid}
                       uid={uid}
-                      session={dbSessionByUserId.get(uid)}
+                      session={resolveVoiceSessionForUid(uid)}
                       hasVideo={session.remoteVideoUids.includes(uid)}
                       isSpeaking={session.activeSpeakerUids.includes(uid)}
                     />

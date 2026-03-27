@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.86",
+            "version": "11.7.87",
             "date": "2026-03-27",
             "badge": "Current Build",
+            "improvements": [
+                "Server voice screen sharing now uses a separate share client like the direct-call stack, with capture fallback paths for Agora and native display capture instead of a single fragile publish path.",
+                "Screen-share startup now negotiates quality more defensively, stepping down through supported capture modes so NCore can keep sharing alive instead of hard-failing on one unsupported screen source configuration.",
+                "Voice channel video tiles now show active screen-share streams clearly, including a labeled local self-preview when you are sharing without camera enabled."
+            ],
+            "bugFixes": [
+                "Fixed server voice screen sharing freezing or collapsing when the original track ended by adding deterministic stop handling and full secondary-client teardown.",
+                "Fixed voice channel leave flow so active screen-share tracks and screen-audio tracks are unpublishing and closing cleanly instead of lingering after disconnect.",
+                "Fixed screen-share participant rendering so shared streams resolve against the correct base profile instead of showing ambiguous or missing remote identity state."
+            ]
+        },
+        {
+            "version": "11.7.86",
+            "date": "2026-03-27",
+            "badge": "Previous",
             "improvements": [
                 "Server headers now ship a Discord-style control surface with invite access on the plus icon, richer server dropdown actions, and owner/admin quick actions for channel and category creation.",
                 "Servers and DMs now keep an always-visible bottom user dock with live profile access, mute and deafen controls, voice entry shortcuts, and a richer profile popover.",
