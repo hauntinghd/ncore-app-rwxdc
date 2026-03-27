@@ -1,9 +1,23 @@
 {
     "releases": [
         {
-            "version": "11.7.84",
+            "version": "11.7.85",
             "date": "2026-03-27",
             "badge": "Current Build",
+            "improvements": [
+                "Added renderer startup diagnostics in Electron so future renderer bootstrap failures surface with explicit load/process logs instead of a silent dark window.",
+                "Restored the root Vite app entry template so web and desktop builds continue to produce clean startup assets instead of inheriting stale built-file references."
+            ],
+            "bugFixes": [
+                "Fixed the 11.7.84 Electron blank-window regression caused by route telemetry calling a non-existent tracker.start() method during initial renderer bootstrap.",
+                "Fixed the build pipeline corruption where the source index.html had been overwritten with compiled asset tags, which could break subsequent NCore builds and packaging runs.",
+                "Fixed route transition telemetry sampling so it now records safely without crashing the app on first navigation."
+            ]
+        },
+        {
+            "version": "11.7.84",
+            "date": "2026-03-27",
+            "badge": "Previous",
             "improvements": [
                 "Added a server-side phishing and account-risk classifier that scores suspicious channel messages, direct messages, and shield/auth security events inside Supabase.",
                 "Wired security risk cases into Admin Security Ops with refresh, review, dismissal, and containment-release controls using the existing NCore capability gate system.",

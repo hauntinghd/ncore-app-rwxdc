@@ -127,7 +127,6 @@ function RealtimeBridge() {
   const navigate = useNavigate();
   const location = useLocation();
   const shouldProbeRunPod = import.meta.env.DEV || String(import.meta.env.VITE_ENABLE_RUNPOD_PROBE || '').trim() === '1';
-  const routeTrackerRef = useRef(createDurationTracker('route_transition_duration_ms', { sampleRate: 0.35 }));
   const previousRouteRef = useRef<string>('');
 
   useEffect(() => {
@@ -152,16 +151,19 @@ function RealtimeBridge() {
   useEffect(() => {
     const routeKey = `${location.pathname}${location.search}`;
     const previousRoute = previousRouteRef.current;
-    const end = routeTrackerRef.current.start({
+    const end = createDurationTracker('route_transition_duration_ms', {
       route: routeKey,
       from_route: previousRoute || null,
+    }, {
+      userId: profile?.id,
+      sampleRate: 0.35,
     });
     const rafId = window.requestAnimationFrame(() => {
       end({ route: routeKey });
     });
     previousRouteRef.current = routeKey;
     return () => window.cancelAnimationFrame(rafId);
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, profile?.id]);
 
   useEffect(() => {
     if (!shouldProbeRunPod) return;

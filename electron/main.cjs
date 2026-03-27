@@ -114,6 +114,27 @@ function createWindow() {
     mainWindow = null;
   });
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.info('[renderer] did-finish-load');
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[renderer] did-fail-load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[renderer] render-process-gone', details);
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (!message) return;
+    console.log('[renderer:console]', { level, message, line, sourceId });
+  });
+
   const htmlPath = path.join(__dirname, '..', 'dist', 'index.html');
   mainWindow.loadFile(htmlPath);
   return mainWindow;

@@ -1,8 +1,8 @@
-version: 11.7.84
+version: 11.7.85
 files:
-  - url: NCore Setup 11.7.84.exe
-    sha512: +Re6tAdGFYSbMMrgS9RMPK9PwW0+um/53Ci3h/VqEXcbgEQwMLPfuKTdhE2Sm2JkrJMefQ3HoO1vW6pstSioLg==
-    size: 92363503
-path: NCore Setup 11.7.84.exe
-sha512: +Re6tAdGFYSbMMrgS9RMPK9PwW0+um/53Ci3h/VqEXcbgEQwMLPfuKTdhE2Sm2JkrJMefQ3HoO1vW6pstSioLg==
-releaseDate: '2026-03-27T09:37:14.099Z'
+  - url: NCore Setup 11.7.85.exe
+    sha512: +1xivqtyNfdUX1FZfceMw5R1PFep3QIAnfnCWbQprKjDoKCJEww4NSM3oPydMh/81ypxjvriNvbtpeaZl15/GQ==
+    size: 92363669
+path: NCore Setup 11.7.85.exe
+sha512: +1xivqtyNfdUX1FZfceMw5R1PFep3QIAnfnCWbQprKjDoKCJEww4NSM3oPydMh/81ypxjvriNvbtpeaZl15/GQ==
+releaseDate: '2026-03-27T10:18:48.218Z'
