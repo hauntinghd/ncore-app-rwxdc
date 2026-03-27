@@ -56,6 +56,11 @@ export interface ServerVoiceSessionState {
   screenSources: ScreenSourceOption[];
   selectedScreenSourceId: string;
   loadingScreenSources: boolean;
+  participantCount: number;
+  averagePingMs: number | null;
+  lastPingMs: number | null;
+  outboundPacketLossPct: number | null;
+  privacyCode: string[];
 }
 
 export interface ServerVoiceSessionShellState {
@@ -66,6 +71,13 @@ export interface ServerVoiceSessionShellState {
   isMuted: boolean;
   isDeafened: boolean;
   isCameraOn: boolean;
+  isScreenSharing: boolean;
+  noiseSuppressionEnabled: boolean;
+  participantCount: number;
+  averagePingMs: number | null;
+  lastPingMs: number | null;
+  outboundPacketLossPct: number | null;
+  privacyCode: string[];
 }
 
 interface JoinOptions {
@@ -96,6 +108,11 @@ const initialState: ServerVoiceSessionState = {
   screenSources: [],
   selectedScreenSourceId: '',
   loadingScreenSources: false,
+  participantCount: 0,
+  averagePingMs: null,
+  lastPingMs: null,
+  outboundPacketLossPct: null,
+  privacyCode: [],
 };
 
 function formatRtcError(error: unknown): string {
@@ -116,6 +133,13 @@ class ServerVoiceSessionStore {
     isMuted: initialState.isMuted,
     isDeafened: initialState.isDeafened,
     isCameraOn: initialState.isCameraOn,
+    isScreenSharing: initialState.isScreenSharing,
+    noiseSuppressionEnabled: initialState.noiseSuppressionEnabled,
+    participantCount: initialState.participantCount,
+    averagePingMs: initialState.averagePingMs,
+    lastPingMs: initialState.lastPingMs,
+    outboundPacketLossPct: initialState.outboundPacketLossPct,
+    privacyCode: initialState.privacyCode,
   };
   private lifecycleToken = 0;
 
@@ -132,6 +156,8 @@ class ServerVoiceSessionStore {
   private localVideoContainer: HTMLDivElement | null = null;
   private dbSessionsChannel: any = null;
   private activeSpeakerKey = '';
+  private statsInterval: ReturnType<typeof setInterval> | null = null;
+  private latencySamples: number[] = [];
 
   private async configureRtcOptimizations(client: IAgoraRTCClient) {
     try {
@@ -163,6 +189,13 @@ class ServerVoiceSessionStore {
       isMuted: state.isMuted,
       isDeafened: state.isDeafened,
       isCameraOn: state.isCameraOn,
+      isScreenSharing: state.isScreenSharing,
+      noiseSuppressionEnabled: state.noiseSuppressionEnabled,
+      participantCount: state.participantCount,
+      averagePingMs: state.averagePingMs,
+      lastPingMs: state.lastPingMs,
+      outboundPacketLossPct: state.outboundPacketLossPct,
+      privacyCode: state.privacyCode,
     };
   }
 
@@ -239,8 +272,11 @@ class ServerVoiceSessionStore {
       .select('*, profile:profiles(*)')
       .eq('channel_id', channelId);
     if (this.state.channelId !== channelId) return;
+    const nextSessions = (data || []) as VoiceSession[];
     this.setState({
-      dbSessions: (data || []) as VoiceSession[],
+      dbSessions: nextSessions,
+      participantCount: nextSessions.length,
+      privacyCode: this.buildPrivacyCode(channelId, nextSessions),
     });
   }
 
@@ -273,6 +309,77 @@ class ServerVoiceSessionStore {
         // ignore output volume failures
       }
     }));
+  }
+
+  private normalizePacketLoss(value: unknown): number | null {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return null;
+    const pct = numeric <= 1 ? numeric * 100 : numeric;
+    return Math.round(pct * 10) / 10;
+  }
+
+  private buildPrivacyCode(channelId: string, sessions: VoiceSession[]): string[] {
+    const seed = [
+      String(channelId || '').trim(),
+      ...sessions.map((session) => String(session.user_id || '').trim()).filter(Boolean).sort(),
+    ].join(':');
+    let hash = 0;
+    for (let index = 0; index < seed.length; index += 1) {
+      hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
+    }
+    const nextCodes: string[] = [];
+    let cursor = Math.abs(hash) + 104729;
+    while (nextCodes.length < 6) {
+      cursor = (cursor * 1103515245 + 12345) & 0x7fffffff;
+      nextCodes.push(String(cursor % 100000).padStart(5, '0'));
+    }
+    return nextCodes;
+  }
+
+  private stopStatsPolling() {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
+    this.latencySamples = [];
+  }
+
+  private updateRtcStats() {
+    const rtcStats = (this.client as any)?.getRTCStats?.();
+    if (!rtcStats) return;
+    const lastPingMs = Number(
+      rtcStats.RTT
+      ?? rtcStats.rtt
+      ?? rtcStats.Rtt
+      ?? rtcStats.roundTripTime
+      ?? rtcStats.NetworkTransportDelay
+      ?? 0,
+    );
+    if (Number.isFinite(lastPingMs) && lastPingMs > 0) {
+      this.latencySamples = [...this.latencySamples, Math.round(lastPingMs)].slice(-12);
+    }
+    const averagePingMs = this.latencySamples.length > 0
+      ? Math.round(this.latencySamples.reduce((sum, sample) => sum + sample, 0) / this.latencySamples.length)
+      : null;
+    this.setState({
+      lastPingMs: Number.isFinite(lastPingMs) && lastPingMs > 0 ? Math.round(lastPingMs) : null,
+      averagePingMs,
+      outboundPacketLossPct: this.normalizePacketLoss(
+        rtcStats.OutgoingPacketLossRate
+        ?? rtcStats.outgoingPacketLossRate
+        ?? rtcStats.SendPacketLossRate
+        ?? rtcStats.sendPacketLossRate
+        ?? null,
+      ),
+    });
+  }
+
+  private startStatsPolling() {
+    this.stopStatsPolling();
+    this.updateRtcStats();
+    this.statsInterval = setInterval(() => {
+      this.updateRtcStats();
+    }, 2500);
   }
 
   private attachActiveLocalVideoTrack() {
@@ -410,6 +517,7 @@ class ServerVoiceSessionStore {
 
       if (!AGORA_APP_ID) {
         if (joinToken !== this.lifecycleToken) return false;
+        this.stopStatsPolling();
         this.setState({
           phase: 'active',
           isConnected: true,
@@ -594,9 +702,11 @@ class ServerVoiceSessionStore {
         isConnecting: false,
         connectionError: '',
       });
+      this.startStatsPolling();
       return true;
     } catch (error) {
       console.error('Failed to join server voice channel:', error);
+      this.stopStatsPolling();
       await this.disposeAudioDenoiser();
       queueRuntimeEvent('server_voice_join_failed', {
         channel_id: channelId,
@@ -629,6 +739,8 @@ class ServerVoiceSessionStore {
     const activeClient = this.client;
     const activeDbSessionsChannel = this.dbSessionsChannel;
     const activeRemoteVideoTracks = Array.from(this.remoteVideoTracks.values());
+
+    this.stopStatsPolling();
 
     this.client = null;
     this.dbSessionsChannel = null;
@@ -903,6 +1015,13 @@ publishServerVoiceShellState({
   isMuted: initialState.isMuted,
   isDeafened: initialState.isDeafened,
   isCameraOn: initialState.isCameraOn,
+  isScreenSharing: initialState.isScreenSharing,
+  noiseSuppressionEnabled: initialState.noiseSuppressionEnabled,
+  participantCount: initialState.participantCount,
+  averagePingMs: initialState.averagePingMs,
+  lastPingMs: initialState.lastPingMs,
+  outboundPacketLossPct: initialState.outboundPacketLossPct,
+  privacyCode: initialState.privacyCode,
 });
 
 export function useServerVoiceSession(): ServerVoiceSessionState {

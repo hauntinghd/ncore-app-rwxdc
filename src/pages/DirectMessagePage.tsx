@@ -17,6 +17,7 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { SidebarUserDock } from '../components/layout/SidebarUserDock';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,6 +42,7 @@ import {
   type MentionSuggestion,
 } from '../lib/mentions';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
+import { runServerVoiceAction, useServerVoiceShellState } from '../lib/serverVoiceShell';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import type { DirectConversation, DirectMessage, DirectMessageAttachment, Profile } from '../lib/types';
 import { formatFileSize, formatRelativeTime } from '../lib/utils';
@@ -150,6 +152,7 @@ function isUuid(value: unknown): boolean {
 export function DirectMessagePage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { profile } = useAuth();
+  const voiceShell = useServerVoiceShellState();
   const { capabilities, contract } = useGrowthCapabilities();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
@@ -2838,7 +2841,7 @@ export function DirectMessagePage() {
   }
 
   return (
-    <AppShell showChannelSidebar={false} title="Direct Messages">
+    <AppShell showChannelSidebar={false} suppressPersistentVoiceBar title="Direct Messages">
       <div className="flex h-full min-h-0">
         <div className={`${isCompactLayout && conversationId ? 'hidden' : 'flex'} ${isCompactLayout ? 'w-full' : 'w-72'} border-r border-surface-800 flex-col bg-surface-900`}>
           <div className="p-3 border-b border-surface-800">
@@ -2916,6 +2919,23 @@ export function DirectMessagePage() {
               );
             })}
           </div>
+
+          {profile && (
+            <SidebarUserDock
+              profile={profile}
+              voice={voiceShell.phase === 'idle' ? null : voiceShell}
+              onOpenVoice={() => {
+                if (voiceShell.communityId && voiceShell.channelId) {
+                  navigate(`/app/community/${voiceShell.communityId}/voice/${voiceShell.channelId}`);
+                }
+              }}
+              onToggleMute={() => void runServerVoiceAction('toggleMute')}
+              onToggleDeafen={() => void runServerVoiceAction('toggleDeafen')}
+              onToggleScreenShare={() => void runServerVoiceAction('toggleScreenShare')}
+              onLeaveVoice={() => void runServerVoiceAction('leave')}
+              onOpenSettings={() => navigate('/app/settings')}
+            />
+          )}
         </div>
 
         <div className={`${isCompactLayout && !conversationId ? 'hidden' : 'flex'} flex-1 flex-col min-w-0`}>

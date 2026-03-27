@@ -10,9 +10,16 @@ export interface ServerVoiceShellState {
   isMuted: boolean;
   isDeafened: boolean;
   isCameraOn: boolean;
+  isScreenSharing: boolean;
+  noiseSuppressionEnabled: boolean;
+  participantCount: number;
+  averagePingMs: number | null;
+  lastPingMs: number | null;
+  outboundPacketLossPct: number | null;
+  privacyCode: string[];
 }
 
-export type ServerVoiceRuntimeAction = 'toggleMute' | 'toggleDeafen' | 'toggleCamera' | 'leave';
+export type ServerVoiceRuntimeAction = 'toggleMute' | 'toggleDeafen' | 'toggleCamera' | 'toggleScreenShare' | 'toggleNoiseSuppression' | 'leave';
 
 const DEFAULT_STATE: ServerVoiceShellState = {
   phase: 'idle',
@@ -22,6 +29,13 @@ const DEFAULT_STATE: ServerVoiceShellState = {
   isMuted: false,
   isDeafened: false,
   isCameraOn: false,
+  isScreenSharing: false,
+  noiseSuppressionEnabled: false,
+  participantCount: 0,
+  averagePingMs: null,
+  lastPingMs: null,
+  outboundPacketLossPct: null,
+  privacyCode: [],
 };
 
 const listeners = new Set<Listener>();
@@ -36,6 +50,13 @@ function sameState(a: ServerVoiceShellState, b: ServerVoiceShellState): boolean 
     && a.isMuted === b.isMuted
     && a.isDeafened === b.isDeafened
     && a.isCameraOn === b.isCameraOn
+    && a.isScreenSharing === b.isScreenSharing
+    && a.noiseSuppressionEnabled === b.noiseSuppressionEnabled
+    && a.participantCount === b.participantCount
+    && a.averagePingMs === b.averagePingMs
+    && a.lastPingMs === b.lastPingMs
+    && a.outboundPacketLossPct === b.outboundPacketLossPct
+    && JSON.stringify(a.privacyCode) === JSON.stringify(b.privacyCode)
   );
 }
 

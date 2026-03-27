@@ -5,12 +5,13 @@ import { ChannelSidebar } from './ChannelSidebar';
 import { TopBar } from './TopBar';
 import { PersistentVoiceBar } from './PersistentVoiceBar';
 import { Modal } from '../ui/Modal';
+import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGrowthCapabilities, getCapabilityLockReason } from '../../lib/growthCapabilities';
 import { trackGrowthEvent } from '../../lib/growthEvents';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { supabase } from '../../lib/supabase';
-import type { ChannelCategory, ChannelType, Community, VoiceSession } from '../../lib/types';
+import type { ChannelCategory, ChannelType, Community, Profile, VoiceSession } from '../../lib/types';
 import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
 import {
   type CommunityTemplateId,
@@ -26,6 +27,7 @@ interface AppShellProps {
   activeCommunityId?: string;
   activeChannelId?: string;
   showChannelSidebar?: boolean;
+  suppressPersistentVoiceBar?: boolean;
 }
 
 interface CreateCommunityForm {
@@ -34,6 +36,15 @@ interface CreateCommunityForm {
   category: string;
   visibility: 'public' | 'private';
   templateId: CommunityTemplateId;
+}
+
+interface InviteCandidate {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  status: Profile['status'];
+  custom_status?: string | null;
 }
 
 const DEFAULT_FORM: CreateCommunityForm = {
@@ -50,7 +61,7 @@ function normalizeTemplateId(value: string): CommunityTemplateId {
 
 export function AppShell({
   children, title, subtitle, topBarActions,
-  activeCommunityId, activeChannelId, showChannelSidebar = true,
+  activeCommunityId, activeChannelId, showChannelSidebar = true, suppressPersistentVoiceBar = false,
 }: AppShellProps) {
   const { profile } = useAuth();
   const { capabilities, contract } = useGrowthCapabilities();
@@ -78,6 +89,15 @@ export function AppShell({
   const [newCommunity, setNewCommunity] = useState<CreateCommunityForm>(DEFAULT_FORM);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteCandidates, setInviteCandidates] = useState<InviteCandidate[]>([]);
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
+  const [inviteActionUserId, setInviteActionUserId] = useState<string | null>(null);
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [featureNotice, setFeatureNotice] = useState<{ title: string; body: string } | null>(null);
   const communitiesCacheKey = profile ? `ncore.cache.communities.${profile.id}` : null;
   const hasActiveServerVoice = voiceSession.phase !== 'idle' && Boolean(voiceSession.channelId);
   const sidebarVoiceChannelIds = useMemo(
@@ -94,6 +114,153 @@ export function AppShell({
     && Boolean(voiceSession.channelId)
     && Boolean(voiceSession.communityId)
     && location.pathname === `/app/community/${voiceSession.communityId}/voice/${voiceSession.channelId}`;
+  const shouldShowPersistentVoiceBar = hasActiveServerVoice
+    && !isOnActiveVoiceRoute
+    && voiceSession.channelId
+    && voiceSession.communityId
+    && !suppressPersistentVoiceBar
+    && !(showChannelSidebar && isDesktopSidebar);
+  const activeChannelName = useMemo(() => {
+    if (!activeChannelId) return '';
+    for (const category of categories) {
+      const match = (category.channels || []).find((channel) => String(channel.id) === String(activeChannelId));
+      if (match) return String(match.name || '');
+    }
+    return '';
+  }, [activeChannelId, categories]);
+  const filteredInviteCandidates = useMemo(() => {
+    const query = inviteSearch.trim().toLowerCase();
+    if (!query) return inviteCandidates;
+    return inviteCandidates.filter((candidate) => {
+      const display = String(candidate.display_name || '').toLowerCase();
+      const username = String(candidate.username || '').toLowerCase();
+      return display.includes(query) || username.includes(query);
+    });
+  }, [inviteCandidates, inviteSearch]);
+
+  function createInviteCode() {
+    const token = Math.random().toString(36).slice(2, 8);
+    const stamp = Date.now().toString(36).slice(-4);
+    return `${token}${stamp}`.toUpperCase();
+  }
+
+  function buildInviteLink(communityId: string, code: string): string {
+    return `${window.location.origin}/app/community/${communityId}?invite=${encodeURIComponent(code)}`;
+  }
+
+  async function ensureDirectConversation(targetUserId: string): Promise<string | null> {
+    if (!profile?.id) return null;
+    const normalizedTargetId = String(targetUserId || '').trim();
+    if (!normalizedTargetId || normalizedTargetId === String(profile.id)) return null;
+
+    const { data: rpcConversationId, error: rpcError } = await (supabase as any).rpc('create_or_get_direct_conversation', {
+      p_target_user_id: normalizedTargetId,
+    });
+    if (!rpcError && rpcConversationId) {
+      return String(rpcConversationId);
+    }
+
+    const { data: conversationRow, error: createConversationError } = await supabase
+      .from('direct_conversations')
+      .insert({ created_by: profile.id, is_group: false } as any)
+      .select('id')
+      .maybeSingle();
+    if (createConversationError || !(conversationRow as any)?.id) return null;
+
+    const conversationId = String((conversationRow as any).id);
+    const { error: memberInsertError } = await supabase.from('direct_conversation_members').insert([
+      { conversation_id: conversationId, user_id: profile.id, role: 'member', added_by: profile.id },
+      { conversation_id: conversationId, user_id: normalizedTargetId, role: 'member', added_by: profile.id },
+    ] as any);
+    if (memberInsertError) return null;
+
+    return conversationId;
+  }
+
+  async function ensureInviteLink(forceRefresh = false): Promise<string> {
+    if (!activeCommunityId || !profile?.id) return '';
+    if (!forceRefresh && inviteLink && inviteCode) return inviteLink;
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const nextCode = createInviteCode();
+    const { data, error } = await supabase
+      .from('community_invites')
+      .insert({
+        community_id: activeCommunityId,
+        code: nextCode,
+        max_uses: null,
+        expires_at: expiresAt,
+        created_by: profile.id,
+      } as any)
+      .select('code')
+      .maybeSingle();
+
+    if (error || !(data as any)?.code) {
+      setInviteMessage(error?.message || 'Could not create an invite link right now.');
+      return '';
+    }
+
+    const code = String((data as any).code || nextCode);
+    const link = buildInviteLink(activeCommunityId, code);
+    setInviteCode(code);
+    setInviteLink(link);
+    return link;
+  }
+
+  async function loadInviteCandidates() {
+    if (!profile?.id) return;
+    setInviteLoading(true);
+    setInviteMessage('');
+    try {
+      const { data: relationshipRows, error: relationshipError } = await supabase
+        .from('user_relationships')
+        .select('target_user_id, relationship')
+        .eq('user_id', profile.id)
+        .eq('relationship', 'friend');
+
+      if (relationshipError) {
+        setInviteMessage(relationshipError.message || 'Could not load your friends.');
+        setInviteCandidates([]);
+        return;
+      }
+
+      const friendIds = Array.from(
+        new Set((relationshipRows || []).map((row: any) => String(row.target_user_id || '').trim()).filter(Boolean)),
+      );
+      if (friendIds.length === 0) {
+        setInviteCandidates([]);
+        return;
+      }
+
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('id,username,display_name,avatar_url,status,custom_status')
+        .in('id', friendIds);
+
+      if (profileError) {
+        setInviteMessage(profileError.message || 'Could not load friend profiles.');
+        setInviteCandidates([]);
+        return;
+      }
+
+      const nextCandidates = ((profileRows || []) as any[])
+        .map((row) => ({
+          id: String(row.id),
+          username: String(row.username || ''),
+          display_name: row.display_name || null,
+          avatar_url: row.avatar_url || null,
+          status: row.status || 'offline',
+          custom_status: row.custom_status || null,
+        }))
+        .sort((a, b) => {
+          const onlineScore = (entry: InviteCandidate) => (entry.status === 'online' ? 2 : entry.status === 'idle' || entry.status === 'dnd' ? 1 : 0);
+          return onlineScore(b) - onlineScore(a) || String(a.display_name || a.username).localeCompare(String(b.display_name || b.username));
+        });
+      setInviteCandidates(nextCandidates);
+    } finally {
+      setInviteLoading(false);
+    }
+  }
 
   async function loadUserCommunities() {
     if (!profile) return;
@@ -319,6 +486,12 @@ export function AppShell({
       // ignore malformed cache
     }
   }, [communitiesCacheKey, activeCommunityId]);
+
+  useEffect(() => {
+    if (!showInviteModal) return;
+    void loadInviteCandidates();
+    void ensureInviteLink(true);
+  }, [showInviteModal, activeCommunityId, profile?.id]);
 
   useEffect(() => {
     if (!profile) return;
@@ -811,6 +984,102 @@ export function AppShell({
     }
   }
 
+  async function ensureQuickCreateCategory(): Promise<string | null> {
+    if (!activeServerId || !activeCommunity || !isCommunityAdmin(activeCommunity)) return null;
+    if (categories[0]?.id) return String(categories[0].id);
+    const requestedName = window.prompt('Category name', 'TEXT CHANNELS');
+    const name = String(requestedName || '').trim();
+    if (!name) return null;
+
+    const { data: createdCategory, error } = await supabase
+      .from('channel_categories')
+      .insert({
+        server_id: activeServerId,
+        name: name.toUpperCase(),
+        order_index: categories.length,
+      } as any)
+      .select('*')
+      .maybeSingle();
+
+    if (error || !(createdCategory as any)?.id) {
+      console.warn('Could not create category:', error);
+      return null;
+    }
+
+    const nextCategory = { ...(createdCategory as any), channels: [] } as ChannelCategory;
+    setCategories((prev) => [...prev, nextCategory]);
+    return String(nextCategory.id);
+  }
+
+  async function handleQuickCreateChannel(type: 'text' | 'voice' = 'text') {
+    const categoryId = await ensureQuickCreateCategory();
+    if (!categoryId) return;
+    await handleAddChannel(categoryId, type);
+  }
+
+  async function handleInviteFriend(target: InviteCandidate) {
+    if (!profile?.id || !activeCommunityId || !activeCommunity) return;
+    setInviteActionUserId(target.id);
+    setInviteMessage('');
+    try {
+      const link = await ensureInviteLink();
+      if (!link) return;
+      try {
+        await navigator.clipboard.writeText(link);
+      } catch {
+        // noop
+      }
+
+      const conversationId = await ensureDirectConversation(target.id);
+      if (conversationId) {
+        await supabase.from('direct_messages').insert({
+          conversation_id: conversationId,
+          author_id: profile.id,
+          content: `Join me in ${activeCommunity.name}${activeChannelName ? ` (#${activeChannelName})` : ''}: ${link}`,
+        } as any);
+      }
+
+      setInviteMessage(`Invite sent to @${target.username}.`);
+    } finally {
+      setInviteActionUserId(null);
+    }
+  }
+
+  async function handleCopyInviteLink() {
+    const link = await ensureInviteLink();
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setInviteMessage('Invite link copied.');
+    } catch {
+      setInviteMessage(link);
+    }
+  }
+
+  async function handleLeaveCommunity() {
+    if (!activeCommunity || !activeCommunityId || !profile?.id) return;
+    if (String(activeCommunity.owner_id || '') === String(profile.id)) {
+      setFeatureNotice({
+        title: 'Owner action required',
+        body: 'Transfer ownership or delete the server from Server Settings before leaving it.',
+      });
+      return;
+    }
+    const confirmed = window.confirm(`Leave ${activeCommunity.name}?`);
+    if (!confirmed) return;
+    const { error } = await supabase
+      .from('community_members')
+      .delete()
+      .eq('community_id', activeCommunityId)
+      .eq('user_id', profile.id);
+    if (error) {
+      setFeatureNotice({ title: 'Could not leave server', body: error.message || 'The server could not be left right now.' });
+      return;
+    }
+    setCommunities((prev) => prev.filter((community) => String(community.id) !== String(activeCommunityId)));
+    navigate('/app/dm');
+  }
+
   function handleTemplateChange(rawTemplateId: string) {
     const templateId = normalizeTemplateId(rawTemplateId);
     const blueprint = getCommunityBlueprint(templateId);
@@ -923,6 +1192,10 @@ export function AppShell({
             onDeleteCategory={handleDeleteCategory}
             onEditChannel={handleEditChannel}
             onDeleteChannel={handleDeleteChannel}
+            onQuickCreateChannel={handleQuickCreateChannel}
+            onOpenInviteModal={() => setShowInviteModal(true)}
+            onOpenFeatureNotice={(title, body) => setFeatureNotice({ title, body })}
+            onLeaveCommunity={handleLeaveCommunity}
             onClose={() => setSidebarOpen(false)}
           />
         </div>
@@ -948,6 +1221,10 @@ export function AppShell({
                 onDeleteCategory={handleDeleteCategory}
                 onEditChannel={handleEditChannel}
                 onDeleteChannel={handleDeleteChannel}
+                onQuickCreateChannel={handleQuickCreateChannel}
+                onOpenInviteModal={() => setShowInviteModal(true)}
+                onOpenFeatureNotice={(title, body) => setFeatureNotice({ title, body })}
+                onLeaveCommunity={handleLeaveCommunity}
                 onClose={() => setSidebarOpen(false)}
               />
             </div>
@@ -967,11 +1244,11 @@ export function AppShell({
           sidebarOpen={isDesktopSidebar ? true : sidebarOpen}
         />
         <div className="flex-1 overflow-hidden">{children}</div>
-        {hasActiveServerVoice && !isOnActiveVoiceRoute && voiceSession.channelId && voiceSession.communityId && (
+        {shouldShowPersistentVoiceBar && (
           <PersistentVoiceBar
             channelName={voiceSession.channelName}
-            communityId={voiceSession.communityId}
-            channelId={voiceSession.channelId}
+            communityId={voiceSession.communityId!}
+            channelId={voiceSession.channelId!}
             isMuted={voiceSession.isMuted}
             isDeafened={voiceSession.isDeafened}
             isCameraOn={voiceSession.isCameraOn}
@@ -1092,6 +1369,88 @@ export function AppShell({
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={showInviteModal}
+        onClose={() => {
+          setShowInviteModal(false);
+          setInviteSearch('');
+          setInviteMessage('');
+        }}
+        title={activeCommunity ? `Invite friends to ${activeCommunity.name}` : 'Invite to Server'}
+        size="xl"
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-surface-400">
+            Recipients will land in {activeChannelName ? `#${activeChannelName}` : 'the server'}.
+          </div>
+          <input
+            type="text"
+            value={inviteSearch}
+            onChange={(event) => setInviteSearch(event.target.value)}
+            placeholder="Search for friends"
+            className="nyptid-input"
+          />
+          {inviteMessage && (
+            <div className="rounded-xl border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-surface-300">
+              {inviteMessage}
+            </div>
+          )}
+          <div className="max-h-[48vh] overflow-y-auto rounded-2xl border border-surface-700 bg-surface-900/60">
+            {inviteLoading ? (
+              <div className="px-4 py-8 text-center text-sm text-surface-500">Loading your friends...</div>
+            ) : filteredInviteCandidates.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-surface-500">No friends match that search yet.</div>
+            ) : filteredInviteCandidates.map((candidate) => (
+              <div key={candidate.id} className="flex items-center gap-3 border-b border-surface-800/80 px-4 py-3 last:border-b-0">
+                <Avatar
+                  src={candidate.avatar_url}
+                  name={candidate.display_name || candidate.username}
+                  size="md"
+                  status={candidate.status}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-surface-100">{candidate.display_name || candidate.username}</div>
+                  <div className="truncate text-xs text-surface-500">@{candidate.username}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleInviteFriend(candidate)}
+                  disabled={inviteActionUserId === candidate.id}
+                  className="nyptid-btn-secondary px-3 py-2 text-xs"
+                >
+                  {inviteActionUserId === candidate.id ? 'Inviting...' : 'Invite'}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-2xl border border-surface-700 bg-surface-900/60 p-4">
+            <div className="text-sm font-semibold text-surface-100">Or, send a server invite link</div>
+            <div className="mt-3 flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={inviteLink}
+                className="nyptid-input flex-1"
+                placeholder="Creating invite link..."
+              />
+              <button type="button" onClick={() => void handleCopyInviteLink()} className="nyptid-btn-primary px-4">
+                Copy
+              </button>
+            </div>
+            <div className="mt-2 text-xs text-surface-500">Invite links expire in 7 days by default.</div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(featureNotice)}
+        onClose={() => setFeatureNotice(null)}
+        title={featureNotice?.title || 'NCore'}
+        size="md"
+      >
+        <div className="text-sm leading-relaxed text-surface-300">{featureNotice?.body}</div>
       </Modal>
     </div>
   );

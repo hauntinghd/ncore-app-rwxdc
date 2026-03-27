@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.85",
+            "version": "11.7.86",
             "date": "2026-03-27",
             "badge": "Current Build",
+            "improvements": [
+                "Server headers now ship a Discord-style control surface with invite access on the plus icon, richer server dropdown actions, and owner/admin quick actions for channel and category creation.",
+                "Servers and DMs now keep an always-visible bottom user dock with live profile access, mute and deafen controls, voice entry shortcuts, and a richer profile popover.",
+                "Voice sessions now expose live connection details and privacy details in-shell, including ping, packet loss, participant count, and a shared session privacy code."
+            ],
+            "bugFixes": [
+                "Fixed the broken local package manifest state that had stripped out the NCore build and packaging scripts, restoring clean web and Electron release builds.",
+                "Fixed the server sidebar interaction gap by wiring right-click server actions for invite, create channel, create category, and hide muted channels.",
+                "Fixed DM layout parity so the new bottom profile and voice dock remains visible outside server routes instead of only appearing inside community views."
+            ]
+        },
+        {
+            "version": "11.7.85",
+            "date": "2026-03-27",
+            "badge": "Previous",
             "improvements": [
                 "Added renderer startup diagnostics in Electron so future renderer bootstrap failures surface with explicit load/process logs instead of a silent dark window.",
                 "Restored the root Vite app entry template so web and desktop builds continue to produce clean startup assets instead of inheriting stale built-file references."
