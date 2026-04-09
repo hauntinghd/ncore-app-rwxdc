@@ -149,26 +149,33 @@ export function DirectCallPage() {
   const [isCaller, setIsCaller] = useState(false);
   const [loadingAccess, setLoadingAccess] = useState(true);
   const [screenQuality, setScreenQuality] = useState<ScreenShareQuality>(() => loadCallSettings().screenShareQuality || '720p30');
-  const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState<boolean>(() => loadCallSettings().noiseSuppression);
+  const [noiseSuppressionPreference, setNoiseSuppressionPreference] = useState<boolean>(() => loadCallSettings().noiseSuppression);
   const [participantProfilesByUid, setParticipantProfilesByUid] = useState<Record<string, CallParticipantProfile>>({});
   const [screenSources, setScreenSources] = useState<ScreenSourceOption[]>([]);
   const [screenSourceId, setScreenSourceId] = useState('');
   const [loadingScreenSources, setLoadingScreenSources] = useState(false);
+  const [screenShareTransitioning, setScreenShareTransitioning] = useState(false);
   const [fullscreenFallbackUid, setFullscreenFallbackUid] = useState<string | null>(null);
   const [remoteVolumesByUid, setRemoteVolumesByUid] = useState<Record<string, number>>({});
   const [remoteVolumeContextMenu, setRemoteVolumeContextMenu] = useState<RemoteVolumeContextMenuState | null>(null);
   const [callStartedAtMs, setCallStartedAtMs] = useState<number | null>(null);
   const remoteTileRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const fullscreenOverlayRef = useRef<HTMLDivElement | null>(null);
   const previousRemoteVolumeRef = useRef<Record<string, number>>({});
   const sessionWasLiveRef = useRef(false);
   const callConnectedTrackedRef = useRef(false);
   const callDroppedTrackedRef = useRef(false);
 
   const isThisConversationSession = session.conversationId === (conversationId || null);
-  const isConnecting = loadingAccess || (isThisConversationSession && session.isConnecting);
+  const hasLiveSession = isThisConversationSession && (session.phase === 'active' || session.phase === 'connecting');
+  const isConnecting = (!hasLiveSession && loadingAccess) || (isThisConversationSession && session.isConnecting);
   const isMuted = isThisConversationSession ? session.isMuted : false;
+  const isDeafened = isThisConversationSession ? session.isDeafened : false;
   const isVideoOn = isThisConversationSession ? session.isVideoOn : false;
   const isScreenSharing = isThisConversationSession ? session.isScreenSharing : false;
+  const noiseSuppressionEnabled = isThisConversationSession
+    ? session.noiseSuppressionEnabled
+    : noiseSuppressionPreference;
   const remoteParticipantUids = isThisConversationSession ? session.remoteParticipantUids : [];
   const remoteVideoUids = isThisConversationSession ? session.remoteVideoUids : [];
   const activeSpeakerUids = isThisConversationSession ? session.activeSpeakerUids : [];
@@ -184,6 +191,17 @@ export function DirectCallPage() {
     if (typeof window === 'undefined') return false;
     return window.matchMedia('(max-width: 767px)').matches;
   });
+  const connectionTelemetryLabel = useMemo(() => {
+    if (!isThisConversationSession) return '';
+    const segments: string[] = [];
+    if (session.averagePingMs != null) {
+      segments.push(`${session.averagePingMs} ms`);
+    }
+    if (session.outboundPacketLossPct != null) {
+      segments.push(`${session.outboundPacketLossPct}% loss`);
+    }
+    return segments.join(' • ');
+  }, [isThisConversationSession, session.averagePingMs, session.outboundPacketLossPct]);
 
   useEffect(() => {
     sessionWasLiveRef.current = false;
@@ -219,6 +237,10 @@ export function DirectCallPage() {
       saveCallSettings({ ...loadCallSettings(), screenShareQuality: clamped });
     }
   }, [maxScreenShareQuality, screenQuality]);
+
+  useEffect(() => {
+    setNoiseSuppressionPreference(session.noiseSuppressionEnabled);
+  }, [session.noiseSuppressionEnabled]);
 
   const loadScreenSources = useCallback(async () => {
     if (!window.desktopBridge?.listDesktopCaptureSources) return;
@@ -290,6 +312,10 @@ export function DirectCallPage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {});
+        return;
+      }
       setFullscreenFallbackUid(null);
     };
     window.addEventListener('keydown', onKeyDown);
@@ -297,6 +323,26 @@ export function DirectCallPage() {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
+
+  useEffect(() => {
+    if (!fullscreenFallbackUid || typeof document === 'undefined') return undefined;
+    const overlayNode = fullscreenOverlayRef.current;
+    if (!overlayNode || typeof overlayNode.requestFullscreen !== 'function') return undefined;
+
+    let cancelled = false;
+    window.setTimeout(() => {
+      if (cancelled) return;
+      if (document.fullscreenElement === overlayNode) return;
+      void overlayNode.requestFullscreen().catch(() => {});
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      if (document.fullscreenElement === overlayNode) {
+        void document.exitFullscreen().catch(() => {});
+      }
+    };
+  }, [fullscreenFallbackUid]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -606,8 +652,23 @@ export function DirectCallPage() {
     directCallSession.attachLocalVideo(node);
   }, []);
 
+  const closeFullscreenFallback = useCallback(async () => {
+    setFullscreenFallbackUid(null);
+    if (typeof document !== 'undefined' && document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // noop
+      }
+    }
+  }, []);
+
   async function toggleMute() {
     await directCallSession.toggleMute();
+  }
+
+  async function toggleDeafen() {
+    await directCallSession.toggleDeafen();
   }
 
   async function toggleVideo() {
@@ -615,18 +676,26 @@ export function DirectCallPage() {
   }
 
   async function toggleScreenShare() {
-    if (!isScreenSharing && screenSourceId && window.desktopBridge?.setPreferredDesktopCaptureSource) {
-      await window.desktopBridge.setPreferredDesktopCaptureSource(screenSourceId);
+    if (screenShareTransitioning) return;
+    setScreenShareTransitioning(true);
+    try {
+      if (!isScreenSharing && screenSourceId && window.desktopBridge?.setPreferredDesktopCaptureSource) {
+        await window.desktopBridge.setPreferredDesktopCaptureSource(screenSourceId);
+      }
+      await directCallSession.toggleScreenShare({
+        quality: screenQuality,
+        maxQuality: maxScreenShareQuality,
+      });
+    } catch (error) {
+      console.error('Direct-call screen share toggle failed', error);
+    } finally {
+      setScreenShareTransitioning(false);
     }
-    await directCallSession.toggleScreenShare({
-      quality: screenQuality,
-      maxQuality: maxScreenShareQuality,
-    });
   }
 
   async function toggleParticipantFullscreen(uid: string) {
     if (fullscreenFallbackUid === uid) {
-      setFullscreenFallbackUid(null);
+      await closeFullscreenFallback();
       return;
     }
     setFullscreenFallbackUid(uid);
@@ -669,7 +738,7 @@ export function DirectCallPage() {
 
   async function toggleNoiseSuppression() {
     const next = !noiseSuppressionEnabled;
-    setNoiseSuppressionEnabled(next);
+    setNoiseSuppressionPreference(next);
     const nextSettings = {
       ...loadCallSettings(),
       noiseSuppression: next,
@@ -812,7 +881,7 @@ export function DirectCallPage() {
         title="Right-click for volume controls"
         className={`relative rounded-2xl border bg-surface-900 overflow-hidden ${heightClass} flex items-center justify-center ${isSpeaking ? 'border-nyptid-300/70 shadow-glow' : 'border-surface-700'}`}
       >
-        <div className="absolute top-2 right-2 z-20 flex items-center gap-2 rounded-full bg-black/55 px-2 py-1">
+        <div className="absolute top-2 right-2 z-[30] pointer-events-auto flex items-center gap-2 rounded-full bg-black/55 px-2 py-1">
           <button
             type="button"
             onClick={() => void toggleParticipantFullscreen(uid)}
@@ -834,7 +903,7 @@ export function DirectCallPage() {
         </div>
 
         {hasVideo && !isPoppedOut ? (
-          <div className="w-full h-full">
+          <div className="w-full h-full pointer-events-none">
             <RemoteVideoMount uid={uid} />
             <div className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
               {participantName}
@@ -962,15 +1031,20 @@ export function DirectCallPage() {
           const remoteVolume = remoteVolumesByUid[uid] ?? 100;
           const isRemoteMuted = remoteVolume <= 0;
           return (
-            <div className="fixed inset-0 z-[130] bg-black/90 p-4 sm:p-6">
+            <div
+              ref={fullscreenOverlayRef}
+              className="fixed inset-0 z-[130] bg-black/90 p-4 sm:p-6"
+              onClick={() => void closeFullscreenFallback()}
+            >
               <div
                 className="relative h-full w-full rounded-2xl border border-surface-700 bg-surface-950 overflow-hidden"
+                onClick={(event) => event.stopPropagation()}
                 onContextMenuCapture={(event) => openRemoteVolumeContextMenu(event as any, uid)}
               >
-                <div className="absolute top-3 right-3 z-20 flex items-center gap-2 rounded-full bg-black/60 px-2 py-1">
+                <div className="absolute top-3 right-3 z-[40] pointer-events-auto flex items-center gap-2 rounded-full bg-black/60 px-2 py-1">
                   <button
                     type="button"
-                    onClick={() => setFullscreenFallbackUid(null)}
+                    onClick={() => void closeFullscreenFallback()}
                     className="text-white/90 hover:text-white transition-colors"
                     title="Exit fullscreen"
                   >
@@ -986,7 +1060,7 @@ export function DirectCallPage() {
                   </button>
                 </div>
                 {hasVideo ? (
-                  <div className="w-full h-full">
+                  <div className="absolute inset-0 z-0 pointer-events-none">
                     <RemoteVideoMount uid={uid} />
                   </div>
                 ) : (
@@ -1002,6 +1076,7 @@ export function DirectCallPage() {
                 )}
                 <div className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-1 text-sm text-white">
                   {participantName}
+                  {connectionTelemetryLabel ? ` • ${connectionTelemetryLabel}` : ''}
                 </div>
               </div>
             </div>
@@ -1066,13 +1141,31 @@ export function DirectCallPage() {
         })(), document.body)}
 
         <div className="border-t border-surface-800 bg-surface-900 py-4">
-          <div className="flex items-center justify-center gap-3 flex-wrap px-3">
+          <div className="relative flex items-center justify-center gap-3 flex-wrap px-3">
+            <div className="absolute left-3 text-xs text-surface-500">
+              {isThisConversationSession && session.phase === 'active' ? (
+                <span className="flex items-center gap-1.5 text-green-400">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-green-400 animate-pulse" />
+                  {connectionTelemetryLabel ? `Live • ${connectionTelemetryLabel}` : 'Live'}
+                </span>
+              ) : (
+                <span>{isConnecting ? 'Connecting...' : 'Standby'}</span>
+              )}
+            </div>
             <button
               onClick={toggleMute}
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isMuted ? 'bg-red-600 text-white' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
               title={isMuted ? 'Unmute' : 'Mute'}
             >
               {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+            </button>
+
+            <button
+              onClick={toggleDeafen}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isDeafened ? 'bg-red-600 text-white' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
+              title={isDeafened ? 'Undeafen' : 'Deafen'}
+            >
+              {isDeafened ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
 
             <button
@@ -1085,8 +1178,9 @@ export function DirectCallPage() {
 
             <button
               onClick={toggleScreenShare}
-              className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isScreenSharing ? 'bg-green-500 text-white' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
-              title={isScreenSharing ? 'Stop screen share' : 'Start screen share'}
+              disabled={screenShareTransitioning}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${screenShareTransitioning ? 'cursor-wait bg-surface-800 text-surface-500' : isScreenSharing ? 'bg-green-500 text-white' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
+              title={screenShareTransitioning ? 'Updating screen share...' : (isScreenSharing ? 'Stop screen share' : 'Start screen share')}
             >
               <MonitorUp size={18} />
             </button>
@@ -1099,6 +1193,7 @@ export function DirectCallPage() {
                 setScreenQuality(clamped);
                 saveCallSettings({ ...loadCallSettings(), screenShareQuality: clamped });
               }}
+              disabled={screenShareTransitioning}
               className="nyptid-input w-auto text-xs py-2"
             >
               <option value="720p30">Screen: 720p 30fps</option>
@@ -1114,6 +1209,7 @@ export function DirectCallPage() {
               <select
                 value={screenSourceId}
                 onChange={(e) => setScreenSourceId(e.target.value)}
+                disabled={screenShareTransitioning}
                 className="nyptid-input w-auto max-w-[240px] text-xs py-2"
                 title="Choose screen or app window for screen share"
               >
@@ -1129,7 +1225,8 @@ export function DirectCallPage() {
               <button
                 type="button"
                 onClick={() => void loadScreenSources()}
-                className="h-10 px-3 rounded-lg text-xs font-semibold bg-surface-700 text-surface-200 hover:bg-surface-600 transition-colors"
+                disabled={loadingScreenSources || screenShareTransitioning}
+                className={`h-10 px-3 rounded-lg text-xs font-semibold transition-colors ${loadingScreenSources || screenShareTransitioning ? 'bg-surface-800 text-surface-500 cursor-wait' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
                 title="Refresh screen share sources"
               >
                 {loadingScreenSources ? 'Refreshing...' : 'Refresh Sources'}

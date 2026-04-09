@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Profile } from '../../lib/types';
+import type { Profile, UserStatus } from '../../lib/types';
 import { getPlatformRoleBadge, getRankBadgeClasses, getStatusLabel } from '../../lib/utils';
 
 export interface SidebarVoiceDockState {
@@ -65,10 +65,25 @@ export function SidebarUserDock({
   const [showVoiceDetails, setShowVoiceDetails] = useState(false);
   const [voiceTab, setVoiceTab] = useState<'connection' | 'privacy'>('connection');
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusDraft, setStatusDraft] = useState<UserStatus>(profile.status);
+  const [customStatusDraft, setCustomStatusDraft] = useState(profile.custom_status || '');
+  const [customStatusEmojiDraft, setCustomStatusEmojiDraft] = useState(profile.custom_status_emoji || '');
+  const [statusSaveError, setStatusSaveError] = useState('');
+  const [statusSaved, setStatusSaved] = useState(false);
 
   const hasActiveVoice = Boolean(voice && voice.phase !== 'idle' && voice.channelId);
   const roleBadge = getPlatformRoleBadge(profile.platform_role);
   const rankClasses = getRankBadgeClasses(profile.rank);
+  const isDirectCallVoice = Boolean(hasActiveVoice && voice && !voice.communityId);
+  const voiceConnectionLabel = voice
+    ? (voice.phase === 'connecting'
+      ? (isDirectCallVoice ? 'Connecting Call' : 'Connecting Voice')
+      : (isDirectCallVoice ? 'Call Connected' : 'Voice Connected'))
+    : 'Voice Connected';
+  const voiceParticipantLabel = voice
+    ? `${voice.participantCount} ${isDirectCallVoice ? 'in call' : 'in channel'}`
+    : '0 connected';
+  const voiceLatencyLabel = voice?.averagePingMs != null ? `${voice.averagePingMs} ms` : '';
   const privacyRows = useMemo(() => {
     const chunks: string[][] = [];
     const source = Array.isArray(voice?.privacyCode) ? voice!.privacyCode : [];
@@ -104,11 +119,32 @@ export function SidebarUserDock({
     };
   }, [showProfilePopover, showVoiceDetails]);
 
-  async function handleToggleDnd() {
+  useEffect(() => {
+    setStatusDraft(profile.status);
+    setCustomStatusDraft(profile.custom_status || '');
+    setCustomStatusEmojiDraft(profile.custom_status_emoji || '');
+    setStatusSaveError('');
+  }, [profile.custom_status, profile.custom_status_emoji, profile.status]);
+
+  async function handleSaveStatus() {
     if (statusUpdating) return;
     setStatusUpdating(true);
-    const nextStatus = profile.status === 'dnd' ? 'online' : 'dnd';
-    await updateProfile({ status: nextStatus });
+    setStatusSaveError('');
+    setStatusSaved(false);
+
+    const { error } = await updateProfile({
+      status: statusDraft,
+      custom_status: customStatusDraft.trim().slice(0, 160),
+      custom_status_emoji: customStatusEmojiDraft.trim().slice(0, 16),
+    });
+
+    if (error) {
+      setStatusSaveError(error.message);
+    } else {
+      setStatusSaved(true);
+      window.setTimeout(() => setStatusSaved(false), 2200);
+    }
+
     setStatusUpdating(false);
   }
 
@@ -143,8 +179,8 @@ export function SidebarUserDock({
               <div className="px-4 py-4">
                 {voiceTab === 'connection' ? (
                   <div className="space-y-2 text-sm text-surface-300">
-                    <div>Average ping: <span className="font-semibold text-surface-100">{voice.averagePingMs ?? '—'} ms</span></div>
-                    <div>Last ping: <span className="font-semibold text-surface-100">{voice.lastPingMs ?? '—'} ms</span></div>
+                    <div>Average ping: <span className="font-semibold text-surface-100">{voice.averagePingMs ?? 'â€”'} ms</span></div>
+                    <div>Last ping: <span className="font-semibold text-surface-100">{voice.lastPingMs ?? 'â€”'} ms</span></div>
                     <div>Outbound packet loss rate: <span className="font-semibold text-surface-100">{voice.outboundPacketLossPct ?? 0}%</span></div>
                     <p className="pt-2 text-xs leading-relaxed text-surface-500">
                       Audio usually starts degrading around 250 ms or when packet loss climbs above 10%. If it keeps drifting, leave and rejoin the channel.
@@ -182,12 +218,13 @@ export function SidebarUserDock({
                 onClick={onOpenVoice}
                 className="min-w-0 flex-1 text-left"
               >
-                <div className="text-xs font-semibold text-green-300">
-                  {voice.phase === 'connecting' ? 'Connecting Voice' : 'Voice Connected'}
-                </div>
+                <div className="text-xs font-semibold text-green-300">{voiceConnectionLabel}</div>
                 <div className="truncate text-sm font-medium text-surface-100">{voice.channelName}</div>
                 <div className="mt-0.5 text-[11px] text-surface-400">
-                  {voice.participantCount} in channel • Noise {voice.noiseSuppressionEnabled ? 'On' : 'Off'}
+                  {voiceParticipantLabel}
+                  {voiceLatencyLabel ? ` • ${voiceLatencyLabel}` : ''}
+                  {' • '}
+                  Noise {voice.noiseSuppressionEnabled ? 'On' : 'Off'}
                 </div>
               </button>
               <div className="flex items-center gap-1">
@@ -269,6 +306,104 @@ export function SidebarUserDock({
                 {statusLine}
               </div>
 
+              <div className="mt-3 rounded-xl border border-surface-700 bg-surface-950/70 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-surface-500">Quick Status</div>
+                    <div className="mt-1 text-xs text-surface-400">Update presence and custom status without leaving the chat.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusDraft(profile.status);
+                      setCustomStatusDraft('');
+                      setCustomStatusEmojiDraft('');
+                      setStatusSaveError('');
+                    }}
+                    className="text-[11px] font-semibold text-surface-500 transition-colors hover:text-surface-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'online', label: 'Online', tone: 'border-green-500/30 bg-green-500/10 text-green-200' },
+                    { value: 'idle', label: 'Idle', tone: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200' },
+                    { value: 'dnd', label: 'DND', tone: 'border-red-500/30 bg-red-500/10 text-red-200' },
+                    { value: 'invisible', label: 'Invisible', tone: 'border-surface-600 bg-surface-800 text-surface-200' },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setStatusDraft(option.value)}
+                      className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                        statusDraft === option.value ? option.tone : 'border-surface-700 bg-surface-900/70 text-surface-400 hover:text-surface-200'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-[84px_minmax(0,1fr)] gap-2">
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
+                    Emoji
+                    <input
+                      type="text"
+                      value={customStatusEmojiDraft}
+                      onChange={(event) => setCustomStatusEmojiDraft(event.target.value)}
+                      maxLength={16}
+                      placeholder=":)"
+                      className="nyptid-input mt-1 text-center"
+                    />
+                  </label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
+                    Status
+                    <input
+                      type="text"
+                      value={customStatusDraft}
+                      onChange={(event) => setCustomStatusDraft(event.target.value)}
+                      maxLength={160}
+                      placeholder="What are you doing right now?"
+                      className="nyptid-input mt-1"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-surface-500">
+                  <span>{customStatusDraft.length}/160 characters</span>
+                  <span>{statusDraft === 'dnd' ? 'Notifications stay muted.' : 'Applies across profile, DMs, and the dock.'}</span>
+                </div>
+
+                {(statusSaveError || statusSaved) && (
+                  <div className={`mt-2 text-xs ${statusSaveError ? 'text-red-300' : 'text-emerald-300'}`}>
+                    {statusSaveError || 'Status updated.'}
+                  </div>
+                )}
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveStatus()}
+                    disabled={statusUpdating}
+                    className="nyptid-btn-primary flex-1 py-2 text-xs disabled:opacity-60"
+                  >
+                    {statusUpdating ? 'Saving...' : 'Save Status'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate('/app/settings?section=privacy');
+                      setShowProfilePopover(false);
+                    }}
+                    className="nyptid-btn-secondary px-3 py-2 text-xs"
+                  >
+                    More
+                  </button>
+                </div>
+              </div>
+
               {profile.bio && (
                 <div className="mt-3 text-sm leading-relaxed text-surface-300 line-clamp-4">
                   {profile.bio}
@@ -300,11 +435,13 @@ export function SidebarUserDock({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleToggleDnd()}
-                  disabled={statusUpdating}
+                  onClick={() => {
+                    navigate('/app/settings?section=privacy');
+                    setShowProfilePopover(false);
+                  }}
                   className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800 disabled:opacity-60"
                 >
-                  <span>{profile.status === 'dnd' ? 'Clear Do Not Disturb' : 'Do Not Disturb'}</span>
+                  <span>Privacy &amp; Status</span>
                   <ChevronRight size={14} className="text-surface-500" />
                 </button>
                 <button
@@ -358,30 +495,36 @@ export function SidebarUserDock({
             <button
               type="button"
               onClick={onToggleMute}
-              disabled={!hasActiveVoice}
               className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 hasActiveVoice
                   ? voice?.isMuted
                     ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
                     : 'bg-surface-800 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
-                  : 'bg-surface-900 text-surface-600'
+                  : voice?.isMuted
+                    ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                    : 'bg-surface-900 text-surface-500 hover:bg-surface-800 hover:text-surface-200'
               }`}
-              title={hasActiveVoice ? (voice?.isMuted ? 'Unmute' : 'Mute') : 'Join a voice channel to mute'}
+              title={hasActiveVoice
+                ? (voice?.isMuted ? 'Unmute' : 'Mute')
+                : (voice?.isMuted ? 'Unmute (ready for next call)' : 'Mute (ready for next call)')}
             >
               {voice?.isMuted ? <MicOff size={14} /> : <Mic size={14} />}
             </button>
             <button
               type="button"
               onClick={onToggleDeafen}
-              disabled={!hasActiveVoice}
               className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 hasActiveVoice
                   ? voice?.isDeafened
                     ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
                     : 'bg-surface-800 text-surface-300 hover:bg-surface-700 hover:text-surface-100'
-                  : 'bg-surface-900 text-surface-600'
+                  : voice?.isDeafened
+                    ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                    : 'bg-surface-900 text-surface-500 hover:bg-surface-800 hover:text-surface-200'
               }`}
-              title={hasActiveVoice ? (voice?.isDeafened ? 'Undeafen' : 'Deafen') : 'Join a voice channel to deafen'}
+              title={hasActiveVoice
+                ? (voice?.isDeafened ? 'Undeafen' : 'Deafen')
+                : (voice?.isDeafened ? 'Undeafen (ready for next call)' : 'Deafen (ready for next call)')}
             >
               {voice?.isDeafened ? <VolumeX size={14} /> : <Volume2 size={14} />}
             </button>
@@ -399,3 +542,4 @@ export function SidebarUserDock({
     </div>
   );
 }
+

@@ -532,7 +532,7 @@ export function ChannelSidebar({
         <SidebarUserDock
           profile={profile}
           communityRoleLabel={communityRoleBadge?.label || (community?.member_role ? String(community.member_role).toUpperCase() : null)}
-          voice={voiceSession.phase === 'idle' ? null : voiceSession}
+          voice={voiceSession}
           showVoiceCard
           onOpenVoice={() => {
             if (voiceSession.communityId && voiceSession.channelId) {

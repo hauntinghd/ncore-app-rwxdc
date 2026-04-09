@@ -13,6 +13,7 @@ import { loadCallSettings, saveCallSettings, type CallSettings } from './callSet
 import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
 import { publishDirectCallShellState } from './directCallShell';
+import { playVoiceToggleSound } from './notificationSound';
 import {
   buildLegacyCallStateUpdate,
   isCallsModernSchemaMissingError,
@@ -41,13 +42,20 @@ export interface DirectCallSessionState {
   wantsVideo: boolean;
   isConnecting: boolean;
   isMuted: boolean;
+  isDeafened: boolean;
   isVideoOn: boolean;
   isScreenSharing: boolean;
+  noiseSuppressionEnabled: boolean;
   screenShareQuality: ScreenShareQuality;
   hasRemoteVideo: boolean;
   remoteParticipantUids: string[];
   remoteVideoUids: string[];
   activeSpeakerUids: string[];
+  participantCount: number;
+  averagePingMs: number | null;
+  lastPingMs: number | null;
+  outboundPacketLossPct: number | null;
+  privacyCode: string[];
   startedAt: number | null;
   mediaError: string;
   mediaErrorDetail: string;
@@ -70,18 +78,33 @@ const initialState: DirectCallSessionState = {
   isCaller: false,
   wantsVideo: false,
   isConnecting: false,
-  isMuted: false,
+  isMuted: Boolean(loadCallSettings().startMuted),
+  isDeafened: Boolean(loadCallSettings().startDeafened),
   isVideoOn: false,
   isScreenSharing: false,
+  noiseSuppressionEnabled: loadCallSettings().noiseSuppression,
   screenShareQuality: '720p30',
   hasRemoteVideo: false,
   remoteParticipantUids: [],
   remoteVideoUids: [],
   activeSpeakerUids: [],
+  participantCount: 0,
+  averagePingMs: null,
+  lastPingMs: null,
+  outboundPacketLossPct: null,
+  privacyCode: [],
   startedAt: null,
   mediaError: '',
   mediaErrorDetail: '',
 };
+
+function persistVoiceTogglePreferences(next: { startMuted?: boolean; startDeafened?: boolean }) {
+  const current = loadCallSettings();
+  saveCallSettings({
+    ...current,
+    ...next,
+  });
+}
 
 let cachedAgoraModule: Promise<AgoraRTCModule> | null = null;
 
@@ -222,6 +245,9 @@ class DirectCallSessionStore {
   private activeSpeakerFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingActiveSpeakerUids: string[] | null = null;
   private remoteOptimizationTimer: ReturnType<typeof setTimeout> | null = null;
+  private statsInterval: ReturnType<typeof setInterval> | null = null;
+  private latencySamples: number[] = [];
+  private screenShareOperation: Promise<void> | null = null;
 
   private sameUidArray(a: string[], b: string[]): boolean {
     if (a.length !== b.length) return false;
@@ -283,14 +309,22 @@ class DirectCallSessionStore {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: buildDisplayMediaVideoConstraints(quality),
         audio: withAudio,
-      });
+        selfBrowserSurface: 'exclude' as any,
+        surfaceSwitching: 'include' as any,
+        systemAudio: withAudio ? 'include' as any : 'exclude' as any,
+        preferCurrentTab: false as any,
+      } as any);
     } catch (primaryError) {
       // Some Electron/Chromium builds reject advanced constraints and only
       // allow plain boolean capture constraints.
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: withAudio,
-      }).catch(() => {
+        selfBrowserSurface: 'exclude' as any,
+        surfaceSwitching: 'include' as any,
+        systemAudio: withAudio ? 'include' as any : 'exclude' as any,
+        preferCurrentTab: false as any,
+      } as any).catch(() => {
         throw primaryError;
       });
     }
@@ -342,6 +376,103 @@ class DirectCallSessionStore {
     }
   }
 
+  private normalizePacketLoss(value: unknown): number | null {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return null;
+    const pct = numeric <= 1 ? numeric * 100 : numeric;
+    return Math.round(pct * 10) / 10;
+  }
+
+  private normalizeParticipantUid(uid: string | null | undefined): string {
+    return String(uid || '').trim().replace(/::screen$/i, '');
+  }
+
+  private buildPrivacyCode(conversationId: string, participants: string[]): string[] {
+    const seed = [
+      String(conversationId || '').trim(),
+      ...participants.map((participant) => String(participant || '').trim()).filter(Boolean).sort(),
+    ].join(':');
+    let hash = 0;
+    for (let index = 0; index < seed.length; index += 1) {
+      hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
+    }
+    const nextCodes: string[] = [];
+    let cursor = Math.abs(hash) + 104729;
+    while (nextCodes.length < 6) {
+      cursor = (cursor * 1103515245 + 12345) & 0x7fffffff;
+      nextCodes.push(String(cursor % 100000).padStart(5, '0'));
+    }
+    return nextCodes;
+  }
+
+  private rebuildConnectionDetails() {
+    if (this.state.phase === 'idle' || !this.state.conversationId) {
+      this.setState({
+        participantCount: 0,
+        privacyCode: [],
+      });
+      return;
+    }
+
+    const participants = Array.from(new Set([
+      this.normalizeParticipantUid(this.localUid),
+      ...Array.from(this.remoteParticipantUids).map((uid) => this.normalizeParticipantUid(uid)),
+    ].filter(Boolean))).sort();
+
+    this.setState({
+      participantCount: participants.length,
+      privacyCode: participants.length > 0
+        ? this.buildPrivacyCode(this.state.conversationId, participants)
+        : [],
+    });
+  }
+
+  private stopStatsPolling() {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
+    this.latencySamples = [];
+  }
+
+  private updateRtcStats() {
+    const rtcStats = (this.client as any)?.getRTCStats?.();
+    if (!rtcStats) return;
+    const lastPingMs = Number(
+      rtcStats.RTT
+      ?? rtcStats.rtt
+      ?? rtcStats.Rtt
+      ?? rtcStats.roundTripTime
+      ?? rtcStats.NetworkTransportDelay
+      ?? 0,
+    );
+    if (Number.isFinite(lastPingMs) && lastPingMs > 0) {
+      this.latencySamples = [...this.latencySamples, Math.round(lastPingMs)].slice(-12);
+    }
+    const averagePingMs = this.latencySamples.length > 0
+      ? Math.round(this.latencySamples.reduce((sum, sample) => sum + sample, 0) / this.latencySamples.length)
+      : null;
+    this.setState({
+      lastPingMs: Number.isFinite(lastPingMs) && lastPingMs > 0 ? Math.round(lastPingMs) : null,
+      averagePingMs,
+      outboundPacketLossPct: this.normalizePacketLoss(
+        rtcStats.OutgoingPacketLossRate
+        ?? rtcStats.outgoingPacketLossRate
+        ?? rtcStats.SendPacketLossRate
+        ?? rtcStats.sendPacketLossRate
+        ?? null,
+      ),
+    });
+  }
+
+  private startStatsPolling() {
+    this.stopStatsPolling();
+    this.updateRtcStats();
+    this.statsInterval = setInterval(() => {
+      this.updateRtcStats();
+    }, 2500);
+  }
+
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -356,6 +487,8 @@ class DirectCallSessionStore {
       callId: nextState.callId,
       wantsVideo: nextState.wantsVideo,
       startedAt: nextState.startedAt,
+      isMuted: nextState.isMuted,
+      isDeafened: nextState.isDeafened,
     });
   }
 
@@ -510,6 +643,8 @@ class DirectCallSessionStore {
     if (this.remoteVideoContainer && remoteVideoUids.length > 0) {
       this.attachRemoteVideoForUid(remoteVideoUids[0], this.remoteVideoContainer);
     }
+
+    this.rebuildConnectionDetails();
   }
 
   private clearRemoteState() {
@@ -540,6 +675,7 @@ class DirectCallSessionStore {
       activeSpeakerUids: [],
       hasRemoteVideo: false,
     });
+    this.rebuildConnectionDetails();
   }
 
   setCallMeta(meta: {
@@ -559,6 +695,7 @@ class DirectCallSessionStore {
       mediaError: '',
       mediaErrorDetail: '',
     });
+    this.rebuildConnectionDetails();
   }
 
   attachLocalVideo(container: HTMLDivElement | null) {
@@ -610,7 +747,7 @@ class DirectCallSessionStore {
     this.remoteAudioVolumes.set(normalizedUid, clamped);
     const remoteAudioTrack = this.remoteAudioTracks.get(normalizedUid);
     if (remoteAudioTrack && typeof remoteAudioTrack.setVolume === 'function') {
-      remoteAudioTrack.setVolume(clamped);
+      remoteAudioTrack.setVolume(this.state.isDeafened ? 0 : clamped);
     }
   }
 
@@ -632,8 +769,14 @@ class DirectCallSessionStore {
       isCaller = false,
     } = options;
     const settings = loadCallSettings();
+    const preferredMuted = Boolean(settings.startMuted);
+    const preferredDeafened = Boolean(settings.startDeafened);
     this.appId = appId;
-    this.setState({ screenShareQuality: settings.screenShareQuality || '720p30' });
+    this.localUid = String(userId || '').trim() || null;
+    this.setState({
+      screenShareQuality: settings.screenShareQuality || '720p30',
+      noiseSuppressionEnabled: settings.noiseSuppression,
+    });
 
     if (!appId) {
       this.setState({
@@ -643,7 +786,14 @@ class DirectCallSessionStore {
         wantsVideo,
         phase: 'idle',
         isConnecting: false,
+        isMuted: preferredMuted,
+        isDeafened: preferredDeafened,
         activeSpeakerUids: [],
+        participantCount: 0,
+        averagePingMs: null,
+        lastPingMs: null,
+        outboundPacketLossPct: null,
+        privacyCode: [],
         mediaError: 'Agora is not configured. Set `VITE_AGORA_APP_ID` to enable calling.',
         mediaErrorDetail: '',
       });
@@ -662,8 +812,13 @@ class DirectCallSessionStore {
         callId,
         isCaller,
         wantsVideo,
+        noiseSuppressionEnabled: settings.noiseSuppression,
+        averagePingMs: null,
+        lastPingMs: null,
+        outboundPacketLossPct: null,
         ...(Number.isFinite(startedAtMs) && (startedAtMs || 0) > 0 ? { startedAt: Number(startedAtMs) } : {}),
       });
+      this.rebuildConnectionDetails();
       void effectiveStartedAt;
       this.attachLocalVideo(this.localVideoContainer);
       this.attachRemoteVideo(this.remoteVideoContainer);
@@ -679,16 +834,24 @@ class DirectCallSessionStore {
       wantsVideo,
       phase: 'connecting',
       isConnecting: true,
-      isMuted: false,
+      isMuted: preferredMuted,
+      isDeafened: preferredDeafened,
       isVideoOn: false,
       isScreenSharing: false,
       hasRemoteVideo: false,
       remoteParticipantUids: [],
       remoteVideoUids: [],
       activeSpeakerUids: [],
+      participantCount: 0,
+      averagePingMs: null,
+      lastPingMs: null,
+      outboundPacketLossPct: null,
+      privacyCode: [],
+      noiseSuppressionEnabled: settings.noiseSuppression,
       mediaError: '',
       mediaErrorDetail: '',
     });
+    this.rebuildConnectionDetails();
 
     const callSettings = await this.resolveCallAudioSettings();
     this.watchCallState(callId);
@@ -696,7 +859,6 @@ class DirectCallSessionStore {
     try {
       const AgoraRTC = await getAgoraModule();
       this.client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-      this.localUid = userId;
       this.registerClientEvents(this.client);
       await this.configureRtcOptimizations(this.client);
 
@@ -721,6 +883,9 @@ class DirectCallSessionStore {
             // Ignore unsupported/invalid device errors and continue with current input.
           }
         }
+        if (this.state.isMuted) {
+          await this.audioTrack.setEnabled(false);
+        }
         tracksToPublish.push(this.audioTrack);
       } catch (audioError) {
         this.setState({
@@ -735,7 +900,11 @@ class DirectCallSessionStore {
           tracksToPublish.push(this.videoTrack);
           this.setState({ isVideoOn: true });
           if (this.localVideoContainer) {
-            this.videoTrack.play(this.localVideoContainer);
+            try {
+              this.videoTrack.play(this.localVideoContainer);
+            } catch {
+              // noop
+            }
           }
         } catch (videoError) {
           this.setState({
@@ -760,10 +929,14 @@ class DirectCallSessionStore {
         phase: 'active',
         isConnecting: false,
         startedAt: effectiveStartedAt,
+        noiseSuppressionEnabled: callSettings.noiseSuppression,
       });
+      this.rebuildConnectionDetails();
+      this.startStatsPolling();
       return true;
     } catch (error) {
       console.error('Failed to join DM call:', error);
+      this.stopStatsPolling();
       const joinDetail = describeAgoraJoinFailure(error);
       this.setState({
         phase: 'idle',
@@ -772,6 +945,11 @@ class DirectCallSessionStore {
         isScreenSharing: false,
         hasRemoteVideo: false,
         activeSpeakerUids: [],
+        participantCount: 0,
+        averagePingMs: null,
+        lastPingMs: null,
+        outboundPacketLossPct: null,
+        privacyCode: [],
         mediaError: joinDetail.includes('token-based join')
           ? 'Call connection failed (Agora token setup required).'
           : 'Could not access microphone/camera. Check app permissions and selected devices.',
@@ -783,15 +961,46 @@ class DirectCallSessionStore {
   }
 
   async toggleMute() {
-    if (!this.audioTrack) return;
     const newMuted = !this.state.isMuted;
-    await this.audioTrack.setEnabled(!newMuted);
+    if (this.audioTrack) {
+      await this.audioTrack.setEnabled(!newMuted);
+    }
+    persistVoiceTogglePreferences({ startMuted: newMuted });
     this.setState({ isMuted: newMuted });
+    playVoiceToggleSound('mute', newMuted);
+  }
+
+  async toggleDeafen() {
+    const nextDeafened = !this.state.isDeafened;
+    persistVoiceTogglePreferences({ startDeafened: nextDeafened });
+    this.setState({ isDeafened: nextDeafened });
+    await this.applyRemoteAudioState();
+    playVoiceToggleSound('deafen', nextDeafened);
+  }
+
+  private async applyRemoteAudioState(nextSettingsInput?: CallSettings) {
+    const nextSettings = nextSettingsInput || loadCallSettings();
+    const defaultOutputVolume = Math.max(0, Math.min(200, Math.round(Number(nextSettings.outputVolume) || 100)));
+    for (const [uid, remoteTrack] of this.remoteAudioTracks.entries()) {
+      const configuredVolume = this.remoteAudioVolumes.get(uid);
+      const baseVolume = typeof configuredVolume === 'number' ? configuredVolume : defaultOutputVolume;
+      this.remoteAudioVolumes.set(uid, baseVolume);
+      if (typeof remoteTrack.setVolume === 'function') {
+        remoteTrack.setVolume(this.state.isDeafened ? 0 : baseVolume);
+      }
+      if (nextSettings.outputDeviceId && nextSettings.outputDeviceId !== 'default' && typeof remoteTrack.setPlaybackDevice === 'function') {
+        try {
+          await remoteTrack.setPlaybackDevice(nextSettings.outputDeviceId);
+        } catch {
+          // Some runtimes don't allow output routing changes.
+        }
+      }
+    }
   }
 
   async setNoiseSuppression(enabled: boolean) {
     const current = loadCallSettings();
-    if (current.noiseSuppression === enabled && this.audioTrack) return;
+    if (current.noiseSuppression === enabled && this.state.noiseSuppressionEnabled === enabled && this.audioTrack) return;
 
     const nextSettings = {
       ...current,
@@ -800,6 +1009,7 @@ class DirectCallSessionStore {
     };
     // Store user preference immediately, even if we cannot hot-swap the track.
     saveCallSettings(nextSettings);
+    this.setState({ noiseSuppressionEnabled: enabled });
 
     if (!this.client || this.state.phase !== 'active') return;
     if (!this.audioTrack) return;
@@ -862,23 +1072,9 @@ class DirectCallSessionStore {
   async applyCallSettings(nextSettingsInput?: CallSettings) {
     const nextSettings = await this.resolveCallAudioSettings(nextSettingsInput || loadCallSettings());
     saveCallSettings(nextSettings);
+    this.setState({ noiseSuppressionEnabled: nextSettings.noiseSuppression });
 
-    const outputVolume = Math.max(0, Math.min(200, Math.round(Number(nextSettings.outputVolume) || 100)));
-    for (const [uid, remoteTrack] of this.remoteAudioTracks.entries()) {
-      const configuredVolume = this.remoteAudioVolumes.get(uid);
-      const nextVolume = typeof configuredVolume === 'number' ? configuredVolume : outputVolume;
-      this.remoteAudioVolumes.set(uid, nextVolume);
-      if (typeof remoteTrack.setVolume === 'function') {
-        remoteTrack.setVolume(nextVolume);
-      }
-      if (nextSettings.outputDeviceId && nextSettings.outputDeviceId !== 'default' && typeof remoteTrack.setPlaybackDevice === 'function') {
-        try {
-          await remoteTrack.setPlaybackDevice(nextSettings.outputDeviceId);
-        } catch {
-          // Some runtimes don't allow output routing changes.
-        }
-      }
-    }
+    await this.applyRemoteAudioState(nextSettings);
 
     if (!this.client || this.state.phase !== 'active') {
       this.setState({
@@ -992,11 +1188,26 @@ class DirectCallSessionStore {
     await this.client.publish(newVideoTrack);
     this.setState({ isVideoOn: true, wantsVideo: true });
     if (this.localVideoContainer) {
-      newVideoTrack.play(this.localVideoContainer);
+      try {
+        newVideoTrack.play(this.localVideoContainer);
+      } catch {
+        // noop
+      }
     }
   }
 
   async toggleScreenShare(options: ToggleScreenShareOptions) {
+    if (this.screenShareOperation) {
+      return this.screenShareOperation;
+    }
+    const operation = this.performToggleScreenShare(options).finally(() => {
+      this.screenShareOperation = null;
+    });
+    this.screenShareOperation = operation;
+    return operation;
+  }
+
+  private async performToggleScreenShare(options: ToggleScreenShareOptions) {
     if (!this.client || this.state.phase !== 'active') return;
     if (!this.appId || !this.state.conversationId || !this.localUid) return;
 
@@ -1020,6 +1231,7 @@ class DirectCallSessionStore {
         : requestedQuality === '4k60'
           ? ['4k60', '1080p120', '720p30']
           : ['720p30'];
+    const preferNativeCapture = typeof window !== 'undefined' && Boolean(window.desktopBridge?.setPreferredDesktopCaptureSource);
 
     const attemptErrors: string[] = [];
     let activeQuality: ScreenShareQuality | null = null;
@@ -1029,24 +1241,43 @@ class DirectCallSessionStore {
       const attemptFns: Array<{
         label: string;
         run: () => Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }>;
-      }> = [
-        {
-          label: `${quality}:agora:audio-on`,
-          run: () => this.createAgoraScreenTracks(quality, 'enable'),
-        },
-        {
-          label: `${quality}:agora:audio-off`,
-          run: () => this.createAgoraScreenTracks(quality, 'disable'),
-        },
-        {
-          label: `${quality}:native:audio-on`,
-          run: () => this.createNativeScreenTracks(quality, true),
-        },
-        {
-          label: `${quality}:native:audio-off`,
-          run: () => this.createNativeScreenTracks(quality, false),
-        },
-      ];
+      }> = preferNativeCapture
+        ? [
+          {
+            label: `${quality}:native:audio-on`,
+            run: () => this.createNativeScreenTracks(quality, true),
+          },
+          {
+            label: `${quality}:native:audio-off`,
+            run: () => this.createNativeScreenTracks(quality, false),
+          },
+          {
+            label: `${quality}:agora:audio-on`,
+            run: () => this.createAgoraScreenTracks(quality, 'enable'),
+          },
+          {
+            label: `${quality}:agora:audio-off`,
+            run: () => this.createAgoraScreenTracks(quality, 'disable'),
+          },
+        ]
+        : [
+          {
+            label: `${quality}:agora:audio-on`,
+            run: () => this.createAgoraScreenTracks(quality, 'enable'),
+          },
+          {
+            label: `${quality}:agora:audio-off`,
+            run: () => this.createAgoraScreenTracks(quality, 'disable'),
+          },
+          {
+            label: `${quality}:native:audio-on`,
+            run: () => this.createNativeScreenTracks(quality, true),
+          },
+          {
+            label: `${quality}:native:audio-off`,
+            run: () => this.createNativeScreenTracks(quality, false),
+          },
+        ];
 
       for (const attempt of attemptFns) {
         try {
@@ -1056,6 +1287,7 @@ class DirectCallSessionStore {
           this.bindScreenTrackEnded(this.screenTrack);
           const AgoraRTC = await getAgoraModule();
           this.screenClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+          await this.configureRtcOptimizations(this.screenClient);
           this.screenUid = `${this.localUid}::screen`;
           const channelName = `dm-${this.state.conversationId}`;
           const token = await resolveAgoraJoinToken(channelName, this.screenUid);
@@ -1075,6 +1307,11 @@ class DirectCallSessionStore {
           attemptErrors.push(`${attempt.label}: ${formatRtcError(error)}`);
           if (this.screenClient) {
             try {
+              this.screenClient.removeAllListeners();
+            } catch {
+              // noop
+            }
+            try {
               await this.screenClient.leave();
             } catch {
               // noop
@@ -1089,7 +1326,7 @@ class DirectCallSessionStore {
       if (activeQuality) break;
     }
 
-    if (!activeQuality || !this.screenTrack) {
+    if (!activeQuality || !this.screenTrack || !this.screenClient) {
       this.setState({
         mediaError: 'Could not start screen sharing.',
         mediaErrorDetail: attemptErrors.join(' || ') || 'No supported screen capture method succeeded.',
@@ -1104,7 +1341,11 @@ class DirectCallSessionStore {
       mediaErrorDetail: '',
     });
     if (this.localVideoContainer) {
-      this.screenTrack.play(this.localVideoContainer);
+      try {
+        this.screenTrack.play(this.localVideoContainer);
+      } catch {
+        // noop
+      }
     }
   }
 
@@ -1185,6 +1426,7 @@ class DirectCallSessionStore {
     const { signalEnded = true, clearMeta = true } = options;
     const signalCallId = this.state.callId;
     const signalConversationId = this.state.conversationId;
+    this.stopStatsPolling();
 
     if (signalEnded && signalCallId) {
       void (async () => {
@@ -1247,16 +1489,24 @@ class DirectCallSessionStore {
 
     // Flip UI state immediately so route transitions are instant even if
     // media teardown/network leave takes a moment.
+    const persistedSettings = loadCallSettings();
     this.setState({
       phase: 'idle',
       isConnecting: false,
-      isMuted: false,
+      isMuted: Boolean(persistedSettings.startMuted),
+      isDeafened: Boolean(persistedSettings.startDeafened),
       isVideoOn: false,
       isScreenSharing: false,
+      noiseSuppressionEnabled: persistedSettings.noiseSuppression,
       hasRemoteVideo: false,
       remoteParticipantUids: [],
       remoteVideoUids: [],
       activeSpeakerUids: [],
+      participantCount: 0,
+      averagePingMs: null,
+      lastPingMs: null,
+      outboundPacketLossPct: null,
+      privacyCode: [],
       mediaError: '',
       mediaErrorDetail: '',
       ...(clearMeta
@@ -1333,6 +1583,7 @@ class DirectCallSessionStore {
   }
 
   private forceLocalCleanup() {
+    this.stopStatsPolling();
     this.disposeScreenTracks();
     void this.disposeAudioDenoiser();
 
@@ -1449,7 +1700,7 @@ class DirectCallSessionStore {
           : callSettings.outputVolume;
         this.remoteAudioVolumes.set(uid, nextVolume);
         if (typeof user.audioTrack.setVolume === 'function') {
-          user.audioTrack.setVolume(nextVolume);
+          user.audioTrack.setVolume(this.state.isDeafened ? 0 : nextVolume);
         }
         if (callSettings.outputDeviceId && callSettings.outputDeviceId !== 'default' && typeof user.audioTrack.setPlaybackDevice === 'function') {
           try {
@@ -1659,6 +1910,8 @@ publishDirectCallShellState({
   callId: initialState.callId,
   wantsVideo: initialState.wantsVideo,
   startedAt: initialState.startedAt,
+  isMuted: initialState.isMuted,
+  isDeafened: initialState.isDeafened,
 });
 
 export function useDirectCallSession(): DirectCallSessionState {

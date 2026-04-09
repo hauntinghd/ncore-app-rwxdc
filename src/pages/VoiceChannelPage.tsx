@@ -141,6 +141,16 @@ export function VoiceChannelPage() {
   const isLocalSpeaking = localSpeakerUid ? session.activeSpeakerUids.includes(localSpeakerUid) : false;
   const localName = profile?.display_name || profile?.username || 'You';
   const remoteParticipantUids = session.remoteParticipantUids.filter((uid) => uid !== localSpeakerUid);
+  const connectionTelemetryLabel = useMemo(() => {
+    const segments: string[] = [];
+    if (session.averagePingMs != null) {
+      segments.push(`${session.averagePingMs} ms`);
+    }
+    if (session.outboundPacketLossPct != null) {
+      segments.push(`${session.outboundPacketLossPct}% loss`);
+    }
+    return segments.join(' • ');
+  }, [session.averagePingMs, session.outboundPacketLossPct]);
 
   function resolveVoiceSessionForUid(uid: string): VoiceSession | undefined {
     const normalizedUid = String(uid || '').trim();
@@ -238,12 +248,12 @@ export function VoiceChannelPage() {
               )}
             </div>
 
-            <div className="flex items-center justify-center gap-4 py-4 border-t border-surface-800 bg-surface-900 flex-shrink-0">
+            <div className="relative flex items-center justify-center gap-4 py-4 border-t border-surface-800 bg-surface-900 flex-shrink-0">
               <div className="text-xs text-surface-500 absolute left-4">
                 {session.isConnected ? (
                   <span className="flex items-center gap-1.5 text-green-400">
                     <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                    Connected
+                    {connectionTelemetryLabel ? `Connected • ${connectionTelemetryLabel}` : 'Connected'}
                   </span>
                 ) : 'Connecting...'}
               </div>

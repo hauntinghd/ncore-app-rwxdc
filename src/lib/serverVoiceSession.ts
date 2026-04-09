@@ -16,6 +16,7 @@ import { queueRuntimeEvent } from './runtimeTelemetry';
 import { publishServerVoiceShellState } from './serverVoiceShell';
 import { supabase } from './supabase';
 import type { Channel, VoiceSession } from './types';
+import { playVoiceToggleSound } from './notificationSound';
 
 type Listener = () => void;
 
@@ -96,8 +97,8 @@ const initialState: ServerVoiceSessionState = {
   communityId: null,
   channelId: null,
   channelName: '',
-  isMuted: false,
-  isDeafened: false,
+  isMuted: Boolean(loadCallSettings().startMuted),
+  isDeafened: Boolean(loadCallSettings().startDeafened),
   isCameraOn: false,
   isScreenSharing: false,
   isConnected: false,
@@ -117,6 +118,14 @@ const initialState: ServerVoiceSessionState = {
   outboundPacketLossPct: null,
   privacyCode: [],
 };
+
+function persistVoiceTogglePreferences(next: { startMuted?: boolean; startDeafened?: boolean }) {
+  const current = loadCallSettings();
+  saveCallSettings({
+    ...current,
+    ...next,
+  });
+}
 
 function formatRtcError(error: unknown): string {
   const e = error as any;
@@ -223,15 +232,19 @@ class ServerVoiceSessionStore {
   private activeSpeakerKey = '';
   private statsInterval: ReturnType<typeof setInterval> | null = null;
   private latencySamples: number[] = [];
+  private screenShareOperation: Promise<void> | null = null;
 
   private async configureRtcOptimizations(client: IAgoraRTCClient) {
+    const clientAny = client as any;
     try {
       await client.enableDualStream();
     } catch {
       // noop
     }
     try {
-      await client.setStreamFallbackOption(2);
+      if (typeof clientAny.setStreamFallbackOption === 'function') {
+        clientAny.setStreamFallbackOption(2);
+      }
     } catch {
       // noop
     }
@@ -524,12 +537,20 @@ class ServerVoiceSessionStore {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: buildDisplayMediaVideoConstraints(quality),
         audio: withAudio,
-      });
+        selfBrowserSurface: 'exclude' as any,
+        surfaceSwitching: 'include' as any,
+        systemAudio: withAudio ? 'include' as any : 'exclude' as any,
+        preferCurrentTab: false as any,
+      } as any);
     } catch (primaryError) {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: withAudio,
-      }).catch(() => {
+        selfBrowserSurface: 'exclude' as any,
+        surfaceSwitching: 'include' as any,
+        systemAudio: withAudio ? 'include' as any : 'exclude' as any,
+        preferCurrentTab: false as any,
+      } as any).catch(() => {
         throw primaryError;
       });
     }
@@ -672,6 +693,9 @@ class ServerVoiceSessionStore {
     const { communityId, channelId, channelName, profileId, userId } = options;
     if (!channelId || !profileId) return false;
     const joinToken = ++this.lifecycleToken;
+    const activeCallSettings = loadCallSettings();
+    const preferredMuted = Boolean(activeCallSettings.startMuted);
+    const preferredDeafened = Boolean(activeCallSettings.startDeafened);
 
     if (
       this.state.channelId === channelId
@@ -699,10 +723,12 @@ class ServerVoiceSessionStore {
       communityId,
       channelId,
       channelName: String(channelName || ''),
+      isMuted: preferredMuted,
+      isDeafened: preferredDeafened,
       isConnected: false,
       isConnecting: true,
       connectionError: '',
-      noiseSuppressionEnabled: loadCallSettings().noiseSuppression,
+      noiseSuppressionEnabled: activeCallSettings.noiseSuppression,
     });
 
     void this.hydrateChannelName(channelId, channelName);
@@ -715,8 +741,8 @@ class ServerVoiceSessionStore {
       await supabase.from('voice_sessions').upsert({
         channel_id: channelId,
         user_id: profileId,
-        is_muted: false,
-        is_deafened: false,
+        is_muted: this.state.isMuted,
+        is_deafened: this.state.isDeafened,
         is_camera_on: false,
         is_screen_sharing: false,
       });
@@ -859,7 +885,6 @@ class ServerVoiceSessionStore {
         return false;
       }
 
-      const activeCallSettings = loadCallSettings();
       const audioTrack = await createConfiguredLocalAudioTrack(activeCallSettings);
       if (joinToken !== this.lifecycleToken) {
         try {
@@ -883,6 +908,9 @@ class ServerVoiceSessionStore {
       const audioDenoiserBinding = await createAIDenoiserBinding(audioTrack, activeCallSettings.noiseSuppression);
       this.localAudioTrack = audioTrack;
       this.audioDenoiserBinding = audioDenoiserBinding;
+      if (this.state.isMuted) {
+        await audioTrack.setEnabled(false);
+      }
       await client.publish(audioTrack);
       if (joinToken !== this.lifecycleToken) {
         try {
@@ -965,9 +993,12 @@ class ServerVoiceSessionStore {
     this.remoteAudioTracks.clear();
     this.remoteVideoContainers.clear();
     this.activeSpeakerKey = '';
+    const persistedSettings = loadCallSettings();
     this.setState({
       ...initialState,
-      noiseSuppressionEnabled: loadCallSettings().noiseSuppression,
+      isMuted: Boolean(persistedSettings.startMuted),
+      isDeafened: Boolean(persistedSettings.startDeafened),
+      noiseSuppressionEnabled: persistedSettings.noiseSuppression,
       screenSources: preservedScreenSources,
       selectedScreenSourceId: preservedSelectedScreenSourceId,
     });
@@ -1032,10 +1063,14 @@ class ServerVoiceSessionStore {
   }
 
   async toggleMute() {
-    if (!this.localAudioTrack || !this.state.channelId || !this.localProfileId) return;
     const nextMuted = !this.state.isMuted;
-    await this.localAudioTrack.setEnabled(!nextMuted);
+    if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
+      await this.localAudioTrack.setEnabled(!nextMuted);
+    }
+    persistVoiceTogglePreferences({ startMuted: nextMuted });
     this.setState({ isMuted: nextMuted });
+    playVoiceToggleSound('mute', nextMuted);
+    if (!this.state.channelId || !this.localProfileId) return;
     await supabase
       .from('voice_sessions')
       .update({ is_muted: nextMuted })
@@ -1045,8 +1080,10 @@ class ServerVoiceSessionStore {
 
   async toggleDeafen() {
     const next = !this.state.isDeafened;
+    persistVoiceTogglePreferences({ startDeafened: next });
     this.setState({ isDeafened: next });
     await this.applyRemoteAudioState();
+    playVoiceToggleSound('deafen', next);
     if (this.state.channelId && this.localProfileId) {
       await supabase
         .from('voice_sessions')
@@ -1083,6 +1120,17 @@ class ServerVoiceSessionStore {
   }
 
   async toggleScreenShare() {
+    if (this.screenShareOperation) {
+      return this.screenShareOperation;
+    }
+    const operation = this.performToggleScreenShare().finally(() => {
+      this.screenShareOperation = null;
+    });
+    this.screenShareOperation = operation;
+    return operation;
+  }
+
+  private async performToggleScreenShare() {
     if (!this.client || !this.state.channelId || !this.localProfileId || !this.localUid || !AGORA_APP_ID) return;
     if (this.state.isScreenSharing) {
       await this.stopScreenShare();
@@ -1091,6 +1139,7 @@ class ServerVoiceSessionStore {
 
     const requestedQuality = this.getPreferredScreenShareQuality();
     const qualityAttemptOrder = this.getScreenShareAttemptOrder(requestedQuality);
+    const preferNativeCapture = typeof window !== 'undefined' && Boolean(window.desktopBridge?.setPreferredDesktopCaptureSource);
     const attemptErrors: string[] = [];
 
     try {
@@ -1104,24 +1153,43 @@ class ServerVoiceSessionStore {
         const attemptFns: Array<{
           label: string;
           run: () => Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }>;
-        }> = [
-          {
-            label: `${quality}:agora:audio-on`,
-            run: () => this.createAgoraScreenTracks(quality, 'enable'),
-          },
-          {
-            label: `${quality}:agora:audio-off`,
-            run: () => this.createAgoraScreenTracks(quality, 'disable'),
-          },
-          {
-            label: `${quality}:native:audio-on`,
-            run: () => this.createNativeScreenTracks(quality, true),
-          },
-          {
-            label: `${quality}:native:audio-off`,
-            run: () => this.createNativeScreenTracks(quality, false),
-          },
-        ];
+        }> = preferNativeCapture
+          ? [
+            {
+              label: `${quality}:native:audio-on`,
+              run: () => this.createNativeScreenTracks(quality, true),
+            },
+            {
+              label: `${quality}:native:audio-off`,
+              run: () => this.createNativeScreenTracks(quality, false),
+            },
+            {
+              label: `${quality}:agora:audio-on`,
+              run: () => this.createAgoraScreenTracks(quality, 'enable'),
+            },
+            {
+              label: `${quality}:agora:audio-off`,
+              run: () => this.createAgoraScreenTracks(quality, 'disable'),
+            },
+          ]
+          : [
+            {
+              label: `${quality}:agora:audio-on`,
+              run: () => this.createAgoraScreenTracks(quality, 'enable'),
+            },
+            {
+              label: `${quality}:agora:audio-off`,
+              run: () => this.createAgoraScreenTracks(quality, 'disable'),
+            },
+            {
+              label: `${quality}:native:audio-on`,
+              run: () => this.createNativeScreenTracks(quality, true),
+            },
+            {
+              label: `${quality}:native:audio-off`,
+              run: () => this.createNativeScreenTracks(quality, false),
+            },
+          ];
 
         for (const attempt of attemptFns) {
           try {

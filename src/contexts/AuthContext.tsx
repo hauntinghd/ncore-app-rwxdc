@@ -301,7 +301,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('id', user.id);
 
     if (!error) {
-      setProfile(prev => prev ? { ...prev, ...updates } : null);
+      setProfile((prev) => {
+        if (!prev) return null;
+        const nextProfile = { ...prev, ...updates };
+        writeCachedProfile(nextProfile);
+        return nextProfile;
+      });
     }
 
     return { error: error as Error | null };

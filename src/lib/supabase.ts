@@ -10,11 +10,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const DESKTOP_AUTH_STORAGE_KEY = 'ncore-auth';
 
 function hasDesktopAuthStorageBridge(): boolean {
-  return Boolean(
-    typeof window !== 'undefined'
-      && window.desktopBridge?.authStorageGetItem
-      && window.desktopBridge?.authStorageSetItem
-      && window.desktopBridge?.authStorageRemoveItem,
+  if (typeof window === 'undefined') return false;
+  const bridge = window.desktopBridge;
+  return (
+    typeof bridge?.authStorageGetItem === 'function'
+    && typeof bridge?.authStorageSetItem === 'function'
+    && typeof bridge?.authStorageRemoveItem === 'function'
   );
 }
 

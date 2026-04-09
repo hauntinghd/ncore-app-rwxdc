@@ -1,9 +1,69 @@
 {
     "releases": [
         {
+            "version": "11.7.92",
+            "date": "2026-04-08",
+            "badge": "Current Build",
+            "improvements": [
+                "User dock mute and deafen toggles now work even while idle, matching Discord-style pre-call behavior.",
+                "Pre-call mute/deafen preferences now persist and auto-apply when joining direct calls or server voice channels.",
+                "In-app notification and call cues are louder with a minimum 85% target and full-strength default tuning."
+            ],
+            "bugFixes": [
+                "Fixed notification sound inconsistencies by tightening cue playback and adding dedicated mute/deafen feedback sounds.",
+                "Fixed voice session state sync so persisted mute/deafen state correctly carries into active call joins.",
+                "Adjusted dock control affordances so mute/deafen actions are no longer blocked when not currently connected."
+            ]
+        },
+        {
+            "version": "11.7.91",
+            "date": "2026-04-07",
+            "badge": "Previous",
+            "improvements": [
+                "Direct-call and server-voice surfaces now show live latency telemetry so connection quality is visible in-call instead of hidden behind backend stats.",
+                "The DM voice dock now follows active direct-call state, which restores real mute and deafen control from the bottom-left profile tray while a DM call is live.",
+                "Screen-share capture now filters out the NCore window itself and uses stronger fullscreen/share-session handling so share flows behave more like a production desktop comms app."
+            ],
+            "bugFixes": [
+                "Fixed the broken DM dock call controls that stayed greyed out during active direct calls because the dock only listened to server voice state.",
+                "Fixed the remote share fullscreen exit path so zoom-out and unfullscreen actions work reliably from the same viewer controls.",
+                "Reduced screen-share instability by serializing share start-stop operations, hardening native capture constraints, and cleaning up the share RTC client more defensively."
+            ]
+        },
+        {
+            "version": "11.7.90",
+            "date": "2026-04-07",
+            "badge": "Previous",
+            "improvements": [
+                "Installed NCore desktop builds now use the embedded updater end-to-end, with live checking, download progress, and restart-to-update controls in the app shell and What's New.",
+                "Windows release packaging now defaults to the NSIS installer path so shipped desktop builds stay eligible for self-updating releases instead of silently falling back to portable behavior.",
+                "The What's New update launcher now shows real updater state, progress, and ready-to-install status so desktop updates look and behave like a proper production client."
+            ],
+            "bugFixes": [
+                "Fixed the desktop update action still handing users off to external installers even when electron-updater was already available in the installed app.",
+                "Fixed the packaging mismatch that could keep NCore on a portable-target default, which disables automatic self-updating by design.",
+                "Fixed updater status visibility so checking, downloading, and install-ready states no longer look stalled or ambiguous from the settings surface."
+            ]
+        },
+        {
+            "version": "11.7.89",
+            "date": "2026-04-07",
+            "badge": "Previous",
+            "improvements": [
+                "The NCore landing site now presents a stronger operator-focused product story with a cleaner launch surface and clearer web-app and download paths.",
+                "Direct messages now hydrate new sends in-place, typing presence updates more reliably, and animated typing indicators feel closer to a real production chat app.",
+                "Discover now has distinct Servers, Apps, and Quests lanes, while custom status editing is available directly from the user dock."
+            ],
+            "bugFixes": [
+                "Fixed the in-app notifications bell so realtime and fetched notifications merge cleanly instead of dropping or clobbering state.",
+                "Fixed the DM refresh bug where a sent message could stay invisible until you clicked away from the conversation and came back.",
+                "Fixed profile status persistence so custom statuses save through the cached auth profile instead of appearing to fail silently."
+            ]
+        },
+        {
             "version": "11.7.88",
             "date": "2026-03-27",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "QuickDraw now uses a much closer TRW-style contract grid with a dedicated command rail, saved-contract controls, alert toggles, live filters, richer detail states, and a more operator-focused browse/deploy split.",
                 "Game marketplace now behaves more like a real storefront with a stronger Steam-style layout, featured capsules, dedicated tabs including Wishlist, safe installer opens, and cleaner detail / library flows.",

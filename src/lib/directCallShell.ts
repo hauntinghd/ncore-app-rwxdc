@@ -9,6 +9,8 @@ export interface DirectCallShellState {
   callId: string | null;
   wantsVideo: boolean;
   startedAt: number | null;
+  isMuted: boolean;
+  isDeafened: boolean;
 }
 
 interface HangupOptions {
@@ -22,6 +24,8 @@ const DEFAULT_STATE: DirectCallShellState = {
   callId: null,
   wantsVideo: false,
   startedAt: null,
+  isMuted: false,
+  isDeafened: false,
 };
 
 const listeners = new Set<Listener>();
@@ -34,6 +38,8 @@ function sameState(a: DirectCallShellState, b: DirectCallShellState): boolean {
     && a.callId === b.callId
     && a.wantsVideo === b.wantsVideo
     && a.startedAt === b.startedAt
+    && a.isMuted === b.isMuted
+    && a.isDeafened === b.isDeafened
   );
 }
 
@@ -59,6 +65,16 @@ export function useDirectCallShellState(): DirectCallShellState {
 export async function hangupDirectCall(options?: HangupOptions) {
   const { directCallSession } = await import('./directCallSession');
   return directCallSession.hangup(options);
+}
+
+export async function toggleDirectCallMute() {
+  const { directCallSession } = await import('./directCallSession');
+  return directCallSession.toggleMute();
+}
+
+export async function toggleDirectCallDeafen() {
+  const { directCallSession } = await import('./directCallSession');
+  return directCallSession.toggleDeafen();
 }
 
 export async function applyDirectCallSettings(nextSettings: CallSettings) {

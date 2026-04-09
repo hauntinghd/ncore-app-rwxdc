@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.88",
+  "version": "11.7.92",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -23,10 +23,12 @@
     "build:apk:release": "npm run build:mobile:web && npm run sync:android:mobile && cd android && gradlew.bat assembleRelease --no-daemon",
     "icons:sync": "node scripts/sync-brand-icons.cjs",
     "version:bump": "node scripts/bump-version.cjs patch",
-    "build:exe": "npm run icons:sync && npm run build:electron:web && electron-builder --win portable --x64 -c.win.signAndEditExecutable=false",
+    "build:exe": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false",
+    "build:exe:portable": "npm run icons:sync && npm run build:electron:web && electron-builder --win portable --x64 -c.win.signAndEditExecutable=false",
     "build:exe:auto:nobump": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "build:exe:auto": "npm run version:bump && npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "release:web": "node scripts/release-web.cjs",
+    "release:web:auto": "npm run version:bump && node scripts/release-web.cjs",
     "release:update": "npm run build:exe:auto && npm run release:web"
   },
   "dependencies": {
@@ -99,7 +101,7 @@
       "icon": "electron/assets/ncore-icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]

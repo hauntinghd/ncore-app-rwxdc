@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
-  Download, RefreshCw, Search, Settings, User, X, Zap,
+  Download, Mic, MicOff, RefreshCw, Search, Settings, User, Volume2, VolumeX, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { hangupDirectCall, useDirectCallShellState } from '../../lib/directCallShell';
+import { hangupDirectCall, toggleDirectCallDeafen, toggleDirectCallMute, useDirectCallShellState } from '../../lib/directCallShell';
 import type { Notification } from '../../lib/types';
 import { formatRelativeTime } from '../../lib/utils';
 import { playNotificationSound, primeNotificationAudio, startIncomingCallRing, stopIncomingCallRing, type NotificationSoundKind } from '../../lib/notificationSound';
@@ -38,9 +38,35 @@ const RELEASE_CACHE_TTL_MS = 120000;
 const EMPTY_UPDATE_RUNTIME_STATE = {
   portable: false,
   ready: false,
+  checking: false,
+  downloading: false,
+  progress: 0,
   installing: false,
   version: '',
+  latestVersion: '',
+  message: '',
 };
+
+function sortNotificationsByCreatedAt(list: Notification[]): Notification[] {
+  return [...list].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+
+function mergeNotificationLists(current: Notification[], incoming: Notification[]): Notification[] {
+  const merged = new Map<string, Notification>();
+
+  for (const notification of [...current, ...incoming]) {
+    const id = String(notification?.id || '').trim();
+    if (!id) continue;
+    const existing = merged.get(id);
+    merged.set(id, existing ? {
+      ...existing,
+      ...notification,
+      is_read: Boolean(existing.is_read || notification.is_read),
+    } : notification);
+  }
+
+  return sortNotificationsByCreatedAt(Array.from(merged.values()));
+}
 
 function readSeenReleaseVersion(): string {
   if (typeof window === 'undefined') return '';
@@ -109,6 +135,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [incomingCall, setIncomingCall] = useState<Notification | null>(null);
+  const [notificationError, setNotificationError] = useState('');
   const [callNowMs, setCallNowMs] = useState(Date.now());
   const [releaseUpdates, setReleaseUpdates] = useState<ReleaseLogEntry[]>([]);
   const [latestReleaseVersion, setLatestReleaseVersion] = useState('');
@@ -141,7 +168,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     ? location.pathname === `/app/dm/${activeCallConversationId}/call`
     : false;
   const updateInstallInProgress = installingFromTopbar || updateRuntimeState.installing;
-  const showTopbarUpdateButton = !updateRuntimeState.portable && (updateRuntimeState.ready || updateInstallInProgress);
+  const updateDownloadInProgress = updateRuntimeState.checking || updateRuntimeState.downloading;
+  const showTopbarUpdateButton = !updateRuntimeState.portable && (updateRuntimeState.ready || updateInstallInProgress || updateDownloadInProgress);
 
   function markReleaseUpdatesRead(version = latestReleaseVersion) {
     const normalized = String(version || '').trim();
@@ -220,8 +248,13 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       setUpdateRuntimeState({
         portable: Boolean(payload.portable),
         ready: Boolean(payload.ready),
+        checking: Boolean(payload.checking),
+        downloading: Boolean(payload.downloading),
+        progress: Number(payload.progress || 0),
         installing: Boolean(payload.installing),
         version: String(payload.version || ''),
+        latestVersion: String(payload.latestVersion || ''),
+        message: String(payload.message || ''),
       });
       if (!payload.installing) {
         setInstallingFromTopbar(false);
@@ -329,16 +362,23 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   useEffect(() => {
     if (!profile) return;
     const pullNotifications = async (emitDesktopForNew: boolean) => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .eq('user_id', profile.id)
         .order('created_at', { ascending: false })
         .limit(20);
 
+      if (error) {
+        setNotificationError(error.message || 'Could not refresh notifications.');
+        return;
+      }
       if (!data) return;
-      const list = data as Notification[];
-      setNotifications(list);
+      const list = sortNotificationsByCreatedAt(data as Notification[]);
+      setNotificationError('');
+      setNotifications((prev) => mergeNotificationLists(prev, list).slice(0, 50));
+      const latestIncomingCall = list.find((notification) => notification.type === 'incoming_call' && !notification.is_read) || null;
+      setIncomingCall(latestIncomingCall);
 
       if (!useMainProcessDesktopNotifications && emitDesktopForNew && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         for (const notification of list) {
@@ -377,7 +417,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         },
         (payload) => {
           const incoming = payload.new as Notification;
-          setNotifications((prev) => [incoming, ...prev].slice(0, 50));
+          setNotifications((prev) => mergeNotificationLists(prev, [incoming]).slice(0, 50));
+          setNotificationError('');
           if (incoming.type === 'incoming_call') {
             setIncomingCall(incoming);
           }
@@ -419,6 +460,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   }, []);
 
   useEffect(() => {
+    setShowNotifications(false);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
     if (streamerMode.silentNotifications) {
       stopIncomingCallRing();
       return;
@@ -443,6 +488,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id);
     setNotifications((prev) => prev.map((notification) => ({ ...notification, is_read: true })));
     setIncomingCall(null);
+    setShowNotifications(false);
     stopIncomingCallRing();
   }
 
@@ -452,6 +498,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   }
 
   async function handleNotificationClick(notification: Notification) {
+    setShowNotifications(false);
     if (!notification.is_read) {
       await supabase.from('notifications').update({ is_read: true }).eq('id', notification.id);
       setNotifications((prev) => prev.map((entry) => (entry.id === notification.id ? { ...entry, is_read: true } : entry)));
@@ -466,7 +513,6 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       stopIncomingCallRing();
 
       if (conversationId) {
-        setShowNotifications(false);
         navigate(buildCallRoute(conversationId, video, fallbackJoin));
         return;
       }
@@ -478,12 +524,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       const targetCommunityId = data.community_id as string | undefined;
       const targetChannelId = data.channel_id as string | undefined;
       if (targetCommunityId && targetChannelId) {
-        setShowNotifications(false);
         navigate(`/app/community/${targetCommunityId}/channel/${targetChannelId}`);
         return;
       }
       if (targetConversationId) {
-        setShowNotifications(false);
         navigate(`/app/dm/${targetConversationId}`);
         return;
       }
@@ -493,7 +537,6 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       const data = (notification.data || {}) as any;
       const targetConversationId = data.conversation_id as string | undefined;
       if (targetConversationId) {
-        setShowNotifications(false);
         navigate(`/app/dm/${targetConversationId}`);
       }
     }
@@ -588,12 +631,36 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                 ? 'Connecting call...'
                 : `In call ${formatCallDuration(callNowMs - (callSession.startedAt || callNowMs))}`}
             </span>
+            <button
+              type="button"
+              onClick={() => void toggleDirectCallMute()}
+              className={`rounded p-1 transition-colors ${
+                callSession.isMuted
+                  ? 'bg-red-600/90 text-white hover:bg-red-500'
+                  : 'bg-surface-700/70 text-surface-100 hover:bg-surface-600'
+              }`}
+              title={callSession.isMuted ? 'Unmute' : 'Mute'}
+            >
+              {callSession.isMuted ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => void toggleDirectCallDeafen()}
+              className={`rounded p-1 transition-colors ${
+                callSession.isDeafened
+                  ? 'bg-red-600/90 text-white hover:bg-red-500'
+                  : 'bg-surface-700/70 text-surface-100 hover:bg-surface-600'
+              }`}
+              title={callSession.isDeafened ? 'Undeafen' : 'Deafen'}
+            >
+              {callSession.isDeafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
+            </button>
             {!isOnActiveCallRoute && (
               <button
                 onClick={() => navigate(`/app/dm/${activeCallConversationId}/call${callSession.wantsVideo ? '?video=1' : ''}`)}
                 className="rounded bg-surface-700/70 px-2 py-1 text-[11px] font-semibold text-surface-100 transition-colors hover:bg-surface-600"
               >
-                Open
+                Return
               </button>
             )}
             <button
@@ -613,14 +680,28 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
             type="button"
             onClick={handleInstallUpdateFromTopbar}
             disabled={!updateRuntimeState.ready || updateInstallInProgress}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-green-500/40 bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-100 transition-colors hover:bg-green-500/25 disabled:cursor-not-allowed disabled:opacity-70"
-            title={updateInstallInProgress ? 'Applying update and restarting NCore...' : 'Apply downloaded update and restart NCore'}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+              updateRuntimeState.ready || updateInstallInProgress
+                ? 'border-green-500/40 bg-green-500/15 text-green-100 hover:bg-green-500/25'
+                : 'border-amber-500/35 bg-amber-500/12 text-amber-100 hover:bg-amber-500/18'
+            } disabled:cursor-not-allowed disabled:opacity-70`}
+            title={updateInstallInProgress
+              ? 'Applying update and restarting NCore...'
+              : updateDownloadInProgress
+                ? (updateRuntimeState.message || 'NCore is downloading the latest update in the background.')
+                : 'Apply downloaded update and restart NCore'}
           >
-            {updateInstallInProgress ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+            {updateInstallInProgress || updateDownloadInProgress
+              ? <RefreshCw size={13} className="animate-spin" />
+              : <Download size={13} />}
             <span>
               {updateInstallInProgress
                 ? 'Updating...'
-                : `Update${updateRuntimeState.version ? ` v${updateRuntimeState.version}` : ' Ready'}`}
+                : updateDownloadInProgress
+                  ? (updateRuntimeState.downloading
+                    ? `Downloading${updateRuntimeState.progress ? ` ${Math.round(updateRuntimeState.progress)}%` : '...'}`
+                    : 'Checking...')
+                  : `Update${updateRuntimeState.version ? ` v${updateRuntimeState.version}` : ' Ready'}`}
             </span>
           </button>
         )}
@@ -706,13 +787,19 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
               )}
 
               <div className="max-h-80 overflow-y-auto">
+                {notificationError && (
+                  <div className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-red-200">
+                    {notificationError}
+                  </div>
+                )}
                 {notifications.length === 0 ? (
                   <div className="py-8 text-center text-sm text-surface-500">No account notifications yet</div>
                 ) : notifications.map((notification) => (
-                  <div
+                  <button
                     key={notification.id}
+                    type="button"
                     onClick={() => handleNotificationClick(notification)}
-                    className={`border-b border-surface-700/50 px-4 py-3 transition-colors hover:bg-surface-700/30 ${!notification.is_read ? 'bg-nyptid-300/5' : ''}`}
+                    className={`w-full border-b border-surface-700/50 px-4 py-3 text-left transition-colors hover:bg-surface-700/30 ${!notification.is_read ? 'bg-nyptid-300/5' : ''}`}
                   >
                     <div className="flex items-start gap-3">
                       {!notification.is_read && <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-nyptid-300" />}
@@ -726,7 +813,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                         <div className="mt-1 text-xs text-surface-600">{formatRelativeTime(notification.created_at)}</div>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

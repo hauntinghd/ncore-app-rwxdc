@@ -32,6 +32,12 @@ const PRIMARY_UPDATE_FEED_URL = 'https://ncore.nyptidindustries.com/updates';
 const isPortableBuild = Boolean(process.env.PORTABLE_EXECUTABLE_FILE);
 let isUpdateReady = false;
 let downloadedUpdateVersion = '';
+let availableUpdateVersion = '';
+let isCheckingForUpdate = false;
+let isDownloadingUpdate = false;
+let updateDownloadProgress = 0;
+let updateStatusMessage = '';
+let autoUpdateCheckPromise = null;
 
 function getUpdateRuntimeState() {
   return {
@@ -39,7 +45,12 @@ function getUpdateRuntimeState() {
     portable: isPortableBuild,
     ready: isUpdateReady,
     installing: isInstallingUpdate,
-    version: String(downloadedUpdateVersion || ''),
+    checking: isCheckingForUpdate,
+    downloading: isDownloadingUpdate,
+    progress: Number.isFinite(updateDownloadProgress) ? Number(updateDownloadProgress) : 0,
+    version: String(downloadedUpdateVersion || availableUpdateVersion || ''),
+    latestVersion: String(availableUpdateVersion || downloadedUpdateVersion || ''),
+    message: String(updateStatusMessage || ''),
   };
 }
 
@@ -157,6 +168,39 @@ function resolveAppIconPath() {
     }
   }
   return undefined;
+}
+
+function getWindowCaptureTitles() {
+  return BrowserWindow.getAllWindows()
+    .filter((win) => win && !win.isDestroyed())
+    .map((win) => String(win.getTitle() || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isOwnWindowCaptureSource(source, knownTitles = getWindowCaptureTitles()) {
+  if (!source) return false;
+  const sourceId = String(source.id || '').trim().toLowerCase();
+  const sourceName = String(source.name || '').trim().toLowerCase();
+  if (!sourceId.startsWith('window:')) return false;
+  if (!sourceName) return false;
+  if (sourceName.includes('ncore') || sourceName.includes('nyptid')) return true;
+  return knownTitles.some((title) => (
+    title
+    && (sourceName === title || sourceName.includes(title) || title.includes(sourceName))
+  ));
+}
+
+function filterDesktopCaptureSources(sources) {
+  const sourceList = Array.isArray(sources) ? sources : [];
+  const windowTitles = getWindowCaptureTitles();
+  const filtered = sourceList.filter((source) => !isOwnWindowCaptureSource(source, windowTitles));
+  const preferred = filtered.length > 0 ? filtered : sourceList;
+  return [...preferred].sort((left, right) => {
+    const leftIsScreen = String(left?.id || '').startsWith('screen:');
+    const rightIsScreen = String(right?.id || '').startsWith('screen:');
+    if (leftIsScreen === rightIsScreen) return 0;
+    return leftIsScreen ? -1 : 1;
+  });
 }
 
 function showMainWindow() {
@@ -455,10 +499,11 @@ app.whenReady().then(() => {
   // getDisplayMedia/createScreenVideoTrack with NOT_SUPPORTED.
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
-      const sources = await desktopCapturer.getSources({
+      const rawSources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
         fetchWindowIcons: true,
       });
+      const sources = filterDesktopCaptureSources(rawSources);
 
       if (!sources || sources.length === 0) {
         callback({ video: null, audio: null });
@@ -625,6 +670,7 @@ ipcMain.handle('settings:setStreamerMode', async (_event, payload) => {
 function setupAutoUpdates() {
   if (isPortableBuild) {
     // electron-updater does not support true auto-install flow on portable target.
+    updateStatusMessage = 'Auto-update is unavailable on portable builds. Install NCore Setup to get self-updating releases.';
     console.warn('Auto-update disabled for portable build. Use NSIS build for automatic updates.');
     emitUpdateReadyState();
     return;
@@ -638,35 +684,119 @@ function setupAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  autoUpdater.on('checking-for-update', () => {
+    isCheckingForUpdate = true;
+    isDownloadingUpdate = false;
+    isUpdateReady = false;
+    updateDownloadProgress = 0;
+    updateStatusMessage = 'Checking for updates...';
+    emitUpdateReadyState();
+  });
+
   autoUpdater.on('error', (err) => {
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = false;
+    updateStatusMessage = String(err?.message || err || 'Update check failed.');
+    updateDownloadProgress = 0;
+    autoUpdateCheckPromise = null;
+    emitUpdateReadyState();
     console.warn('Auto-update check skipped or failed:', err?.message || err);
   });
 
   autoUpdater.on('before-quit-for-update', () => {
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = false;
     isUpdateReady = false;
     isInstallingUpdate = true;
     isAppQuitting = true;
+    updateStatusMessage = downloadedUpdateVersion
+      ? `Applying NCore v${downloadedUpdateVersion}...`
+      : 'Applying update...';
     emitUpdateReadyState();
     destroyTray();
   });
 
   autoUpdater.on('update-available', (info) => {
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = true;
     isUpdateReady = false;
-    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '');
+    downloadedUpdateVersion = '';
+    availableUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '');
+    updateDownloadProgress = 0;
+    updateStatusMessage = availableUpdateVersion
+      ? `Downloading NCore v${availableUpdateVersion}...`
+      : 'Downloading update...';
+    emitUpdateReadyState();
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = false;
+    isUpdateReady = false;
+    updateDownloadProgress = 0;
+    availableUpdateVersion = '';
+    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '') || downloadedUpdateVersion;
+    updateStatusMessage = downloadedUpdateVersion
+      ? `NCore is already on the latest build (v${downloadedUpdateVersion}).`
+      : 'NCore is already on the latest build.';
+    emitUpdateReadyState();
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = true;
+    isUpdateReady = false;
+    const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
+    updateDownloadProgress = percent;
+    updateStatusMessage = availableUpdateVersion
+      ? `Downloading NCore v${availableUpdateVersion} (${percent}%)...`
+      : `Downloading update (${percent}%)...`;
     emitUpdateReadyState();
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '') || downloadedUpdateVersion;
+    isCheckingForUpdate = false;
+    isDownloadingUpdate = false;
+    updateDownloadProgress = 100;
+    downloadedUpdateVersion = normalizeSemver(info?.version || info?.releaseName || '') || availableUpdateVersion || downloadedUpdateVersion;
+    availableUpdateVersion = downloadedUpdateVersion || availableUpdateVersion;
     isUpdateReady = true;
+    updateStatusMessage = downloadedUpdateVersion
+      ? `NCore v${downloadedUpdateVersion} is ready to install.`
+      : 'Update downloaded and ready to install.';
     emitUpdateReadyState();
   });
 
   // Check on startup and periodically.
-  autoUpdater.checkForUpdates().catch(() => undefined);
+  void runAutoUpdaterCheck();
   setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => undefined);
+    void runAutoUpdaterCheck();
   }, 10 * 60 * 1000);
+}
+
+async function runAutoUpdaterCheck() {
+  if (isPortableBuild) {
+    return getUpdateRuntimeState();
+  }
+  if (isInstallingUpdate || isUpdateReady) {
+    emitUpdateReadyState();
+    return getUpdateRuntimeState();
+  }
+  if (!autoUpdateCheckPromise) {
+    autoUpdateCheckPromise = autoUpdater.checkForUpdates()
+      .catch((error) => {
+        throw error;
+      })
+      .finally(() => {
+        autoUpdateCheckPromise = null;
+      });
+  }
+  try {
+    await autoUpdateCheckPromise;
+  } catch {
+    // state is already reflected through the autoUpdater error event
+  }
+  return getUpdateRuntimeState();
 }
 
 function readUpdateFeedUrl() {
@@ -847,11 +977,12 @@ function registerDesktopActions() {
 
   ipcMain.handle('desktopCapture:listSources', async () => {
     try {
-      const sources = await desktopCapturer.getSources({
+      const rawSources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
         thumbnailSize: { width: 320, height: 180 },
         fetchWindowIcons: true,
       });
+      const sources = filterDesktopCaptureSources(rawSources);
 
       const mapped = (sources || []).map((source) => ({
         id: String(source.id),
@@ -893,6 +1024,17 @@ function registerDesktopActions() {
 
       const configPath = getUserUpdateConfigPath();
       fs.writeFileSync(configPath, JSON.stringify({ url: normalized }, null, 2), 'utf8');
+      if (!isPortableBuild) {
+        autoUpdater.setFeedURL({ provider: 'generic', url: normalized });
+        availableUpdateVersion = '';
+        downloadedUpdateVersion = '';
+        isUpdateReady = false;
+        isCheckingForUpdate = false;
+        isDownloadingUpdate = false;
+        updateDownloadProgress = 0;
+        updateStatusMessage = 'Update feed saved. Ready to check for new releases.';
+        emitUpdateReadyState();
+      }
       return { ok: true };
     } catch (error) {
       return { ok: false, message: String(error?.message || error) };
@@ -901,6 +1043,29 @@ function registerDesktopActions() {
 
   ipcMain.handle('updates:downloadLatest', async () => {
     try {
+      if (!isPortableBuild) {
+        const runtime = await runAutoUpdaterCheck();
+        const currentVersion = normalizeSemver(app.getVersion());
+        const latestVersion = normalizeSemver(runtime.latestVersion || runtime.version || '');
+        const noUpdate = !runtime.ready
+          && !runtime.downloading
+          && !runtime.checking
+          && !runtime.installing
+          && (!latestVersion || compareSemver(latestVersion, currentVersion) <= 0);
+        return {
+          ok: true,
+          noUpdate,
+          ready: Boolean(runtime.ready),
+          checking: Boolean(runtime.checking),
+          downloading: Boolean(runtime.downloading),
+          installing: Boolean(runtime.installing),
+          progress: Number(runtime.progress || 0),
+          currentVersion,
+          latestVersion,
+          message: String(runtime.message || ''),
+        };
+      }
+
       const latestRelease = await resolveLatestInstallerRelease();
       const currentVersion = normalizeSemver(app.getVersion());
       const latestVersion = normalizeSemver(latestRelease.version || '');
@@ -924,6 +1089,7 @@ function registerDesktopActions() {
         return {
           ok: true,
           noUpdate: true,
+          portable: true,
           currentVersion,
           latestVersion: latestVersion || currentVersion,
           message: 'No New Updates',
@@ -940,9 +1106,11 @@ function registerDesktopActions() {
       return {
         ok: true,
         noUpdate: false,
+        portable: true,
         installerUrl: latestRelease.installerUrl,
         currentVersion,
         latestVersion,
+        message: 'Portable build detected. Opening the latest NCore Setup installer so you can migrate to the self-updating build.',
       };
     } catch (error) {
       return { ok: false, message: String(error?.message || error) };

@@ -4,6 +4,8 @@ export interface CallSettings {
   cameraDeviceId: string;
   inputVolume: number;
   outputVolume: number;
+  startMuted: boolean;
+  startDeafened: boolean;
   echoCancellation: boolean;
   noiseSuppression: boolean;
   automaticGainControl: boolean;
@@ -26,6 +28,8 @@ export const DEFAULT_CALL_SETTINGS: CallSettings = {
   cameraDeviceId: 'default',
   inputVolume: 100,
   outputVolume: 100,
+  startMuted: false,
+  startDeafened: false,
   echoCancellation: true,
   noiseSuppression: true,
   automaticGainControl: true,

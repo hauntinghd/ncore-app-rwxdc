@@ -225,7 +225,7 @@ export function MarketplaceWebPage() {
               </div>
               <h3 className="text-3xl font-black text-white">Ship market as a standalone web product</h3>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Use `ncoremarket.nyptidindustries.com` for public marketplace presentation while the app surface
+                Use `ncoremarketplace.nyptidindustries.com` for public marketplace presentation while the app surface
                 handles authenticated contracts, publishing, and purchase lifecycle actions.
               </p>
             </div>

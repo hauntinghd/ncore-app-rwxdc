@@ -17,7 +17,7 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { SidebarUserDock } from '../components/layout/SidebarUserDock';
+import { SidebarUserDock, type SidebarVoiceDockState } from '../components/layout/SidebarUserDock';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +43,8 @@ import {
 } from '../lib/mentions';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
 import { runServerVoiceAction, useServerVoiceShellState } from '../lib/serverVoiceShell';
+import { loadCallSettings } from '../lib/callSettings';
+import { directCallSession, useDirectCallSession, type ScreenShareQuality } from '../lib/directCallSession';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import type { DirectConversation, DirectMessage, DirectMessageAttachment, Profile } from '../lib/types';
 import { formatFileSize, formatRelativeTime } from '../lib/utils';
@@ -153,11 +155,13 @@ export function DirectMessagePage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { profile } = useAuth();
   const voiceShell = useServerVoiceShellState();
+  const directCallState = useDirectCallSession();
   const { capabilities, contract } = useGrowthCapabilities();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
   const maxUploadBytes = entitlements.uploadBytesCap;
   const maxGroupDmMembers = 10 + Math.max(entitlements.groupDmMemberBonus || 0, 0);
+  const directCallMaxScreenShareQuality = entitlements.maxScreenShareQuality as ScreenShareQuality;
   const navigate = useNavigate();
   const location = useLocation();
   const [conversations, setConversations] = useState<DirectConversation[]>([]);
@@ -222,6 +226,8 @@ export function DirectMessagePage() {
   const callRefreshTimersRef = useRef<Record<string, number>>({});
   const autoCallAttemptKeyRef = useRef<string>('');
   const conversationMembershipRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef<DirectMessage[]>([]);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -231,6 +237,7 @@ export function DirectMessagePage() {
   const nicknamesStorageKey = profile ? `ncore.dm.nicknames.${profile.id}` : null;
   const notesStorageKey = profile ? `ncore.dm.notes.${profile.id}` : null;
   const closedStorageKey = profile ? `ncore.dm.closed.${profile.id}` : null;
+  const closedSessionStorageKey = profile ? `ncore.dm.closed.session.${profile.id}` : null;
   const mutedStorageKey = profile ? `ncore.dm.muted.${profile.id}` : null;
   const conversationsCacheKey = profile ? `ncore.dm.cache.conversations.${profile.id}` : null;
   const trackedConversationIds = useMemo(
@@ -281,6 +288,11 @@ export function DirectMessagePage() {
     () => (activeMentionQuery ? buildMentionSuggestions(dmMentionTargets, activeMentionQuery.query) : []),
     [activeMentionQuery, dmMentionTargets],
   );
+  const visibleConversations = useMemo(() => {
+    if (closedConversationIds.length === 0) return conversations;
+    const hidden = new Set(closedConversationIds.map((id) => String(id)));
+    return conversations.filter((conversation) => !hidden.has(String(conversation.id)));
+  }, [closedConversationIds, conversations]);
 
   useEffect(() => {
     setMentionSuggestionIndex(0);
@@ -317,6 +329,10 @@ export function DirectMessagePage() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     trackedConversationIdsRef.current = new Set(trackedConversationIds);
@@ -360,6 +376,18 @@ export function DirectMessagePage() {
     conversationMembershipRefreshTimerRef.current = setTimeout(() => {
       conversationMembershipRefreshTimerRef.current = null;
       void loadConversations();
+    }, delayMs);
+  }
+
+  function scheduleActiveConversationRefresh(targetConversationId: string, delayMs = 180) {
+    const normalizedConversationId = String(targetConversationId || '').trim();
+    if (!normalizedConversationId || normalizedConversationId !== String(conversationId || '')) return;
+    if (messageRefreshTimerRef.current) {
+      clearTimeout(messageRefreshTimerRef.current);
+    }
+    messageRefreshTimerRef.current = setTimeout(() => {
+      messageRefreshTimerRef.current = null;
+      void loadMessages(normalizedConversationId);
     }, delayMs);
   }
 
@@ -569,10 +597,10 @@ export function DirectMessagePage() {
       const rawNicknames = localStorage.getItem(nicknamesStorageKey);
       const rawNotes = localStorage.getItem(notesStorageKey);
       const rawMuted = localStorage.getItem(mutedStorageKey);
+      const rawClosed = closedSessionStorageKey ? window.sessionStorage.getItem(closedSessionStorageKey) : null;
       setFriendNicknames(rawNicknames ? JSON.parse(rawNicknames) : {});
       setFriendNotes(rawNotes ? JSON.parse(rawNotes) : {});
-      // Do not persist closed DMs across app restarts. Keep closures session-local.
-      setClosedConversationIds([]);
+      setClosedConversationIds(rawClosed ? JSON.parse(rawClosed) : []);
       setMutedConversationIds(rawMuted ? JSON.parse(rawMuted) : []);
       if (closedStorageKey) {
         localStorage.removeItem(closedStorageKey);
@@ -583,7 +611,7 @@ export function DirectMessagePage() {
       setClosedConversationIds([]);
       setMutedConversationIds([]);
     }
-  }, [nicknamesStorageKey, notesStorageKey, closedStorageKey, mutedStorageKey]);
+  }, [nicknamesStorageKey, notesStorageKey, closedSessionStorageKey, closedStorageKey, mutedStorageKey]);
 
   useEffect(() => {
     if (!nicknamesStorageKey) return;
@@ -599,6 +627,15 @@ export function DirectMessagePage() {
     if (!mutedStorageKey) return;
     localStorage.setItem(mutedStorageKey, JSON.stringify(mutedConversationIds));
   }, [mutedConversationIds, mutedStorageKey]);
+
+  useEffect(() => {
+    if (!closedSessionStorageKey) return;
+    try {
+      window.sessionStorage.setItem(closedSessionStorageKey, JSON.stringify(closedConversationIds));
+    } catch {
+      // best-effort session persistence
+    }
+  }, [closedConversationIds, closedSessionStorageKey]);
 
   useEffect(() => {
     if (!conversationsCacheKey) return;
@@ -745,13 +782,14 @@ export function DirectMessagePage() {
           if (!changedConversationId || !trackedConversationIdsRef.current.has(changedConversationId)) return;
           const createdAtIso = String((payload.new as any)?.created_at || '').trim() || new Date().toISOString();
           promoteConversationActivity(changedConversationId, createdAtIso);
+          scheduleActiveConversationRefresh(changedConversationId, 120);
         },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile?.id]);
+  }, [conversationId, profile?.id]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -761,6 +799,29 @@ export function DirectMessagePage() {
     const found = conversations.find((c) => c.id === conversationId) || null;
     setActiveConversation(found);
   }, [conversationId, conversations]);
+
+  useEffect(() => {
+    if (!conversationId || closedConversationIds.length === 0) return;
+    const active = conversations.find((conversation) => conversation.id === conversationId);
+    if (!active) return;
+    const activeTargetUserId = !active.is_group
+      ? String((active.members || []).find((member: any) => String(member.user_id) !== String(profile?.id))?.user_id || '')
+      : '';
+    setClosedConversationIds((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.filter((id) => {
+        if (String(id) === String(conversationId)) return false;
+        if (!activeTargetUserId) return true;
+        const existingConversation = conversations.find((conversation) => String(conversation.id) === String(id));
+        if (!existingConversation || existingConversation.is_group) return true;
+        const existingTargetUserId = String(
+          (existingConversation.members || []).find((member: any) => String(member.user_id) !== String(profile?.id))?.user_id || ''
+        );
+        return existingTargetUserId !== activeTargetUserId;
+      });
+      return next.length === prev.length ? prev : next;
+    });
+  }, [closedConversationIds.length, conversationId, conversations, profile?.id]);
 
   useEffect(() => {
     if (!conversationId || !profile?.id) return;
@@ -794,8 +855,42 @@ export function DirectMessagePage() {
     void loadMessages(conversationId);
   }, [conversationId]);
 
+  useEffect(() => () => {
+    if (messageRefreshTimerRef.current) {
+      clearTimeout(messageRefreshTimerRef.current);
+      messageRefreshTimerRef.current = null;
+    }
+  }, [conversationId]);
+
   useEffect(() => {
     if (!conversationId) return;
+    const hydrateRealtimeMessage = (row: any, shouldStickToBottom: boolean) => {
+      const fallbackMessage = buildRealtimeDirectMessage(row, dmAuthorMap);
+      upsertDirectMessage(fallbackMessage);
+      if (shouldStickToBottom) {
+        scrollToBottom('auto');
+      }
+
+      const messageId = String(row?.id || '').trim();
+      if (!messageId) {
+        scheduleActiveConversationRefresh(conversationId);
+        return;
+      }
+
+      void fetchHydratedDirectMessage(messageId).then((hydratedMessage) => {
+        if (hydratedMessage) {
+          upsertDirectMessage(hydratedMessage);
+          if (shouldStickToBottom) {
+            scrollToBottom('auto');
+          }
+          return;
+        }
+        scheduleActiveConversationRefresh(conversationId);
+      }).catch(() => {
+        scheduleActiveConversationRefresh(conversationId);
+      });
+    };
+
     const channel = supabase
       .channel(`dm:${conversationId}`)
       .on('postgres_changes', {
@@ -805,10 +900,7 @@ export function DirectMessagePage() {
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const shouldStickToBottom = isNearBottom();
-        upsertDirectMessage(buildRealtimeDirectMessage(payload.new, dmAuthorMap));
-        if (shouldStickToBottom) {
-          scrollToBottom('auto');
-        }
+        hydrateRealtimeMessage(payload.new, shouldStickToBottom);
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -816,7 +908,7 @@ export function DirectMessagePage() {
         table: 'direct_messages',
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
-        upsertDirectMessage(buildRealtimeDirectMessage(payload.new, dmAuthorMap));
+        hydrateRealtimeMessage(payload.new, false);
       })
       .on('postgres_changes', {
         event: 'INSERT',
@@ -824,6 +916,7 @@ export function DirectMessagePage() {
         table: 'direct_message_attachments',
       }, (payload) => {
         const attachment = payload.new as DirectMessageAttachment;
+        const hasAttachmentTarget = messagesRef.current.some((message) => message.id === attachment.direct_message_id);
         setMessages((prev) => {
           const next = prev.map((msg) => {
             if (msg.id !== attachment.direct_message_id) return msg;
@@ -836,6 +929,9 @@ export function DirectMessagePage() {
           });
           return next;
         });
+        if (!hasAttachmentTarget) {
+          scheduleActiveConversationRefresh(conversationId, 80);
+        }
       })
       .on('postgres_changes', {
         event: 'DELETE',
@@ -846,7 +942,9 @@ export function DirectMessagePage() {
         setMessages((prev) => prev.filter((message) => message.id !== String(payload.old.id)));
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversationId, dmAuthorMap, isNearBottom, scrollToBottom, upsertDirectMessage]);
 
   useEffect(() => {
@@ -885,6 +983,17 @@ export function DirectMessagePage() {
     };
   }, [profile?.id]);
 
+  const syncTypingUsersFromPresence = useCallback((channel: any) => {
+    const state = channel.presenceState() as Record<string, Array<{ typing?: boolean; user_id?: string }>>;
+    const others = Object.entries(state)
+      .filter(([key]) => key !== String(profile?.id || ''))
+      .flatMap(([, presences]) => presences)
+      .filter((presence) => presence?.typing)
+      .map((presence) => presence.user_id)
+      .filter(Boolean) as string[];
+    setTypingUserIds(Array.from(new Set(others)));
+  }, [profile?.id]);
+
   useEffect(() => {
     if (!conversationId || !profile) {
       setTypingUserIds([]);
@@ -897,16 +1006,9 @@ export function DirectMessagePage() {
     dmPresenceChannelRef.current = channel;
 
     channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState() as Record<string, Array<{ typing?: boolean; user_id?: string }>>;
-        const others = Object.entries(state)
-          .filter(([key]) => key !== profile.id)
-          .flatMap(([, presences]) => presences)
-          .filter((presence) => presence?.typing)
-          .map((presence) => presence.user_id)
-          .filter(Boolean) as string[];
-        setTypingUserIds(Array.from(new Set(others)));
-      })
+      .on('presence', { event: 'sync' }, () => syncTypingUsersFromPresence(channel))
+      .on('presence', { event: 'join' }, () => syncTypingUsersFromPresence(channel))
+      .on('presence', { event: 'leave' }, () => syncTypingUsersFromPresence(channel))
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           await channel.track({ user_id: profile.id, typing: false, ts: Date.now() });
@@ -922,7 +1024,7 @@ export function DirectMessagePage() {
       supabase.removeChannel(channel);
       dmPresenceChannelRef.current = null;
     };
-  }, [conversationId, profile?.id]);
+  }, [conversationId, profile?.id, syncTypingUsersFromPresence]);
 
   useEffect(() => {
     if (!conversationId || !profile) return;
@@ -2821,6 +2923,94 @@ export function DirectMessagePage() {
     return isMuted ? 'Muted - Click to chat' : 'Click to chat';
   }
 
+  const directCallConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === directCallState.conversationId) || null,
+    [conversations, directCallState.conversationId],
+  );
+
+  const directCallDockVoice = useMemo<SidebarVoiceDockState | null>(() => {
+    if (directCallState.phase === 'idle' || !directCallState.conversationId) return null;
+    return {
+      phase: directCallState.phase,
+      communityId: null,
+      channelId: directCallState.conversationId,
+      channelName: directCallConversation ? getConversationName(directCallConversation) : 'Direct Call',
+      isMuted: directCallState.isMuted,
+      isDeafened: directCallState.isDeafened,
+      isCameraOn: directCallState.isVideoOn,
+      isScreenSharing: directCallState.isScreenSharing,
+      noiseSuppressionEnabled: directCallState.noiseSuppressionEnabled,
+      participantCount: Math.max(1, Number(directCallState.participantCount || 0)),
+      averagePingMs: directCallState.averagePingMs,
+      lastPingMs: directCallState.lastPingMs,
+      outboundPacketLossPct: directCallState.outboundPacketLossPct,
+      privacyCode: Array.isArray(directCallState.privacyCode) ? directCallState.privacyCode : [],
+    };
+  }, [
+    directCallConversation,
+    directCallState.averagePingMs,
+    directCallState.conversationId,
+    directCallState.isDeafened,
+    directCallState.isMuted,
+    directCallState.isScreenSharing,
+    directCallState.isVideoOn,
+    directCallState.lastPingMs,
+    directCallState.noiseSuppressionEnabled,
+    directCallState.outboundPacketLossPct,
+    directCallState.participantCount,
+    directCallState.phase,
+    directCallState.privacyCode,
+  ]);
+
+  const sidebarDockVoice = directCallDockVoice || voiceShell;
+
+  function handleDockOpenVoice() {
+    if (directCallDockVoice?.channelId) {
+      navigate(`/app/dm/${directCallDockVoice.channelId}/call${directCallState.wantsVideo ? '?video=1' : ''}`);
+      return;
+    }
+    if (voiceShell.communityId && voiceShell.channelId) {
+      navigate(`/app/community/${voiceShell.communityId}/voice/${voiceShell.channelId}`);
+    }
+  }
+
+  function handleDockToggleMute() {
+    if (directCallDockVoice) {
+      void directCallSession.toggleMute();
+      return;
+    }
+    void runServerVoiceAction('toggleMute');
+  }
+
+  function handleDockToggleDeafen() {
+    if (directCallDockVoice) {
+      void directCallSession.toggleDeafen();
+      return;
+    }
+    void runServerVoiceAction('toggleDeafen');
+  }
+
+  function handleDockToggleScreenShare() {
+    if (directCallDockVoice) {
+      const preferredQuality = loadCallSettings().screenShareQuality as ScreenShareQuality;
+      void directCallSession.toggleScreenShare({
+        quality: preferredQuality,
+        maxQuality: directCallMaxScreenShareQuality,
+      });
+      return;
+    }
+    void runServerVoiceAction('toggleScreenShare');
+  }
+
+  function handleDockLeaveVoice() {
+    if (directCallDockVoice) {
+      const canEndForEveryone = Boolean(profile?.platform_role === 'owner');
+      void directCallSession.hangup({ signalEnded: canEndForEveryone });
+      return;
+    }
+    void runServerVoiceAction('leave');
+  }
+
   function getTypingText(): string {
     if (!activeConversation || typingUserIds.length === 0) return '';
     const others = (activeConversation.members || [])
@@ -2857,7 +3047,7 @@ export function DirectMessagePage() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {conversations.length === 0 ? (
+            {visibleConversations.length === 0 ? (
               <div className="text-center py-8 px-4">
                 <p className="text-surface-500 text-sm">No conversations yet</p>
                 <button
@@ -2867,7 +3057,7 @@ export function DirectMessagePage() {
                   Start a DM
                 </button>
               </div>
-            ) : conversations.map(conv => {
+            ) : visibleConversations.map(conv => {
               const { src, name, status } = getConversationAvatar(conv);
               const isActive = conv.id === conversationId;
               const activeCall = activeCallsByConversationId[conv.id];
@@ -2923,16 +3113,12 @@ export function DirectMessagePage() {
           {profile && (
             <SidebarUserDock
               profile={profile}
-              voice={voiceShell.phase === 'idle' ? null : voiceShell}
-              onOpenVoice={() => {
-                if (voiceShell.communityId && voiceShell.channelId) {
-                  navigate(`/app/community/${voiceShell.communityId}/voice/${voiceShell.channelId}`);
-                }
-              }}
-              onToggleMute={() => void runServerVoiceAction('toggleMute')}
-              onToggleDeafen={() => void runServerVoiceAction('toggleDeafen')}
-              onToggleScreenShare={() => void runServerVoiceAction('toggleScreenShare')}
-              onLeaveVoice={() => void runServerVoiceAction('leave')}
+              voice={sidebarDockVoice}
+              onOpenVoice={handleDockOpenVoice}
+              onToggleMute={handleDockToggleMute}
+              onToggleDeafen={handleDockToggleDeafen}
+              onToggleScreenShare={handleDockToggleScreenShare}
+              onLeaveVoice={handleDockLeaveVoice}
               onOpenSettings={() => navigate('/app/settings')}
             />
           )}

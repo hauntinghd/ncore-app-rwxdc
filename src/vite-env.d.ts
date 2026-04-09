@@ -6,6 +6,12 @@ declare const __BUILD_TIME__: string;
 interface DesktopDownloadResult {
   ok: boolean;
   noUpdate?: boolean;
+  portable?: boolean;
+  ready?: boolean;
+  checking?: boolean;
+  downloading?: boolean;
+  installing?: boolean;
+  progress?: number;
   currentVersion?: string;
   latestVersion?: string;
   installerUrl?: string;
@@ -23,8 +29,12 @@ interface DesktopUpdateRuntimeState {
   ok: boolean;
   portable?: boolean;
   ready?: boolean;
+  checking?: boolean;
+  downloading?: boolean;
+  progress?: number;
   installing?: boolean;
   version?: string;
+  latestVersion?: string;
   message?: string;
 }
 

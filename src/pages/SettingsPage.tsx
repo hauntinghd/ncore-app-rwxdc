@@ -145,6 +145,21 @@ interface VoiceDeviceHealth {
   checkedAt: string | null;
 }
 
+type UpdateLauncherStage = 'checking' | 'downloading' | 'ready' | 'installing' | 'no-update' | 'error';
+
+const EMPTY_DESKTOP_UPDATE_RUNTIME_STATE: DesktopUpdateRuntimeState = {
+  ok: true,
+  portable: false,
+  ready: false,
+  checking: false,
+  downloading: false,
+  progress: 0,
+  installing: false,
+  version: '',
+  latestVersion: '',
+  message: '',
+};
+
 const DEFAULT_VOICE_DEVICE_HEALTH: VoiceDeviceHealth = {
   microphonePermission: 'unknown',
   cameraPermission: 'unknown',
@@ -159,6 +174,15 @@ const DEFAULT_VOICE_DEVICE_HEALTH: VoiceDeviceHealth = {
   selectedCameraLabel: 'System Default',
   checkedAt: null,
 };
+
+const UPDATE_LAUNCHER_FACTS = [
+  'NCore ships desktop installers from the same managed feed that powers What\'s New.',
+  'Desktop updates only light up when the installer package and public feed both agree on the same version.',
+  'Native capture is preferred first on desktop now to make screen sharing more reliable in Electron.',
+  'NCore rotates release badges automatically so only the newest build is marked Current Build.',
+  'Your updater feed can serve desktop installers and Android packages from one settings surface.',
+  'A clean release path for desktop is `npm run release:update`, not a plain site deploy.',
+];
 
 type StandingResourceId = 'guidelines' | 'terms' | 'appeal';
 
@@ -997,8 +1021,14 @@ export function SettingsPage() {
   const buildVersion = __APP_VERSION__;
   const buildDate = new Date(__BUILD_TIME__).toLocaleString();
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+  const [desktopUpdateRuntimeState, setDesktopUpdateRuntimeState] = useState<DesktopUpdateRuntimeState>(EMPTY_DESKTOP_UPDATE_RUNTIME_STATE);
+  const [installingDownloadedUpdate, setInstallingDownloadedUpdate] = useState(false);
   const [updateDownloadMessage, setUpdateDownloadMessage] = useState('');
   const [updateFeedUrlInput, setUpdateFeedUrlInput] = useState(DEFAULT_UPDATE_FEED_URL);
+  const [showUpdateLauncher, setShowUpdateLauncher] = useState(false);
+  const [updateLauncherStage, setUpdateLauncherStage] = useState<UpdateLauncherStage>('checking');
+  const [updateLauncherDetail, setUpdateLauncherDetail] = useState('Contacting the NCore update feed...');
+  const [updateLauncherFactIndex, setUpdateLauncherFactIndex] = useState(0);
   const [savingUpdateFeedUrl, setSavingUpdateFeedUrl] = useState(false);
   const discordImportInputRef = useRef<HTMLInputElement>(null);
   const [importingDiscord, setImportingDiscord] = useState(false);
@@ -1030,6 +1060,14 @@ export function SettingsPage() {
       return defaults;
     }
   });
+
+  useEffect(() => {
+    if (!showUpdateLauncher) return undefined;
+    const timer = window.setInterval(() => {
+      setUpdateLauncherFactIndex((prev) => (prev + 1) % UPDATE_LAUNCHER_FACTS.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [showUpdateLauncher]);
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
   const [standingResourceModal, setStandingResourceModal] = useState<StandingResourceId | null>(null);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
@@ -1289,6 +1327,14 @@ export function SettingsPage() {
       ? `Update available: v${latestFeedVersion} (installed: v${buildVersion}).`
       : `You are on the latest build (v${buildVersion}).`
     : '';
+  const activeUpdateLauncherFact = UPDATE_LAUNCHER_FACTS[updateLauncherFactIndex] || UPDATE_LAUNCHER_FACTS[0];
+  const desktopUpdateBusy = downloadingUpdate
+    || Boolean(desktopUpdateRuntimeState.checking)
+    || Boolean(desktopUpdateRuntimeState.downloading)
+    || Boolean(desktopUpdateRuntimeState.installing);
+  const desktopUpdateReady = Boolean(desktopUpdateRuntimeState.ready);
+  const desktopUpdateProgress = Math.max(0, Math.min(100, Math.round(Number(desktopUpdateRuntimeState.progress || 0))));
+  const showInstallUpdateAction = desktopUpdateReady && Boolean(window.desktopBridge?.installDownloadedUpdate);
 
   async function handleSaveProfile() {
     if (!profile) return;
@@ -1468,6 +1514,123 @@ export function SettingsPage() {
     setSaving(false);
   }
 
+  function openUpdateLauncher(stage: UpdateLauncherStage, detail: string) {
+    setUpdateLauncherStage(stage);
+    setUpdateLauncherDetail(detail);
+    setUpdateLauncherFactIndex(Math.floor(Math.random() * UPDATE_LAUNCHER_FACTS.length));
+    setShowUpdateLauncher(true);
+  }
+
+  function applyDesktopUpdateRuntimeState(payload?: DesktopUpdateRuntimeState | null) {
+    if (!payload?.ok) return;
+    setDesktopUpdateRuntimeState({
+      ok: true,
+      portable: Boolean(payload.portable),
+      ready: Boolean(payload.ready),
+      checking: Boolean(payload.checking),
+      downloading: Boolean(payload.downloading),
+      progress: Number(payload.progress || 0),
+      installing: Boolean(payload.installing),
+      version: String(payload.version || ''),
+      latestVersion: String(payload.latestVersion || ''),
+      message: String(payload.message || ''),
+    });
+    if (!payload.installing) {
+      setInstallingDownloadedUpdate(false);
+    }
+    const runtimeVersion = String(payload.latestVersion || payload.version || '').trim();
+    const runtimeMessage = String(payload.message || '').trim();
+
+    if (payload.installing) {
+      const detail = runtimeMessage || (runtimeVersion
+        ? `Applying NCore v${runtimeVersion} and restarting...`
+        : 'Applying update and restarting NCore...');
+      setUpdateDownloadMessage(detail);
+      if (showUpdateLauncher || downloadingUpdate) {
+        setUpdateLauncherStage('installing');
+        setUpdateLauncherDetail(detail);
+        setShowUpdateLauncher(true);
+      }
+      return;
+    }
+
+    if (payload.ready) {
+      const detail = runtimeMessage || (runtimeVersion
+        ? `NCore v${runtimeVersion} is downloaded and ready to install.`
+        : 'Update downloaded and ready to install.');
+      setUpdateDownloadMessage(detail);
+      if (showUpdateLauncher || downloadingUpdate) {
+        setUpdateLauncherStage('ready');
+        setUpdateLauncherDetail(detail);
+        setShowUpdateLauncher(true);
+      }
+      return;
+    }
+
+    if (payload.downloading) {
+      const percent = Math.max(0, Math.min(100, Math.round(Number(payload.progress || 0))));
+      const detail = runtimeMessage || (runtimeVersion
+        ? `Downloading NCore v${runtimeVersion}${percent > 0 ? ` (${percent}%)` : ''}...`
+        : `Downloading update${percent > 0 ? ` (${percent}%)` : ''}...`);
+      setUpdateDownloadMessage(detail);
+      if (showUpdateLauncher || downloadingUpdate) {
+        setUpdateLauncherStage('downloading');
+        setUpdateLauncherDetail(detail);
+        setShowUpdateLauncher(true);
+      }
+      return;
+    }
+
+    if (payload.checking) {
+      const detail = runtimeMessage || 'Checking for updates...';
+      setUpdateDownloadMessage(detail);
+      if (showUpdateLauncher || downloadingUpdate) {
+        setUpdateLauncherStage('checking');
+        setUpdateLauncherDetail(detail);
+        setShowUpdateLauncher(true);
+      }
+      return;
+    }
+
+    if (runtimeMessage && (showUpdateLauncher || downloadingUpdate)) {
+      const noUpdate = /latest build|already on the latest|no new updates/i.test(runtimeMessage);
+      setUpdateDownloadMessage(runtimeMessage);
+      setUpdateLauncherStage(noUpdate ? 'no-update' : 'error');
+      setUpdateLauncherDetail(runtimeMessage);
+      setShowUpdateLauncher(true);
+    }
+  }
+
+  useEffect(() => {
+    const desktopBridge = window.desktopBridge;
+    if (!desktopBridge?.getUpdateRuntimeState) return;
+
+    let mounted = true;
+    const apply = (payload?: DesktopUpdateRuntimeState | null) => {
+      if (!mounted) return;
+      applyDesktopUpdateRuntimeState(payload);
+    };
+
+    const loadRuntimeState = async () => {
+      try {
+        const state = await desktopBridge.getUpdateRuntimeState();
+        apply(state);
+      } catch {
+        // ignore updater runtime sync failures
+      }
+    };
+
+    void loadRuntimeState();
+    const unsubscribe = desktopBridge.onUpdateReady
+      ? desktopBridge.onUpdateReady((payload) => apply(payload))
+      : undefined;
+
+    return () => {
+      mounted = false;
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [downloadingUpdate, showUpdateLauncher]);
+
   async function handleDownloadLatestUpdate() {
     setUpdateDownloadMessage('');
     const desktopUpdater = window.desktopBridge?.downloadLatestUpdate;
@@ -1477,16 +1640,48 @@ export function SettingsPage() {
     const isIOSClient = /iphone|ipad|ipod/.test(userAgent);
 
     setDownloadingUpdate(true);
+    openUpdateLauncher('checking', 'Contacting the NCore update feed...');
     try {
       if (desktopUpdater) {
         const result = await desktopUpdater();
-        if (!result.ok) {
-          setUpdateDownloadMessage(result.message || 'Could not start update download.');
-        } else if (result.noUpdate) {
-          setUpdateDownloadMessage(result.message || 'No New Updates');
-        } else {
-          setUpdateDownloadMessage('Download started. Your browser should open the latest installer now.');
-        }
+      if (!result.ok) {
+        const message = result.message || 'Could not start update download.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('error', message);
+      } else if (result.portable) {
+        const message = result.message || 'Portable builds cannot self-update. Opening the latest installer instead.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('downloading', message);
+      } else if (result.installing) {
+        const message = result.message || 'Applying update and restarting NCore...';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('installing', message);
+      } else if (result.ready) {
+        const message = result.message || (result.latestVersion
+          ? `NCore v${result.latestVersion} is ready to install.`
+          : 'Update downloaded and ready to install.');
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('ready', message);
+      } else if (result.downloading) {
+        const progress = Math.max(0, Math.min(100, Math.round(Number(result.progress || 0))));
+        const message = result.message || (result.latestVersion
+          ? `Downloading NCore v${result.latestVersion}${progress > 0 ? ` (${progress}%)` : ''}...`
+          : `Downloading update${progress > 0 ? ` (${progress}%)` : ''}...`);
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('downloading', message);
+      } else if (result.checking) {
+        const message = result.message || 'Checking for updates...';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('checking', message);
+      } else if (result.noUpdate) {
+        const message = result.message || 'No New Updates';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('no-update', message);
+      } else {
+        const message = result.message || 'Update check started. NCore will download the latest release in the background if one is available.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('downloading', message);
+      }
         return;
       }
 
@@ -1494,46 +1689,81 @@ export function SettingsPage() {
         const mobileInstaller = await fetchLatestMobileInstaller(feedBase);
         if (mobileInstaller?.mode === 'apk' && mobileInstaller.url) {
           await openExternalUrl(mobileInstaller.url);
-          setUpdateDownloadMessage(
-            mobileInstaller.version
-              ? `Opening Android installer v${mobileInstaller.version}...`
-              : 'Opening latest Android installer...',
-          );
+          const message = mobileInstaller.version
+            ? `Opening Android installer v${mobileInstaller.version}...`
+            : 'Opening latest Android installer...';
+          setUpdateDownloadMessage(message);
+          openUpdateLauncher('downloading', message);
           return;
         }
 
         if (isIOSClient) {
           const installResult = await promptPwaInstall();
-          setUpdateDownloadMessage(
-            installResult.message
-              || 'On iPhone/iPad: open NCore in Safari, tap Share, then Add to Home Screen.',
-          );
+          const message = installResult.message
+            || 'On iPhone/iPad: open NCore in Safari, tap Share, then Add to Home Screen.';
+          setUpdateDownloadMessage(message);
+          openUpdateLauncher('no-update', message);
           return;
         }
 
-        setUpdateDownloadMessage(
-          mobileInstaller?.message
-          || 'No Android installer is published yet. For now, install the web app via Add to Home Screen.',
-        );
+        const message = mobileInstaller?.message
+          || 'No Android installer is published yet. For now, install the web app via Add to Home Screen.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('no-update', message);
         return;
       }
 
       const installerPath = await fetchLatestInstallerAssetPath(feedBase);
       if (!installerPath) {
-        setUpdateDownloadMessage('Could not resolve the latest installer from the update feed.');
+        const message = 'Could not resolve the latest installer from the update feed.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('error', message);
         return;
       }
       const installerUrl = resolveFeedAssetUrl(feedBase, installerPath);
       if (!installerUrl) {
-        setUpdateDownloadMessage('Could not resolve installer URL.');
+        const message = 'Could not resolve installer URL.';
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('error', message);
         return;
       }
       await openExternalUrl(installerUrl);
-      setUpdateDownloadMessage('Opening latest installer download...');
+      const message = 'Opening latest installer download...';
+      setUpdateDownloadMessage(message);
+      openUpdateLauncher('downloading', message);
     } catch (err: unknown) {
-      setUpdateDownloadMessage(String((err as Error)?.message || err));
+      const message = String((err as Error)?.message || err);
+      setUpdateDownloadMessage(message);
+      openUpdateLauncher('error', message);
     } finally {
       setDownloadingUpdate(false);
+    }
+  }
+
+  async function handleInstallDownloadedUpdate() {
+    const installDownloadedUpdate = window.desktopBridge?.installDownloadedUpdate;
+    if (!installDownloadedUpdate || installingDownloadedUpdate || !desktopUpdateReady) return;
+
+    setInstallingDownloadedUpdate(true);
+    const detail = desktopUpdateRuntimeState.version
+      ? `Applying NCore v${desktopUpdateRuntimeState.version} and restarting...`
+      : 'Applying update and restarting NCore...';
+    setUpdateDownloadMessage(detail);
+    openUpdateLauncher('installing', detail);
+
+    try {
+      const result = await installDownloadedUpdate();
+      if (!result.ok) {
+        const message = result.message || 'Could not apply downloaded update.';
+        setInstallingDownloadedUpdate(false);
+        setUpdateDownloadMessage(message);
+        openUpdateLauncher('error', message);
+      }
+    } catch (err: unknown) {
+      const message = String((err as Error)?.message || err);
+      setInstallingDownloadedUpdate(false);
+      setUpdateDownloadMessage(message);
+      openUpdateLauncher('error', message);
     }
   }
 
@@ -3818,15 +4048,27 @@ export function SettingsPage() {
                   <div className="mt-4 flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={handleDownloadLatestUpdate}
-                      disabled={downloadingUpdate}
+                      onClick={desktopUpdateReady ? handleInstallDownloadedUpdate : handleDownloadLatestUpdate}
+                      disabled={desktopUpdateBusy || installingDownloadedUpdate}
                       className="nyptid-btn-primary text-sm"
                     >
-                      {downloadingUpdate ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-                      {downloadingUpdate ? 'Checking latest...' : 'Download Latest Update'}
+                      {desktopUpdateBusy || installingDownloadedUpdate ? (
+                        <RefreshCw size={14} className="animate-spin" />
+                      ) : (
+                        <Download size={14} />
+                      )}
+                      {installingDownloadedUpdate || desktopUpdateRuntimeState.installing
+                        ? 'Applying update...'
+                        : desktopUpdateReady
+                          ? 'Restart to Update'
+                          : desktopUpdateRuntimeState.downloading
+                            ? `Downloading${desktopUpdateProgress > 0 ? ` ${desktopUpdateProgress}%` : '...'}`
+                            : desktopUpdateRuntimeState.checking || downloadingUpdate
+                              ? 'Checking latest...'
+                              : 'Download Latest Update'}
                     </button>
                     <span className="text-xs text-surface-500">
-                      Uses configured update feed for desktop and mobile downloads.
+                      Installed desktop builds self-update in place. Portable builds still fall back to the latest installer.
                     </span>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
@@ -4005,6 +4247,136 @@ export function SettingsPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={showUpdateLauncher}
+        onClose={() => setShowUpdateLauncher(false)}
+        title="NCore Update Launcher"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="relative overflow-hidden rounded-2xl border border-surface-700 bg-surface-900/90 p-4">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,180,71,0.18),transparent_55%)]" />
+            <div className="relative flex items-center gap-4">
+              <div className="relative flex h-14 w-14 items-center justify-center">
+                <div className={`absolute inset-0 rounded-full ${
+                  updateLauncherStage === 'error'
+                    ? 'bg-red-500/15'
+                    : updateLauncherStage === 'no-update'
+                      ? 'bg-surface-700/70'
+                      : 'bg-nyptid-300/15'
+                }`} />
+                <div className={`absolute inset-1 rounded-full border ${
+                  updateLauncherStage === 'error'
+                    ? 'border-red-500/30'
+                    : updateLauncherStage === 'no-update'
+                      ? 'border-surface-600'
+                      : 'border-nyptid-300/30 animate-pulse'
+                }`} />
+                {updateLauncherStage === 'error' ? (
+                  <AlertTriangle size={22} className="relative z-10 text-red-300" />
+                ) : updateLauncherStage === 'no-update' ? (
+                  <Info size={22} className="relative z-10 text-surface-200" />
+                ) : updateLauncherStage === 'ready' ? (
+                  <CheckCircle size={22} className="relative z-10 text-green-300" />
+                ) : updateLauncherStage === 'downloading' ? (
+                  <Download size={22} className="relative z-10 text-nyptid-200" />
+                ) : (
+                  <RefreshCw size={22} className="relative z-10 animate-spin text-nyptid-200" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold uppercase tracking-[0.24em] text-surface-500">
+                  {updateLauncherStage === 'error'
+                    ? 'Update Error'
+                    : updateLauncherStage === 'no-update'
+                      ? 'Feed Check Complete'
+                      : updateLauncherStage === 'ready'
+                        ? 'Update Ready'
+                        : updateLauncherStage === 'installing'
+                          ? 'Installing Update'
+                          : updateLauncherStage === 'downloading'
+                            ? 'Update In Progress'
+                        : 'Checking Feed'}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-surface-100">{updateLauncherDetail}</div>
+              </div>
+            </div>
+          </div>
+
+          {(desktopUpdateRuntimeState.downloading || desktopUpdateRuntimeState.installing || desktopUpdateRuntimeState.ready) && (
+            <div className="rounded-2xl border border-surface-700 bg-surface-950/80 p-4">
+              <div className="flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.24em] text-surface-500">
+                <span>Updater Status</span>
+                <span className="text-surface-300">
+                  {desktopUpdateRuntimeState.ready
+                    ? '100%'
+                    : desktopUpdateProgress > 0
+                      ? `${desktopUpdateProgress}%`
+                      : desktopUpdateRuntimeState.installing
+                        ? 'Applying'
+                        : 'Preparing'}
+                </span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-800">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    desktopUpdateRuntimeState.ready
+                      ? 'bg-green-400'
+                      : 'bg-gradient-to-r from-amber-300 via-nyptid-300 to-green-300'
+                  }`}
+                  style={{
+                    width: `${desktopUpdateRuntimeState.ready
+                      ? 100
+                      : desktopUpdateRuntimeState.installing
+                        ? 100
+                        : Math.max(desktopUpdateProgress, desktopUpdateRuntimeState.downloading ? 8 : 4)}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-surface-400">
+                {desktopUpdateRuntimeState.ready
+                  ? 'The release package is staged locally and ready to restart into the new build.'
+                  : desktopUpdateRuntimeState.installing
+                    ? 'NCore is applying the downloaded package and will relaunch automatically.'
+                    : 'NCore is downloading the update in the background. You can leave this screen open or keep working.'}
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-surface-700 bg-surface-950/80 p-4">
+            <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-surface-500">Operator Fact</div>
+            <div className="mt-2 text-sm leading-relaxed text-surface-300">
+              {activeUpdateLauncherFact}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-surface-700 bg-surface-900/60 px-3 py-2 text-xs text-surface-400">
+            <span>Installed build</span>
+            <span className="font-semibold text-surface-200">v{buildVersion}</span>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            {showInstallUpdateAction && (
+              <button
+                type="button"
+                onClick={handleInstallDownloadedUpdate}
+                disabled={installingDownloadedUpdate || desktopUpdateRuntimeState.installing}
+                className="nyptid-btn-primary text-sm px-3 py-2"
+              >
+                {installingDownloadedUpdate || desktopUpdateRuntimeState.installing ? 'Applying...' : 'Restart to Update'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowUpdateLauncher(false)}
+              className="nyptid-btn-secondary text-sm px-3 py-2"
+            >
+              {updateLauncherStage === 'checking' || updateLauncherStage === 'downloading' ? 'Hide' : 'Close'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* Delete Account Modal */}
