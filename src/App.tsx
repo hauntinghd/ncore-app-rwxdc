@@ -21,6 +21,8 @@ const CommunitySettingsPage = lazy(() => import('./pages/CommunitySettingsPage')
 const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
 const VoiceChannelPage = lazy(() => import('./pages/VoiceChannelPage').then((m) => ({ default: m.VoiceChannelPage })));
 const ForumChannelPage = lazy(() => import('./pages/ForumChannelPage'));
+const GameLibraryPage = lazy(() => import('./pages/GameLibraryPage'));
+const DeveloperPortalPage = lazy(() => import('./pages/DeveloperPortalPage'));
 const DirectMessagePage = lazy(() => import('./pages/DirectMessagePage').then((m) => ({ default: m.DirectMessagePage })));
 const DirectCallPage = lazy(() => import('./pages/DirectCallPage').then((m) => ({ default: m.DirectCallPage })));
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
@@ -104,6 +106,8 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         <Route path="/app/community/:communityId/channel/:channelId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/voice/:channelId" element={<ProtectedRoute><VoiceChannelPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/forum/:channelId" element={<ProtectedRoute><ForumChannelPage /></ProtectedRoute>} />
+        <Route path="/app/games" element={<ProtectedRoute><GameLibraryPage /></ProtectedRoute>} />
+        <Route path="/app/developer" element={<ProtectedRoute><DeveloperPortalPage /></ProtectedRoute>} />
         <Route path="/app/profile/:userId" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/app/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
         <Route path="/app/leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
