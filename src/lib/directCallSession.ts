@@ -1,16 +1,15 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  IAgoraRTCClient,
-  IAgoraRTCRemoteUser,
-  IRemoteAudioTrack,
-  ILocalAudioTrack,
-  ILocalVideoTrack,
-  IRemoteVideoTrack,
-  ScreenVideoTrackInitConfig,
-} from 'agora-rtc-sdk-ng';
-import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenoiser';
+  IRTCClient,
+  IRTCLocalAudioTrack,
+  IRTCLocalVideoTrack,
+  IRTCRemoteAudioTrack,
+  IRTCRemoteVideoTrack,
+  IRTCProvider,
+  NoiseSuppressionBinding,
+} from './rtc';
+import { getRTCProvider } from './rtc';
 import { loadCallSettings, saveCallSettings, type CallSettings } from './callSettings';
-import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
 import { supabase } from './supabase';
 import { publishDirectCallShellState } from './directCallShell';
 import { playVoiceToggleSound } from './notificationSound';
@@ -22,7 +21,6 @@ import {
 
 type Listener = () => void;
 export type ScreenShareQuality = '720p30' | '1080p120' | '4k60';
-type AgoraRTCModule = typeof import('agora-rtc-sdk-ng')['default'];
 
 export interface DirectCallJoinOptions {
   conversationId: string;
@@ -106,22 +104,13 @@ function persistVoiceTogglePreferences(next: { startMuted?: boolean; startDeafen
   });
 }
 
-let cachedAgoraModule: Promise<AgoraRTCModule> | null = null;
+let cachedProvider: Promise<IRTCProvider> | null = null;
 
-async function getAgoraModule(): Promise<AgoraRTCModule> {
-  if (!cachedAgoraModule) {
-    cachedAgoraModule = import('agora-rtc-sdk-ng').then((module) => {
-      const sdk = module.default as AgoraRTCModule;
-      try {
-        // Reduce SDK log overhead in runtime.
-        sdk.setLogLevel(2); // WARNING
-      } catch {
-        // ignore unsupported logger setup environments
-      }
-      return sdk;
-    });
+function getProvider(): Promise<IRTCProvider> {
+  if (!cachedProvider) {
+    cachedProvider = getRTCProvider();
   }
-  return cachedAgoraModule;
+  return cachedProvider;
 }
 
 function formatRtcError(error: unknown): string {
@@ -160,37 +149,6 @@ function isQualityAllowed(requested: ScreenShareQuality, maxQuality: ScreenShare
   return screenShareQualityRank(requested) <= screenShareQualityRank(maxQuality);
 }
 
-function buildScreenConfig(quality: ScreenShareQuality): ScreenVideoTrackInitConfig {
-  if (quality === '4k60') {
-    return {
-      encoderConfig: {
-        width: 3840,
-        height: 2160,
-        frameRate: 60,
-      },
-      optimizationMode: 'detail',
-    };
-  }
-  if (quality === '1080p120') {
-    return {
-      encoderConfig: {
-        width: 1920,
-        height: 1080,
-        frameRate: 120,
-      },
-      optimizationMode: 'detail',
-    };
-  }
-  return {
-    encoderConfig: {
-      width: 1280,
-      height: 720,
-      frameRate: 30,
-    },
-    optimizationMode: 'detail',
-  };
-}
-
 function buildDisplayMediaVideoConstraints(quality: ScreenShareQuality): MediaTrackConstraints {
   if (quality === '4k60') {
     return {
@@ -217,19 +175,19 @@ class DirectCallSessionStore {
   private listeners = new Set<Listener>();
   private state: DirectCallSessionState = { ...initialState };
 
-  private client: IAgoraRTCClient | null = null;
-  private screenClient: IAgoraRTCClient | null = null;
+  private client: IRTCClient | null = null;
+  private screenClient: IRTCClient | null = null;
   private localUid: string | null = null;
   private screenUid: string | null = null;
   private appId: string | null = null;
-  private audioTrack: ILocalAudioTrack | null = null;
-  private audioDenoiserBinding: AIDenoiserBinding | null = null;
-  private videoTrack: ILocalVideoTrack | null = null;
-  private screenTrack: ILocalVideoTrack | null = null;
-  private screenAudioTrack: ILocalAudioTrack | null = null;
+  private audioTrack: IRTCLocalAudioTrack | null = null;
+  private audioDenoiserBinding: NoiseSuppressionBinding | null = null;
+  private videoTrack: IRTCLocalVideoTrack | null = null;
+  private screenTrack: IRTCLocalVideoTrack | null = null;
+  private screenAudioTrack: IRTCLocalAudioTrack | null = null;
 
-  private remoteVideoTracks = new Map<string, IRemoteVideoTrack>();
-  private remoteAudioTracks = new Map<string, IRemoteAudioTrack>();
+  private remoteVideoTracks = new Map<string, IRTCRemoteVideoTrack>();
+  private remoteAudioTracks = new Map<string, IRTCRemoteAudioTrack>();
   private remoteAudioVolumes = new Map<string, number>();
   private remoteParticipantUids = new Set<string>();
 
@@ -257,7 +215,7 @@ class DirectCallSessionStore {
     return true;
   }
 
-  private async disposeAudioDenoiser(binding: AIDenoiserBinding | null = this.audioDenoiserBinding) {
+  private async disposeAudioDenoiser(binding: NoiseSuppressionBinding | null = this.audioDenoiserBinding) {
     if (!binding) return;
     if (binding === this.audioDenoiserBinding) {
       this.audioDenoiserBinding = null;
@@ -269,7 +227,7 @@ class DirectCallSessionStore {
     }
   }
 
-  private bindScreenTrackEnded(track: ILocalVideoTrack | null) {
+  private bindScreenTrackEnded(track: IRTCLocalVideoTrack | null) {
     const trackAny = track as any;
     if (!trackAny || typeof trackAny.on !== 'function') return;
     trackAny.on('track-ended', () => {
@@ -278,28 +236,17 @@ class DirectCallSessionStore {
     });
   }
 
-  private async createAgoraScreenTracks(
+  private async createProviderScreenTracks(
     quality: ScreenShareQuality,
-    audioMode: 'enable' | 'disable',
-  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
-    const AgoraRTC = await getAgoraModule();
-    const created = await AgoraRTC.createScreenVideoTrack(buildScreenConfig(quality), audioMode);
-    if (Array.isArray(created)) {
-      return {
-        videoTrack: created[0],
-        audioTrack: created[1] || null,
-      };
-    }
-    return {
-      videoTrack: created,
-      audioTrack: null,
-    };
+  ): Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }> {
+    const provider = await getProvider();
+    return provider.createScreenShareTracks({ quality });
   }
 
   private async createNativeScreenTracks(
     quality: ScreenShareQuality,
     withAudio: boolean,
-  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
+  ): Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }> {
     if (!navigator.mediaDevices?.getDisplayMedia) {
       throw new Error('getDisplayMedia is not available in this runtime');
     }
@@ -335,10 +282,10 @@ class DirectCallSessionStore {
       throw new Error('Display capture returned no video track');
     }
 
-    const AgoraRTC = await getAgoraModule();
-    const videoTrack = AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: mediaVideoTrack });
+    const provider = await getProvider();
+    const videoTrack = await provider.createCustomVideoTrack(mediaVideoTrack);
     const mediaAudioTrack = stream.getAudioTracks()[0];
-    const audioTrack = mediaAudioTrack ? AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: mediaAudioTrack }) : null;
+    const audioTrack = mediaAudioTrack ? await provider.createCustomAudioTrack(mediaAudioTrack) : null;
 
     return { videoTrack, audioTrack };
   }
@@ -525,7 +472,7 @@ class DirectCallSessionStore {
     }, 160);
   }
 
-  private async configureRtcOptimizations(client: IAgoraRTCClient) {
+  private async configureRtcOptimizations(client: IRTCClient) {
     const clientAny = client as any;
     try {
       if (typeof clientAny.enableDualStream === 'function') {
@@ -587,14 +534,15 @@ class DirectCallSessionStore {
   }
 
   private bindTokenRenewalHandlers(
-    client: IAgoraRTCClient,
+    client: IRTCClient,
     channelName: string,
     uid: string,
     context: 'call' | 'screen',
   ) {
     const renew = async (reason: 'will-expire' | 'did-expire') => {
       try {
-        const freshToken = await resolveAgoraJoinToken(channelName, uid);
+        const provider = await getProvider();
+        const freshToken = await provider.resolveToken(channelName, uid);
         if (!freshToken) return;
         await client.renewToken(freshToken);
         if (reason === 'did-expire' && (this.state.mediaError || this.state.mediaErrorDetail)) {
@@ -614,10 +562,10 @@ class DirectCallSessionStore {
       }
     };
 
-    client.on('token-privilege-will-expire' as any, () => {
+    client.on('token-privilege-will-expire', () => {
       void renew('will-expire');
     });
-    client.on('token-privilege-did-expire' as any, () => {
+    client.on('token-privilege-did-expire', () => {
       void renew('did-expire');
     });
   }
@@ -857,21 +805,21 @@ class DirectCallSessionStore {
     this.watchCallState(callId);
     this.watchConversationControl(conversationId);
     try {
-      const AgoraRTC = await getAgoraModule();
-      this.client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+      const provider = await getProvider();
+      this.client = await provider.createClient({ mode: 'rtc', codec: 'vp8' });
       this.registerClientEvents(this.client);
       await this.configureRtcOptimizations(this.client);
 
       const channelName = `dm-${conversationId}`;
-      const token = await resolveAgoraJoinToken(channelName, userId);
-      await this.client.join(appId, channelName, token, userId);
+      const token = await provider.resolveToken(channelName, userId);
+      await this.client.join({ channelName, token, uid: userId });
       this.bindTokenRenewalHandlers(this.client, channelName, String(userId), 'call');
 
       const tracksToPublish: Array<ILocalAudioTrack | ILocalVideoTrack> = [];
 
       try {
         this.audioTrack = await this.createLocalAudioTrack(callSettings);
-        this.audioDenoiserBinding = await createAIDenoiserBinding(this.audioTrack, callSettings.noiseSuppression);
+        this.audioDenoiserBinding = await provider.createNoiseSuppression(this.audioTrack, callSettings.noiseSuppression);
         if (typeof this.audioTrack.setVolume === 'function') {
           this.audioTrack.setVolume(callSettings.inputVolume);
         }
@@ -937,7 +885,8 @@ class DirectCallSessionStore {
     } catch (error) {
       console.error('Failed to join DM call:', error);
       this.stopStatsPolling();
-      const joinDetail = describeAgoraJoinFailure(error);
+      const provider = await getProvider();
+      const joinDetail = provider.describeJoinFailure(error);
       this.setState({
         phase: 'idle',
         isConnecting: false,
@@ -951,7 +900,7 @@ class DirectCallSessionStore {
         outboundPacketLossPct: null,
         privacyCode: [],
         mediaError: joinDetail.includes('token-based join')
-          ? 'Call connection failed (Agora token setup required).'
+          ? 'Call connection failed (RTC token setup required).'
           : 'Could not access microphone/camera. Check app permissions and selected devices.',
         mediaErrorDetail: joinDetail.includes('token-based join') ? joinDetail : formatRtcError(error),
       });
@@ -1019,7 +968,7 @@ class DirectCallSessionStore {
     this.audioTrack = null;
 
     try {
-      await this.client.unpublish(previousTrack);
+      await this.client.unpublish([previousTrack]);
     } catch {
       // noop
     }
@@ -1031,11 +980,12 @@ class DirectCallSessionStore {
       // noop
     }
 
-    let rebuiltTrack: ILocalAudioTrack | null = null;
-    let denoiserBinding: AIDenoiserBinding | null = null;
+    let rebuiltTrack: IRTCLocalAudioTrack | null = null;
+    let denoiserBinding: NoiseSuppressionBinding | null = null;
     try {
       rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
-      denoiserBinding = await createAIDenoiserBinding(rebuiltTrack, nextSettings.noiseSuppression);
+      const provider = await getProvider();
+      denoiserBinding = await provider.createNoiseSuppression(rebuiltTrack, nextSettings.noiseSuppression);
       this.audioTrack = rebuiltTrack;
       this.audioDenoiserBinding = denoiserBinding;
       if (typeof rebuiltTrack.setVolume === 'function') {
@@ -1044,7 +994,7 @@ class DirectCallSessionStore {
       if (wasMuted) {
         await rebuiltTrack.setEnabled(false);
       }
-      await this.client.publish(rebuiltTrack);
+      await this.client.publish([rebuiltTrack]);
       this.setState({
         mediaError: '',
         mediaErrorDetail: '',
@@ -1087,12 +1037,13 @@ class DirectCallSessionStore {
     const previousTrack = this.audioTrack;
     const previousBinding = this.audioDenoiserBinding;
     const wasMuted = this.state.isMuted;
-    let rebuiltTrack: ILocalAudioTrack | null = null;
-    let rebuiltBinding: AIDenoiserBinding | null = null;
+    let rebuiltTrack: IRTCLocalAudioTrack | null = null;
+    let rebuiltBinding: NoiseSuppressionBinding | null = null;
 
     try {
       rebuiltTrack = await this.createLocalAudioTrack(nextSettings);
-      rebuiltBinding = await createAIDenoiserBinding(rebuiltTrack, nextSettings.noiseSuppression);
+      const provider = await getProvider();
+      rebuiltBinding = await provider.createNoiseSuppression(rebuiltTrack, nextSettings.noiseSuppression);
       if (typeof rebuiltTrack.setVolume === 'function') {
         rebuiltTrack.setVolume(nextSettings.inputVolume);
       }
@@ -1118,12 +1069,12 @@ class DirectCallSessionStore {
     try {
       if (previousTrack) {
         try {
-          await this.client.unpublish(previousTrack);
+          await this.client.unpublish([previousTrack]);
         } catch {
           // noop
         }
       }
-      await this.client.publish(rebuiltTrack);
+      await this.client.publish([rebuiltTrack]);
       this.audioTrack = rebuiltTrack;
       this.audioDenoiserBinding = rebuiltBinding;
       rebuiltBinding = null;
@@ -1156,7 +1107,7 @@ class DirectCallSessionStore {
         this.audioTrack = previousTrack;
         this.audioDenoiserBinding = previousBinding;
         try {
-          await this.client.publish(previousTrack);
+          await this.client.publish([previousTrack]);
         } catch {
           // noop
         }
@@ -1175,7 +1126,7 @@ class DirectCallSessionStore {
     if (!this.client || this.state.phase !== 'active') return;
 
     if (this.state.isVideoOn && this.videoTrack) {
-      await this.client.unpublish(this.videoTrack);
+      await this.client.unpublish([this.videoTrack]);
       this.videoTrack.stop();
       this.videoTrack.close();
       this.videoTrack = null;
@@ -1185,7 +1136,7 @@ class DirectCallSessionStore {
 
     const newVideoTrack = await this.createLocalVideoTrack();
     this.videoTrack = newVideoTrack;
-    await this.client.publish(newVideoTrack);
+    await this.client.publish([newVideoTrack]);
     this.setState({ isVideoOn: true, wantsVideo: true });
     if (this.localVideoContainer) {
       try {
@@ -1240,7 +1191,7 @@ class DirectCallSessionStore {
       if (!isQualityAllowed(quality, options.maxQuality)) continue;
       const attemptFns: Array<{
         label: string;
-        run: () => Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }>;
+        run: () => Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }>;
       }> = preferNativeCapture
         ? [
           {
@@ -1252,22 +1203,14 @@ class DirectCallSessionStore {
             run: () => this.createNativeScreenTracks(quality, false),
           },
           {
-            label: `${quality}:agora:audio-on`,
-            run: () => this.createAgoraScreenTracks(quality, 'enable'),
-          },
-          {
-            label: `${quality}:agora:audio-off`,
-            run: () => this.createAgoraScreenTracks(quality, 'disable'),
+            label: `${quality}:provider`,
+            run: () => this.createProviderScreenTracks(quality),
           },
         ]
         : [
           {
-            label: `${quality}:agora:audio-on`,
-            run: () => this.createAgoraScreenTracks(quality, 'enable'),
-          },
-          {
-            label: `${quality}:agora:audio-off`,
-            run: () => this.createAgoraScreenTracks(quality, 'disable'),
+            label: `${quality}:provider`,
+            run: () => this.createProviderScreenTracks(quality),
           },
           {
             label: `${quality}:native:audio-on`,
@@ -1285,16 +1228,16 @@ class DirectCallSessionStore {
           this.screenTrack = created.videoTrack;
           this.screenAudioTrack = created.audioTrack;
           this.bindScreenTrackEnded(this.screenTrack);
-          const AgoraRTC = await getAgoraModule();
-          this.screenClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+          const provider = await getProvider();
+          this.screenClient = await provider.createClient({ mode: 'rtc', codec: 'vp8' });
           await this.configureRtcOptimizations(this.screenClient);
           this.screenUid = `${this.localUid}::screen`;
           const channelName = `dm-${this.state.conversationId}`;
-          const token = await resolveAgoraJoinToken(channelName, this.screenUid);
-          await this.screenClient.join(this.appId, channelName, token, this.screenUid);
+          const token = await provider.resolveToken(channelName, this.screenUid);
+          await this.screenClient.join({ channelName, token, uid: this.screenUid });
           this.bindTokenRenewalHandlers(this.screenClient, channelName, this.screenUid, 'screen');
 
-          const publishTracks: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+          const publishTracks: Array<IRTCLocalVideoTrack | IRTCLocalAudioTrack> = [];
           if (this.screenTrack) publishTracks.push(this.screenTrack);
           if (this.screenAudioTrack) publishTracks.push(this.screenAudioTrack);
           if (publishTracks.length) {
@@ -1356,7 +1299,7 @@ class DirectCallSessionStore {
     this.screenClient = null;
     this.screenUid = null;
 
-    const toUnpublish: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+    const toUnpublish: Array<IRTCLocalVideoTrack | IRTCLocalAudioTrack> = [];
     if (this.screenTrack) toUnpublish.push(this.screenTrack);
     if (this.screenAudioTrack) toUnpublish.push(this.screenAudioTrack);
     if (activeScreenClient && toUnpublish.length) {
@@ -1659,14 +1602,14 @@ class DirectCallSessionStore {
     }
   }
 
-  private registerClientEvents(client: IAgoraRTCClient) {
+  private registerClientEvents(client: IRTCClient) {
     try {
       client.enableAudioVolumeIndicator();
     } catch {
       // Some environments do not expose volume indicators.
     }
 
-    client.on('volume-indicator', (volumes: Array<{ uid: string | number; level: number }>) => {
+    client.on('volume-indicator', (volumes) => {
       if (!Array.isArray(volumes)) return;
       const speaking = volumes
         .filter((entry) => Number(entry?.level || 0) >= 5)
@@ -1678,57 +1621,52 @@ class DirectCallSessionStore {
       this.queueActiveSpeakerUids(deduped);
     });
 
-    client.on('user-joined', (user: IAgoraRTCRemoteUser) => {
-      const uid = String(user.uid);
+    client.on('user-joined', (uid) => {
       this.remoteParticipantUids.add(uid);
       this.syncRemoteState();
     });
 
-    client.on('user-published', async (user: IAgoraRTCRemoteUser, mediaType: 'audio' | 'video') => {
-      const uid = String(user.uid);
+    client.on('user-published', async (uid, mediaType) => {
       this.remoteParticipantUids.add(uid);
       this.syncRemoteState();
 
       const callSettings = loadCallSettings();
-      await client.subscribe(user, mediaType);
+      const participant = await client.subscribe(uid, mediaType);
 
-      if (mediaType === 'audio' && user.audioTrack) {
-        this.remoteAudioTracks.set(uid, user.audioTrack);
+      if (mediaType === 'audio' && participant.audioTrack) {
+        this.remoteAudioTracks.set(uid, participant.audioTrack);
         const configuredVolume = this.remoteAudioVolumes.get(uid);
         const nextVolume = typeof configuredVolume === 'number'
           ? configuredVolume
           : callSettings.outputVolume;
         this.remoteAudioVolumes.set(uid, nextVolume);
-        if (typeof user.audioTrack.setVolume === 'function') {
-          user.audioTrack.setVolume(this.state.isDeafened ? 0 : nextVolume);
-        }
-        if (callSettings.outputDeviceId && callSettings.outputDeviceId !== 'default' && typeof user.audioTrack.setPlaybackDevice === 'function') {
+        participant.audioTrack.setVolume(this.state.isDeafened ? 0 : nextVolume);
+        if (callSettings.outputDeviceId && callSettings.outputDeviceId !== 'default' && typeof participant.audioTrack.setPlaybackDevice === 'function') {
           try {
-            await user.audioTrack.setPlaybackDevice(callSettings.outputDeviceId);
+            await participant.audioTrack.setPlaybackDevice(callSettings.outputDeviceId);
           } catch {
             // Some runtimes don't support changing playback device.
           }
         }
-        user.audioTrack.play();
+        participant.audioTrack.play();
       }
 
-      if (mediaType === 'video' && user.videoTrack) {
-        this.remoteVideoTracks.set(uid, user.videoTrack);
+      if (mediaType === 'video' && participant.videoTrack) {
+        this.remoteVideoTracks.set(uid, participant.videoTrack);
         this.syncRemoteState();
 
         const mappedContainer = this.remoteVideoContainers.get(uid);
         if (mappedContainer) {
-          user.videoTrack.play(mappedContainer);
+          participant.videoTrack.play(mappedContainer);
         } else if (this.remoteVideoContainer && this.state.remoteVideoUids[0] === uid) {
-          user.videoTrack.play(this.remoteVideoContainer);
+          participant.videoTrack.play(this.remoteVideoContainer);
         }
       }
 
       this.queueRemoteVideoOptimization();
     });
 
-    client.on('user-unpublished', (user: IAgoraRTCRemoteUser, mediaType: 'audio' | 'video') => {
-      const uid = String(user.uid);
+    client.on('user-unpublished', (uid, mediaType) => {
       if (mediaType === 'video') {
         const existingTrack = this.remoteVideoTracks.get(uid);
         if (existingTrack) {
@@ -1742,8 +1680,7 @@ class DirectCallSessionStore {
       this.syncRemoteState();
     });
 
-    client.on('user-left', (user: IAgoraRTCRemoteUser) => {
-      const uid = String(user.uid);
+    client.on('user-left', (uid) => {
       const existingTrack = this.remoteVideoTracks.get(uid);
       if (existingTrack) {
         existingTrack.stop();
@@ -1798,80 +1735,39 @@ class DirectCallSessionStore {
     return next;
   }
 
-  private async createLocalAudioTrack(preferredSettings?: CallSettings): Promise<ILocalAudioTrack> {
+  private async createLocalAudioTrack(preferredSettings?: CallSettings): Promise<IRTCLocalAudioTrack> {
     const callSettings = await this.resolveCallAudioSettings(preferredSettings);
+    const provider = await getProvider();
     const errors: string[] = [];
-    const AgoraRTC = await getAgoraModule();
 
+    // Primary: provider creates audio track with getUserMedia + enhanced constraints.
     try {
-      const selectedStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: callSettings.inputDeviceId && callSettings.inputDeviceId !== 'default'
-            ? { exact: callSettings.inputDeviceId }
-            : undefined,
-          echoCancellation: callSettings.echoCancellation,
-          noiseSuppression: callSettings.noiseSuppression,
-          autoGainControl: callSettings.automaticGainControl,
-        },
-        video: false,
+      return await provider.createAudioTrack({
+        deviceId: callSettings.inputDeviceId,
+        echoCancellation: callSettings.echoCancellation,
+        noiseSuppression: callSettings.noiseSuppression,
+        autoGainControl: callSettings.automaticGainControl,
       });
-      const selectedTrack = selectedStream.getAudioTracks()[0];
-      if (!selectedTrack) {
-        throw new Error('No audio track from selected getUserMedia');
-      }
-      await this.applyEnhancedNoiseSuppression(selectedTrack, callSettings.noiseSuppression);
-      return AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: selectedTrack });
     } catch (error) {
-      errors.push(`getUserMedia(selected): ${formatRtcError(error)}`);
+      errors.push(`provider(selected): ${formatRtcError(error)}`);
     }
 
+    // Fallback: default device via provider.
     try {
-      return await AgoraRTC.createMicrophoneAudioTrack({
-        microphoneId: callSettings.inputDeviceId && callSettings.inputDeviceId !== 'default'
-          ? callSettings.inputDeviceId
-          : undefined,
-        AEC: callSettings.echoCancellation,
-        ANS: callSettings.noiseSuppression,
-        AGC: callSettings.automaticGainControl,
-      } as any);
-    } catch (error) {
-      errors.push(`agora(selected): ${formatRtcError(error)}`);
-    }
-
-    try {
-      const defaultStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: callSettings.echoCancellation,
-          noiseSuppression: callSettings.noiseSuppression,
-          autoGainControl: callSettings.automaticGainControl,
-        },
-        video: false,
+      return await provider.createAudioTrack({
+        echoCancellation: callSettings.echoCancellation,
+        noiseSuppression: callSettings.noiseSuppression,
+        autoGainControl: callSettings.automaticGainControl,
       });
-      const defaultTrack = defaultStream.getAudioTracks()[0];
-      if (!defaultTrack) {
-        throw new Error('No audio track from default getUserMedia');
-      }
-      await this.applyEnhancedNoiseSuppression(defaultTrack, callSettings.noiseSuppression);
-      return AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: defaultTrack });
     } catch (error) {
-      errors.push(`getUserMedia(default): ${formatRtcError(error)}`);
-    }
-
-    try {
-      return await AgoraRTC.createMicrophoneAudioTrack({
-        AEC: callSettings.echoCancellation,
-        ANS: callSettings.noiseSuppression,
-        AGC: callSettings.automaticGainControl,
-      } as any);
-    } catch (error) {
-      errors.push(`agora(default): ${formatRtcError(error)}`);
+      errors.push(`provider(default): ${formatRtcError(error)}`);
       throw new Error(errors.join(' || '));
     }
   }
 
-  private async createLocalVideoTrack(): Promise<ILocalVideoTrack> {
-    const AgoraRTC = await getAgoraModule();
+  private async createLocalVideoTrack(): Promise<IRTCLocalVideoTrack> {
     const callSettings = loadCallSettings();
+    const provider = await getProvider();
     let stream: MediaStream;
 
     try {
@@ -1899,7 +1795,7 @@ class DirectCallSessionStore {
     if (!mediaStreamTrack) {
       throw new Error('No camera track returned by browser');
     }
-    return AgoraRTC.createCustomVideoTrack({ mediaStreamTrack });
+    return provider.createCustomVideoTrack(mediaStreamTrack);
   }
 }
 

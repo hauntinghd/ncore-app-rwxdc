@@ -18,7 +18,7 @@ import {
 } from '../lib/callsCompat';
 import type { Profile } from '../lib/types';
 
-const AGORA_APP_ID = import.meta.env.VITE_AGORA_APP_ID || '';
+const RTC_APP_ID = String(import.meta.env.VITE_AGORA_APP_ID || '').trim();
 const OUTGOING_RING_TIMEOUT_MS = 3 * 60 * 1000;
 const BANDWIDTH_IDLE_DISCONNECT_MS = 2 * 60 * 1000;
 
@@ -514,7 +514,7 @@ export function DirectCallPage() {
             wantsVideo,
             startedAtMs: rowStartedAtMs,
             isCaller: callerFlag,
-            appId: AGORA_APP_ID,
+            appId: RTC_APP_ID,
           });
         }
 
@@ -543,7 +543,7 @@ export function DirectCallPage() {
                   wantsVideo,
                   startedAtMs: nextStartedAt,
                   isCaller: updatedCallerFlag,
-                  appId: AGORA_APP_ID,
+                  appId: RTC_APP_ID,
                 });
               }
 
@@ -581,7 +581,7 @@ export function DirectCallPage() {
                 wantsVideo,
                 startedAtMs: nextStartedAt,
                 isCaller: true,
-                appId: AGORA_APP_ID,
+                appId: RTC_APP_ID,
               });
             }
           }, 1500);
@@ -621,7 +621,7 @@ export function DirectCallPage() {
               wantsVideo,
               startedAtMs: Date.now(),
               isCaller: true,
-              appId: AGORA_APP_ID,
+              appId: RTC_APP_ID,
             });
           }
         }
@@ -784,7 +784,7 @@ export function DirectCallPage() {
       wantsVideo,
       startedAtMs: callStartedAtMs || Date.now(),
       isCaller: false,
-      appId: AGORA_APP_ID,
+      appId: RTC_APP_ID,
     });
   }
 
@@ -961,7 +961,7 @@ export function DirectCallPage() {
                 Back to DMs
               </button>
             </div>
-          ) : AGORA_APP_ID ? (
+          ) : RTC_APP_ID ? (
             <div className="w-full max-w-6xl">
               {mediaError && (
                 <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -1019,7 +1019,7 @@ export function DirectCallPage() {
           ) : (
             <div className="text-center">
               <p className="text-yellow-400 font-semibold">Agora is not configured.</p>
-              <p className="text-surface-500 text-sm mt-1">Set `VITE_AGORA_APP_ID` to enable calling.</p>
+              <p className="text-surface-500 text-sm mt-1">Set `VITE_AGORA_APP_ID` to enable real-time calling.</p>
             </div>
           )}
         </div>

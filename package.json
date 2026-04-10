@@ -33,7 +33,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "livekit-client": "^2.18.1"
   },
   "devDependencies": {
     "@capacitor/android": "^8.2.0",
