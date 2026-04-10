@@ -1,0 +1,55 @@
+# NCore LiveKit Server Configuration
+# Docs: https://docs.livekit.io/transport/self-hosting/
+
+port: 7880
+rtc:
+  # UDP port range for WebRTC media
+  port_range_start: 50000
+  port_range_end: 60000
+  # Use TCP fallback when UDP is blocked
+  tcp_port: 7881
+  # Enable ICE-lite for better NAT traversal
+  use_ice_lite: true
+
+# Built-in TURN server (eliminates need for coturn)
+turn:
+  enabled: true
+  domain: "{{ .Env.DOMAIN }}"
+  tls_port: 5349
+  udp_port: 3478
+
+# Redis for multi-node coordination (required for global mesh)
+redis:
+  address: "localhost:6379"
+
+# API keys (set via environment or here)
+keys:
+  # Will be overridden by LIVEKIT_API_KEY env var
+  # Generate with: docker run --rm livekit/generate generate-keys
+
+# Room settings
+room:
+  # Maximum participants per room
+  max_participants: 100
+  # Empty room timeout (seconds)
+  empty_timeout: 300
+  # Departure timeout before removing participant
+  departure_timeout: 20
+
+# Audio settings
+audio:
+  # Active speaker detection
+  active_speaker_update_interval: 300ms
+  # Smooth transitions
+  smooth_active_speaker_update: true
+
+# Video settings
+video:
+  # Enable simulcast for bandwidth-adaptive video
+  dynacast: true
+
+# Logging
+logging:
+  level: info
+  # Set to debug for troubleshooting
+  # level: debug
