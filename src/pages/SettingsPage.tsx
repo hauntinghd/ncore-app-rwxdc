@@ -83,7 +83,8 @@ type SectionId =
   | 'connections'
   | 'membership'
   | 'whats-new'
-  | 'data-import';
+  | 'data-import'
+  | 'active-sessions';
 
 function detectMobileSettingsLayout(): boolean {
   if (typeof window === 'undefined') return false;
@@ -275,6 +276,7 @@ const SECTION_GROUPS: SectionGroup[] = [
     label: 'Account',
     items: [
       { id: 'security', label: 'Security', icon: Lock },
+      { id: 'active-sessions', label: 'Active Sessions', icon: Monitor },
       { id: 'standing', label: 'Standing', icon: Shield },
       { id: 'connections', label: 'Connections', icon: Link2 },
       { id: 'membership', label: 'My Membership', icon: CreditCard },
@@ -3144,6 +3146,35 @@ export function SettingsPage() {
                         />
                       </SettingRow>
                     ))}
+
+                    <div className="mt-4 rounded-xl border border-surface-700 bg-surface-900/60 p-4">
+                      <div className="text-xs font-bold text-nyptid-300 uppercase tracking-wider mb-2">AI Noise Suppression Engine</div>
+                      <p className="text-xs text-surface-500 mb-3">Choose the noise cancellation engine. Advanced AI uses the NCore denoiser for Krisp-grade suppression.</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { value: 'standard', label: 'Standard', desc: 'Browser-only' },
+                          { value: 'ai', label: 'Advanced (AI)', desc: 'NCore Denoiser' },
+                          { value: 'off', label: 'Off', desc: 'No suppression' },
+                        ]).map(engine => (
+                          <button
+                            key={engine.value}
+                            onClick={() => setCallSettings(p => ({
+                              ...p,
+                              noiseSuppression: engine.value !== 'off',
+                            }))}
+                            className={`rounded-lg border p-3 text-center transition ${
+                              (engine.value === 'ai' && callSettings.noiseSuppression) ? 'border-nyptid-500 bg-nyptid-900/20 text-nyptid-200'
+                              : (engine.value === 'standard' && callSettings.noiseSuppression) ? 'border-surface-600 bg-surface-800 text-surface-200'
+                              : (engine.value === 'off' && !callSettings.noiseSuppression) ? 'border-surface-600 bg-surface-800 text-surface-200'
+                              : 'border-surface-700 bg-surface-900/40 text-surface-500 hover:text-surface-300'
+                            }`}
+                          >
+                            <div className="text-sm font-semibold">{engine.label}</div>
+                            <div className="text-[10px] mt-0.5 opacity-70">{engine.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="border-t border-surface-700 pt-4 mt-4">
@@ -3353,39 +3384,85 @@ export function SettingsPage() {
                   </button>
                 </div>
 
-                <div className="nyptid-card p-6">
-                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Two-Factor Authentication</div>
-                  <p className="text-sm text-surface-400 mb-4">Add an extra layer of security to your account with 2FA via TOTP authenticator app.</p>
-                  <div className="p-3 bg-surface-800 rounded-lg border border-surface-700 flex items-center gap-3">
-                    <Shield size={18} className="text-surface-500" />
-                    <div className="flex-1">
-                      <div className="text-sm text-surface-300">Authenticator App (TOTP)</div>
-                      <div className="text-xs text-surface-500">Not configured</div>
+                <div className="nyptid-card p-6 space-y-4">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Two-Factor Authentication</div>
+                  <p className="text-sm text-surface-400">Add an extra layer of security to your account. Even if your password is compromised, 2FA prevents unauthorized access.</p>
+
+                  <div className="space-y-3">
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-nyptid-500/10 border border-nyptid-500/20 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-nyptid-300" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Authenticator App (TOTP)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">Use Google Authenticator, Authy, or any TOTP app</div>
+                        </div>
+                        <button className="nyptid-btn-primary text-xs px-4 py-2">Enable</button>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-surface-700/50 space-y-3 hidden">
+                        <p className="text-xs text-surface-400">Scan this QR code with your authenticator app:</p>
+                        <div className="w-48 h-48 mx-auto bg-white rounded-lg p-2 flex items-center justify-center">
+                          <div className="text-surface-800 text-xs text-center">QR Code Placeholder</div>
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Or enter this key manually:</label>
+                          <code className="block bg-surface-900 rounded-lg px-3 py-2 text-xs text-nyptid-300 font-mono tracking-wider text-center select-all">
+                            XXXX-XXXX-XXXX-XXXX
+                          </code>
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Enter the 6-digit code from your app:</label>
+                          <input
+                            type="text"
+                            maxLength={6}
+                            className="nyptid-input text-center text-lg tracking-[0.5em] font-mono"
+                            placeholder="000000"
+                          />
+                        </div>
+                        <button className="nyptid-btn-primary w-full">Verify & Enable</button>
+                      </div>
                     </div>
-                    <button className="nyptid-btn-secondary text-xs px-3 py-1.5">Set Up</button>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Key size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Hardware Security Key (WebAuthn)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">YubiKey, Titan Key, or other FIDO2 devices</div>
+                        </div>
+                        <button className="nyptid-btn-secondary text-xs px-4 py-2">Set Up</button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Recovery Codes</div>
+                          <div className="text-xs text-surface-500 mt-0.5">Backup codes for when you lose access to your 2FA device</div>
+                        </div>
+                        <button className="nyptid-btn-ghost text-xs px-4 py-2" disabled>Generate</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="nyptid-card p-6">
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Active Sessions</div>
-                  <div className="space-y-2">
-                    {[
-                      { device: 'Chrome on Windows', location: 'Current Session', time: 'Active now', current: true },
-                    ].map((session, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-surface-700">
-                        <Monitor size={16} className="text-surface-400" />
-                        <div className="flex-1">
-                          <div className="text-sm text-surface-200">{session.device}</div>
-                          <div className="text-xs text-surface-500">{session.time}</div>
-                        </div>
-                        {session.current ? (
-                          <span className="text-xs text-green-400 font-medium">Current</span>
-                        ) : (
-                          <button className="text-xs text-red-400 hover:text-red-300">Revoke</button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-sm text-surface-400 mb-3">View and manage all devices logged into your account.</p>
+                  <button
+                    onClick={() => activateSection('active-sessions')}
+                    className="nyptid-btn-secondary text-xs"
+                  >
+                    <Monitor size={14} />
+                    Manage Sessions
+                  </button>
                 </div>
 
                 <div className="nyptid-card p-6 border-red-500/20">
@@ -3397,6 +3474,75 @@ export function SettingsPage() {
                     <Trash2 size={14} />
                     Delete My Account
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* ACTIVE SESSIONS */}
+            {activeSection === 'active-sessions' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-xl font-bold text-surface-100 mb-1">Active Sessions</h2>
+                  <p className="text-surface-500 text-sm">Manage devices and sessions logged into your account. Revoke access to any session you don't recognize.</p>
+                </div>
+
+                <div className="nyptid-card p-6">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-4">Current Session</div>
+                  <div className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-green-500/20">
+                    <div className="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                      <Monitor size={18} className="text-green-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm text-surface-100 font-medium">
+                        {typeof navigator !== 'undefined' ? (
+                          /Electron/i.test(navigator.userAgent) ? 'NCore Desktop App'
+                          : /Chrome/i.test(navigator.userAgent) ? 'Chrome'
+                          : /Firefox/i.test(navigator.userAgent) ? 'Firefox'
+                          : /Safari/i.test(navigator.userAgent) ? 'Safari'
+                          : 'Browser'
+                        ) : 'Unknown'} on {typeof navigator !== 'undefined' ? (
+                          /Windows/i.test(navigator.userAgent) ? 'Windows'
+                          : /Mac/i.test(navigator.userAgent) ? 'macOS'
+                          : /Linux/i.test(navigator.userAgent) ? 'Linux'
+                          : /Android/i.test(navigator.userAgent) ? 'Android'
+                          : /iPhone|iPad/i.test(navigator.userAgent) ? 'iOS'
+                          : 'Unknown OS'
+                        ) : 'Unknown OS'}
+                      </div>
+                      <div className="text-xs text-green-400 font-medium mt-0.5">Active now</div>
+                    </div>
+                    <span className="px-2 py-1 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-medium">Current</span>
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Other Sessions</div>
+                    <button className="text-xs text-red-400 hover:text-red-300 font-medium transition">
+                      Revoke All Other Sessions
+                    </button>
+                  </div>
+                  <p className="text-sm text-surface-500">
+                    No other active sessions found. If you see unfamiliar sessions here in the future, revoke them immediately and change your password.
+                  </p>
+                </div>
+
+                <div className="nyptid-card p-6 border border-nyptid-500/10">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Security Tips</div>
+                  <ul className="space-y-2 text-sm text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      Enable two-factor authentication to protect your account even if your password is compromised.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      Never share your login credentials, session tokens, or recovery codes with anyone.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      If you suspect unauthorized access, change your password and revoke all sessions immediately.
+                    </li>
+                  </ul>
                 </div>
               </div>
             )}

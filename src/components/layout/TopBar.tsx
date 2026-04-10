@@ -134,6 +134,9 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [lastClearedAt, setLastClearedAt] = useState<string | null>(() => {
+    try { return localStorage.getItem('ncore.notifications.lastClearedAt'); } catch { return null; }
+  });
   const [incomingCall, setIncomingCall] = useState<Notification | null>(null);
   const [notificationError, setNotificationError] = useState('');
   const [callNowMs, setCallNowMs] = useState(Date.now());
@@ -374,7 +377,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         return;
       }
       if (!data) return;
-      const list = sortNotificationsByCreatedAt(data as Notification[]);
+      const filtered = lastClearedAt
+        ? (data as Notification[]).filter((n) => n.created_at > lastClearedAt)
+        : (data as Notification[]);
+      const list = sortNotificationsByCreatedAt(filtered);
       setNotificationError('');
       setNotifications((prev) => mergeNotificationLists(prev, list).slice(0, 50));
       const latestIncomingCall = list.find((notification) => notification.type === 'incoming_call' && !notification.is_read) || null;
@@ -417,6 +423,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         },
         (payload) => {
           const incoming = payload.new as Notification;
+          if (lastClearedAt && incoming.created_at <= lastClearedAt) return;
           setNotifications((prev) => mergeNotificationLists(prev, [incoming]).slice(0, 50));
           setNotificationError('');
           if (incoming.type === 'incoming_call') {
@@ -486,7 +493,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     markReleaseUpdatesRead();
     if (!profile) return;
     await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id);
-    setNotifications((prev) => prev.map((notification) => ({ ...notification, is_read: true })));
+    const clearedAt = new Date().toISOString();
+    setLastClearedAt(clearedAt);
+    try { localStorage.setItem('ncore.notifications.lastClearedAt', clearedAt); } catch { /* noop */ }
+    setNotifications([]);
     setIncomingCall(null);
     setShowNotifications(false);
     stopIncomingCallRing();

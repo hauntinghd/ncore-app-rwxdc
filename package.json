@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.92",
+  "version": "11.7.96",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -32,8 +32,11 @@
     "release:update": "npm run build:exe:auto && npm run release:web"
   },
   "dependencies": {
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@supabase/supabase-js": "^2.57.4",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "livekit-client": "^2.18.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.2.0",

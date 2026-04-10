@@ -14,6 +14,7 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
@@ -102,8 +103,11 @@ function MessageGroup({
   const first = messages[0];
 
   const author = first.author as any;
-  const authorName = author?.display_name || author?.username || 'Unknown';
-  const authorAvatar = author?.avatar_url;
+  const metadata = (first as any).metadata;
+  const isBot = metadata?.is_bot_message === true;
+  const botName = metadata?.bot_username;
+  const authorName = isBot && botName ? botName : (author?.display_name || author?.username || 'Unknown');
+  const authorAvatar = isBot && metadata?.bot_avatar_url ? metadata.bot_avatar_url : author?.avatar_url;
 
   return (
     <div className="flex gap-3 px-4 py-1 group hover:bg-surface-800/30 transition-colors">
@@ -111,8 +115,11 @@ function MessageGroup({
         <Avatar src={authorAvatar} name={authorName} size="md" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-0.5">
+        <div className="flex items-center gap-2 mb-0.5">
           <span className="font-semibold text-surface-100 text-sm hover:underline cursor-pointer">{authorName}</span>
+          {isBot && (
+            <span className="px-1.5 py-0.5 rounded bg-nyptid-600/30 text-nyptid-300 text-[10px] font-bold leading-none">BOT</span>
+          )}
           <span className="text-xs text-surface-600">{formatMessageTime(first.created_at)}</span>
         </div>
         {messages.map(msg => (
@@ -377,6 +384,9 @@ export function ChatPage() {
   const [showThreadsModal, setShowThreadsModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
+  const [showCatchUp, setShowCatchUp] = useState(false);
+  const [catchUpSummary, setCatchUpSummary] = useState<string | null>(null);
+  const [catchUpLoading, setCatchUpLoading] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [mentionSuggestionIndex, setMentionSuggestionIndex] = useState(0);
@@ -1170,6 +1180,33 @@ export function ChatPage() {
       </button>
       <button
         type="button"
+        onClick={async () => {
+          if (catchUpLoading) return;
+          setCatchUpLoading(true);
+          setShowCatchUp(true);
+          setCatchUpSummary(null);
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token || '';
+            const { data, error } = await supabase.functions.invoke('channel-summarize', {
+              body: { channel_id: channelId, message_count: 50 },
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (error) throw error;
+            setCatchUpSummary(data?.summary || 'No summary available.');
+          } catch {
+            setCatchUpSummary('Could not generate summary. Try again later.');
+          } finally {
+            setCatchUpLoading(false);
+          }
+        }}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Catch up on this channel"
+      >
+        <Zap size={15} />
+      </button>
+      <button
+        type="button"
         onClick={() => setShowPinnedModal(true)}
         className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
         title="Pinned messages"
@@ -1311,6 +1348,35 @@ export function ChatPage() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+            {/* Slash command autocomplete */}
+            {input.startsWith('/') && input.length > 1 && input.indexOf(' ') === -1 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 mx-0 bg-surface-800 border border-surface-700 rounded-xl shadow-xl overflow-hidden z-30">
+                <div className="px-3 py-2 border-b border-surface-700/50">
+                  <span className="text-[10px] font-bold text-surface-500 uppercase tracking-wider">Bot Commands</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {[
+                    { name: '/help', desc: 'Show available bot commands' },
+                    { name: '/poll', desc: 'Create a poll in this channel' },
+                    { name: '/remind', desc: 'Set a reminder' },
+                    { name: '/summarize', desc: 'Summarize recent messages' },
+                  ].filter(cmd => cmd.name.startsWith(input.toLowerCase())).map(cmd => (
+                    <button
+                      key={cmd.name}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); setInput(cmd.name + ' '); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-700/50 transition-colors"
+                    >
+                      <span className="text-nyptid-300 font-mono text-sm font-semibold">{cmd.name}</span>
+                      <span className="text-xs text-surface-500">{cmd.desc}</span>
+                    </button>
+                  ))}
+                  {['/help', '/poll', '/remind', '/summarize'].filter(c => c.startsWith(input.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-surface-500">No matching commands</div>
+                  )}
                 </div>
               </div>
             )}
@@ -1532,6 +1598,33 @@ export function ChatPage() {
               </div>
               <div className="mt-4 flex justify-end">
                 <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowPinnedModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showCatchUp && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowCatchUp(false)} />
+            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+              <div className="flex items-center gap-2 mb-3">
+                <Zap size={18} className="text-nyptid-400" />
+                <span className="text-lg font-semibold text-surface-100">Catch Up</span>
+              </div>
+              <p className="text-xs text-surface-500 mb-3">AI-generated summary of recent messages in #{channel?.name || 'channel'}</p>
+              {catchUpLoading ? (
+                <div className="flex items-center gap-3 py-6 justify-center">
+                  <div className="w-5 h-5 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-surface-400 text-sm">Generating summary...</span>
+                </div>
+              ) : (
+                <div className="bg-surface-900/60 rounded-lg border border-surface-700 p-4 text-sm text-surface-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto">
+                  {catchUpSummary || 'No summary available.'}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowCatchUp(false)}>
                   Close
                 </button>
               </div>
