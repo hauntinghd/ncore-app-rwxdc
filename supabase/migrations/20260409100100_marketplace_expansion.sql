@@ -320,11 +320,15 @@ $$;
 -- Extend channel types to support forums.
 -- ---------------------------------------------------------------------------
 ALTER TABLE channels
-  DROP CONSTRAINT IF EXISTS channels_type_check;
+  DROP CONSTRAINT IF EXISTS channels_channel_type_check;
 
-ALTER TABLE channels
-  ADD CONSTRAINT channels_type_check
-  CHECK (type IN ('text', 'voice', 'announcement', 'forum', 'stage'));
+DO $$ BEGIN
+  ALTER TABLE channels
+    ADD CONSTRAINT channels_channel_type_check
+    CHECK (channel_type IN ('text', 'voice', 'announcement', 'forum', 'stage'));
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
 
 -- Forum post tags
 CREATE TABLE IF NOT EXISTS forum_tags (
