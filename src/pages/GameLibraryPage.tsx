@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Library, Download, Play, Clock, Star, Heart, Search, Grid3X3, List, ExternalLink, Gamepad2, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import AppShell from '../components/layout/AppShell';
+import { AppShell } from '../components/layout/AppShell';
 
 type ViewMode = 'grid' | 'list';
 type Tab = 'library' | 'store' | 'wishlist';

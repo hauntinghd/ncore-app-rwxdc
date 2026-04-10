@@ -4,8 +4,8 @@ import { MessageSquare, Plus, ArrowUp, ArrowDown, Clock, Flame, Tag, ChevronLeft
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Profile, Channel } from '../lib/types';
-import AppShell from '../components/layout/AppShell';
-import Avatar from '../components/ui/Avatar';
+import { AppShell } from '../components/layout/AppShell';
+import { Avatar } from '../components/ui/Avatar';
 
 type SortMode = 'latest' | 'hot' | 'oldest';
 
@@ -291,7 +291,7 @@ export default function ForumChannelPage() {
           {/* Original post */}
           <div className="px-4 py-4 border-b border-surface-700/30">
             <div className="flex items-start gap-3">
-              <Avatar url={activePost.profile?.avatar_url} username={activePost.profile?.username || '?'} size="md" />
+              <Avatar src={activePost.profile?.avatar_url} name={activePost.profile?.username || '?'} size="md" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-surface-100 font-medium text-sm">{activePost.profile?.display_name || activePost.profile?.username}</span>
@@ -318,7 +318,7 @@ export default function ForumChannelPage() {
             ) : (
               replies.map((reply) => (
                 <div key={reply.id} className="flex items-start gap-3">
-                  <Avatar url={reply.profile?.avatar_url} username={reply.profile?.username || '?'} size="sm" />
+                  <Avatar src={reply.profile?.avatar_url} name={reply.profile?.username || '?'} size="sm" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-surface-200 font-medium text-sm">{reply.profile?.display_name || reply.profile?.username}</span>
@@ -487,7 +487,7 @@ export default function ForumChannelPage() {
                   className="w-full px-4 py-3 hover:bg-surface-800/50 transition text-left"
                 >
                   <div className="flex items-start gap-3">
-                    <Avatar url={post.profile?.avatar_url} username={post.profile?.username || '?'} size="sm" />
+                    <Avatar src={post.profile?.avatar_url} name={post.profile?.username || '?'} size="sm" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         {post.is_pinned && <Pin size={12} className="text-nyptid-400" />}

@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { Bot, Plus, Key, Webhook, Trash2, Copy, Check, RefreshCw, Eye, EyeOff, Globe, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import AppShell from '../components/layout/AppShell';
-import Avatar from '../components/ui/Avatar';
+import { AppShell } from '../components/layout/AppShell';
+import { Avatar } from '../components/ui/Avatar';
 
 interface BotUser {
   id: string;
@@ -301,7 +301,7 @@ export default function DeveloperPortalPage() {
               ) : (
                 bots.map((bot) => (
                   <div key={bot.id} className="nyptid-card p-4 flex items-center gap-3">
-                    <Avatar url={bot.avatar_url} username={bot.username} size="md" />
+                    <Avatar src={bot.avatar_url} name={bot.username} size="md" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-surface-100 font-medium text-sm">{bot.display_name || bot.username}</span>
