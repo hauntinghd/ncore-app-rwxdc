@@ -85,6 +85,7 @@ export function AppShell({
   const memberCountRefreshTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const sidebarVoiceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showCreateCommunity, setShowCreateCommunity] = useState(false);
+  const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [newCommunity, setNewCommunity] = useState<CreateCommunityForm>(DEFAULT_FORM);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -1437,11 +1438,12 @@ export function AppShell({
         isOpen={showCreateCommunity}
         onClose={() => {
           setShowCreateCommunity(false);
+          setCreateStep(1);
           setCreateError('');
           setJoinInviteCode('');
         }}
-        title="Create Your Server"
-        size="xl"
+        title={createStep === 1 ? 'Create a Server' : createStep === 2 ? 'Tell us more' : 'Customize your server'}
+        size="md"
       >
         <div className="space-y-5">
           {createError && (
@@ -1451,177 +1453,114 @@ export function AppShell({
             </div>
           )}
 
-          <div className="rounded-[24px] border border-surface-700 bg-surface-900/70 p-4">
-            <div className="text-sm text-surface-300">
-              Your server is where you and your friends hang out. Start from a template or build it from zero.
-            </div>
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-            <div className="space-y-3">
-              <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500">Start From A Template</div>
-              <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
-                {COMMUNITY_BLUEPRINT_OPTIONS.map((blueprint) => {
-                  const selected = newCommunity.templateId === blueprint.id;
-                  return (
-                    <button
-                      key={blueprint.id}
-                      type="button"
-                      onClick={() => handleTemplateChange(blueprint.id)}
-                      className={`w-full rounded-[22px] border px-4 py-3 text-left transition-all ${
-                        selected
-                          ? 'border-nyptid-300/50 bg-nyptid-300/12 shadow-[0_0_0_1px_rgba(255,180,71,0.12)]'
-                          : 'border-surface-700 bg-surface-950/70 hover:border-surface-500 hover:bg-surface-900/70'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl border border-surface-700 bg-surface-900 text-lg">
-                          {blueprint.icon}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-base font-bold text-surface-100">{blueprint.label}</div>
-                              <div className="text-xs text-surface-500 mt-0.5">{blueprint.createModeLabel}</div>
-                            </div>
-                            {selected && (
-                              <span className="rounded-full border border-nyptid-300/40 bg-nyptid-300/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-nyptid-100">
-                                Selected
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-2 text-sm text-surface-300">{blueprint.templatePitch}</div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
+          {/* Step 1: Choose template */}
+          {createStep === 1 && (
+            <>
+              <p className="text-sm text-surface-400 text-center">Your server is where you and your friends hang out. Pick a template to get started.</p>
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => { handleTemplateChange('blank'); setCreateStep(2); }}
+                  className="w-full rounded-xl border border-surface-700 bg-surface-950/70 hover:border-nyptid-300/50 hover:bg-nyptid-300/5 px-4 py-3 text-left transition-all flex items-center gap-3"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-surface-600 bg-surface-800 text-lg">+</div>
+                  <div className="font-semibold text-surface-100">Create My Own</div>
+                  <div className="ml-auto text-surface-600 text-xs">Start fresh</div>
+                </button>
+                {COMMUNITY_BLUEPRINT_OPTIONS.map((blueprint) => (
+                  <button
+                    key={blueprint.id}
+                    type="button"
+                    onClick={() => { handleTemplateChange(blueprint.id); setCreateStep(2); }}
+                    className="w-full rounded-xl border border-surface-700 bg-surface-950/70 hover:border-nyptid-300/50 hover:bg-nyptid-300/5 px-4 py-3 text-left transition-all flex items-center gap-3"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-surface-600 bg-surface-800 text-lg">{blueprint.icon}</div>
+                    <div className="font-semibold text-surface-100">{blueprint.label}</div>
+                  </button>
+                ))}
               </div>
-            </div>
-
-            <div className="space-y-4">
-              <div
-                className="rounded-[26px] border border-surface-700 p-5"
-                style={{
-                  background: `linear-gradient(155deg, ${getCommunityBlueprint(newCommunity.templateId).gradientStart}, ${getCommunityBlueprint(newCommunity.templateId).gradientEnd})`,
-                }}
-              >
-                <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">Server Blueprint</div>
-                <div className="mt-3 flex items-center gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-[18px] border border-white/10 bg-black/15 text-2xl shadow-inner">
-                    {getCommunityBlueprint(newCommunity.templateId).icon}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xl font-black text-white">{getCommunityBlueprint(newCommunity.templateId).label}</div>
-                    <div className="mt-1 text-sm text-white/75">{getCommunityBlueprint(newCommunity.templateId).serverTagline}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-[24px] border border-surface-700 bg-surface-950/70 p-4 space-y-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-surface-300">Server name</label>
+              <div className="border-t border-surface-700 pt-4">
+                <p className="text-sm text-surface-400 text-center mb-3">Have an invite already?</p>
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    value={newCommunity.name}
-                    onChange={(event) => setNewCommunity((prev) => ({ ...prev, name: event.target.value }))}
-                    className="nyptid-input"
-                    placeholder={getCommunityBlueprint(newCommunity.templateId).recommendedName || 'My Awesome Server'}
-                    maxLength={50}
+                    value={joinInviteCode}
+                    onChange={(event) => setJoinInviteCode(event.target.value)}
+                    className="nyptid-input flex-1"
+                    placeholder="ncore.gg/ABC123 or invite code"
                   />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-surface-300">Description</label>
-                  <textarea
-                    value={newCommunity.description}
-                    onChange={(event) => setNewCommunity((prev) => ({ ...prev, description: event.target.value }))}
-                    className="nyptid-input resize-none"
-                    placeholder={getCommunityBlueprint(newCommunity.templateId).recommendedDescription || 'What is this server about?'}
-                    rows={3}
-                    maxLength={300}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-surface-300">Category</label>
-                    <select
-                      value={newCommunity.category}
-                      onChange={(event) => setNewCommunity((prev) => ({ ...prev, category: event.target.value }))}
-                      className="nyptid-input"
-                    >
-                      {COMMUNITY_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>{category}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-surface-300">Visibility</label>
-                    <select
-                      value={newCommunity.visibility}
-                      onChange={(event) => setNewCommunity((prev) => ({
-                        ...prev,
-                        visibility: event.target.value === 'private' ? 'private' : 'public',
-                      }))}
-                      className="nyptid-input"
-                    >
-                      <option value="public">Public</option>
-                      <option value="private">Private</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-surface-700 bg-surface-900/70 px-3 py-3">
-                  <div className="text-xs font-bold uppercase tracking-[0.26em] text-surface-500">Launch Preview</div>
-                  <div className="mt-3 text-sm text-surface-200">
-                    {getCommunityBlueprint(newCommunity.templateId).categories.length} starter categories •{' '}
-                    {getCommunityBlueprint(newCommunity.templateId).categories.reduce((sum, category) => sum + category.channels.length, 0)} starter channels
-                  </div>
-                  <div className="mt-2 text-xs text-surface-500">
-                    {getCommunityBlueprint(newCommunity.templateId).onboardingSteps.join(' • ')}
-                  </div>
+                  <button type="button" onClick={handleJoinCommunityFromInvite} className="nyptid-btn-secondary px-4">
+                    Join
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
+            </>
+          )}
 
-          <div className="rounded-[24px] border border-surface-700 bg-surface-950/75 p-4">
-            <div className="text-xl font-black text-surface-100 text-center">Have an invite already?</div>
-            <div className="mt-2 text-sm text-surface-500 text-center">Join a server instantly with an ncore.gg code or invite link.</div>
-            <div className="mt-4 flex gap-3">
-              <input
-                type="text"
-                value={joinInviteCode}
-                onChange={(event) => setJoinInviteCode(event.target.value)}
-                className="nyptid-input flex-1"
-                placeholder="ncore.gg/ABC123 or paste invite code"
-              />
-              <button type="button" onClick={handleJoinCommunityFromInvite} className="nyptid-btn-secondary px-5">
-                Join Server
+          {/* Step 2: Purpose */}
+          {createStep === 2 && (
+            <>
+              <p className="text-sm text-surface-400 text-center">Help us customize your server for the best experience.</p>
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => { setNewCommunity((prev) => ({ ...prev, visibility: 'private' })); setCreateStep(3); }}
+                  className="w-full rounded-xl border border-surface-700 bg-surface-950/70 hover:border-nyptid-300/50 hover:bg-nyptid-300/5 p-5 text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">👥</div>
+                  <div className="text-base font-bold text-surface-100">For me and my friends</div>
+                  <div className="text-sm text-surface-400 mt-1">A private space for a small group to hang out.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setNewCommunity((prev) => ({ ...prev, visibility: 'public' })); setCreateStep(3); }}
+                  className="w-full rounded-xl border border-surface-700 bg-surface-950/70 hover:border-nyptid-300/50 hover:bg-nyptid-300/5 p-5 text-left transition-all"
+                >
+                  <div className="text-2xl mb-2">🌍</div>
+                  <div className="text-base font-bold text-surface-100">For a Community</div>
+                  <div className="text-sm text-surface-400 mt-1">A public server for your audience, fans, or org.</div>
+                </button>
+              </div>
+              <button type="button" onClick={() => setCreateStep(1)} className="text-sm text-surface-500 hover:text-surface-300 transition w-full text-center mt-2">
+                Back
               </button>
-            </div>
-          </div>
+            </>
+          )}
 
-          <div className="flex gap-3 pt-1">
-            <button
-              onClick={() => {
-                setShowCreateCommunity(false);
-                setCreateError('');
-                setJoinInviteCode('');
-              }}
-              className="nyptid-btn-secondary flex-1"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreateCommunity}
-              className="nyptid-btn-primary flex-1"
-              disabled={creating || !newCommunity.name.trim()}
-            >
-              {creating ? 'Creating...' : 'Create Server'}
-            </button>
-          </div>
+          {/* Step 3: Name + Create */}
+          {createStep === 3 && (
+            <>
+              <div className="flex flex-col items-center">
+                <div className="w-20 h-20 rounded-full bg-surface-800 border-2 border-dashed border-surface-600 flex items-center justify-center text-surface-500 text-sm mb-4 cursor-pointer hover:border-nyptid-300/50 transition">
+                  {getCommunityBlueprint(newCommunity.templateId).icon || 'ICON'}
+                </div>
+                <p className="text-xs text-surface-500 mb-4">Server icon can be changed later in settings</p>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-surface-300">Server name</label>
+                <input
+                  type="text"
+                  value={newCommunity.name}
+                  onChange={(event) => setNewCommunity((prev) => ({ ...prev, name: event.target.value }))}
+                  className="nyptid-input text-center text-lg"
+                  placeholder={getCommunityBlueprint(newCommunity.templateId).recommendedName || "My Awesome Server"}
+                  maxLength={50}
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-surface-500 text-center">By creating a server, you agree to NCore's Community Guidelines.</p>
+              <button
+                onClick={handleCreateCommunity}
+                className="nyptid-btn-primary w-full py-3 text-base font-bold"
+                disabled={creating || !newCommunity.name.trim()}
+              >
+                {creating ? 'Creating...' : 'Create'}
+              </button>
+              <button type="button" onClick={() => setCreateStep(2)} className="text-sm text-surface-500 hover:text-surface-300 transition w-full text-center">
+                Back
+              </button>
+            </>
+          )}
         </div>
       </Modal>
 

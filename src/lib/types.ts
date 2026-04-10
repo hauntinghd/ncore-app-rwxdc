@@ -169,6 +169,14 @@ export interface MarketplaceGameListing {
   rejection_reason?: string | null;
   security_status?: 'pending' | 'passed' | 'failed' | 'needs_changes' | string;
   security_notes?: string | null;
+  screenshots?: string[];
+  system_requirements?: Record<string, any>;
+  short_description?: string;
+  tags?: string[];
+  discount_percent?: number;
+  sale_ends_at?: string | null;
+  total_reviews?: number;
+  positive_review_pct?: number;
   created_at: string;
   updated_at: string;
   seller_profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'> | null;

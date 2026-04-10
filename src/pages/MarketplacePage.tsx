@@ -502,13 +502,13 @@ export function MarketplacePage() {
       ? [
           { id: 'my_contracts' as QuickdrawNavId, label: 'My Contracts', subtitle: 'Founder command center' },
           { id: 'listed_contracts' as QuickdrawNavId, label: 'Listed Contracts', subtitle: 'Drafted and staged' },
-          { id: 'working_contracts' as QuickdrawNavId, label: 'Working Contracts', subtitle: 'Live escrow orders' },
-          { id: 'escrow_history' as QuickdrawNavId, label: 'Escrow History', subtitle: 'Closed settlements' },
+          { id: 'working_contracts' as QuickdrawNavId, label: 'Active Orders', subtitle: 'Live escrow orders' },
+          { id: 'escrow_history' as QuickdrawNavId, label: 'Order History', subtitle: 'Closed settlements' },
         ]
       : [
-          { id: 'find_contracts' as QuickdrawNavId, label: 'Find Contracts', subtitle: 'Open specialist opportunities' },
-          { id: 'contract_radar' as QuickdrawNavId, label: 'Contract Radar', subtitle: 'Live demand pulse' },
-          { id: 'escrow_history' as QuickdrawNavId, label: 'Escrow History', subtitle: 'Delivered and disputed' },
+          { id: 'find_contracts' as QuickdrawNavId, label: 'Browse', subtitle: 'Open specialist opportunities' },
+          { id: 'contract_radar' as QuickdrawNavId, label: 'Trending', subtitle: 'Live demand pulse' },
+          { id: 'escrow_history' as QuickdrawNavId, label: 'Order History', subtitle: 'Delivered and disputed' },
         ]
   ), [quickdrawRoleView]);
   const activeQuickdrawNav = useMemo(
@@ -2003,7 +2003,7 @@ export function MarketplacePage() {
             <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5">
               <aside className="h-fit space-y-4 rounded-[28px] border border-surface-700 bg-[#0b1723] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)] xl:sticky xl:top-5">
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">QuickDraw Command</div>
+                  <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">Services</div>
                   <div className="rounded-[22px] border border-surface-700 bg-surface-950/45 p-2">
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -2015,8 +2015,8 @@ export function MarketplacePage() {
                             : 'bg-transparent text-surface-400 hover:bg-surface-900/60 hover:text-surface-200'
                         }`}
                       >
-                        <div className="font-semibold">Find Contracts</div>
-                        <div className="mt-1 text-[11px] text-surface-500">Specialist view</div>
+                        <div className="font-semibold">Browse</div>
+                        <div className="mt-1 text-[11px] text-surface-500">Freelancer view</div>
                       </button>
                       <button
                         type="button"
@@ -2028,7 +2028,7 @@ export function MarketplacePage() {
                         }`}
                       >
                         <div className="font-semibold">Deploy</div>
-                        <div className="mt-1 text-[11px] text-surface-500">Founder view</div>
+                        <div className="mt-1 text-[11px] text-surface-500">Hiring view</div>
                       </button>
                     </div>
                   </div>
@@ -2036,7 +2036,7 @@ export function MarketplacePage() {
 
                 <div>
                   <div className="text-xs font-bold uppercase tracking-[0.28em] text-surface-500 mb-3">
-                    {quickdrawRoleView === 'hiring' ? 'Founder Command' : 'Specialist Desk'}
+                    {quickdrawRoleView === 'hiring' ? 'Hire Talent' : 'My Dashboard'}
                   </div>
                   <div className="space-y-2">
                     {quickdrawNavItems.map((item) => (
@@ -2102,10 +2102,10 @@ export function MarketplacePage() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="max-w-3xl">
                         <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-nyptid-200">
-                          {quickdrawRoleView === 'hiring' ? 'Founder Command Center' : 'Contract Grid'}
+                          {quickdrawRoleView === 'hiring' ? 'Hire Talent' : 'Browse Services'}
                         </div>
                         <div className="mt-3 text-4xl font-black leading-none text-white">
-                          {activeQuickdrawNav?.label || 'Contract Grid'}
+                          {activeQuickdrawNav?.label || 'Browse Services'}
                         </div>
                         <div className="mt-3 text-sm text-surface-400">
                           {quickdrawRoleView === 'hiring'
@@ -2115,7 +2115,7 @@ export function MarketplacePage() {
                                 ? 'Monitor progress on your hired projects and track escrow-backed execution.'
                                 : quickdrawNavId === 'escrow_history'
                                   ? 'Review finished hiring activity and lifetime capital deployed.'
-                                  : 'Deploy capital to scale and issue contracts to cleared specialists.')
+                                  : 'Hire professionals to scale and issue contracts to cleared specialists.')
                             : (quickdrawNavId === 'contract_radar'
                               ? 'Monitor category momentum and newest contract demand across the grid.'
                               : quickdrawNavId === 'escrow_history'
@@ -2132,7 +2132,7 @@ export function MarketplacePage() {
                             className="nyptid-btn-primary text-xs px-3 py-2"
                           >
                             <Plus size={13} />
-                            Issue New Contract
+                            Post a Job
                           </button>
                         )}
                         <button
@@ -2201,7 +2201,7 @@ export function MarketplacePage() {
 
                     {showQuickdrawFilters && (
                       <div className="mt-4 rounded-[22px] border border-surface-700 bg-surface-950/55 p-4">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-surface-500">Contract Filters</div>
+                        <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-surface-500">Filters</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -2339,7 +2339,7 @@ export function MarketplacePage() {
                   {!loadingQuickdraw && quickdrawSpotlightListings.length === 0 && (
                     <div className="rounded-[24px] border border-dashed border-surface-700 bg-surface-950/45 px-5 py-8 text-center text-sm text-surface-500">
                       {quickdrawNavId === 'listed_contracts'
-                        ? 'No listed contracts found yet. Use Issue New Contract to stage your first contract.'
+                        ? 'No listed contracts found yet. Use Post a Job to stage your first contract.'
                         : quickdrawNavId === 'working_contracts'
                           ? 'No active contracts in execution right now.'
                           : quickdrawNavId === 'escrow_history'
@@ -2387,7 +2387,7 @@ export function MarketplacePage() {
                       ))}
                       {quickdrawContractDrafts.length === 0 && (
                         <div className="rounded-lg border border-dashed border-surface-700 bg-surface-900/50 px-3 py-4 text-sm text-surface-500">
-                          No contract drafts yet. Click <span className="text-surface-300 font-semibold">Issue New Contract</span> to open the deploy composer.
+                          No contract drafts yet. Click <span className="text-surface-300 font-semibold">Post a Job</span> to open the deploy composer.
                         </div>
                       )}
                     </div>
@@ -2396,7 +2396,7 @@ export function MarketplacePage() {
 
                 {quickdrawNavId === 'working_contracts' && (
                   <div className="nyptid-card p-4">
-                    <div className="font-bold text-surface-100 mb-2">Working Contracts</div>
+                    <div className="font-bold text-surface-100 mb-2">Active Orders</div>
                     <div className="space-y-2">
                       {activeServiceOrdersForRole.slice(0, 10).map((order) => (
                         <div key={order.id} className="rounded-lg border border-surface-700 bg-surface-900/60 p-2.5">
@@ -2415,7 +2415,7 @@ export function MarketplacePage() {
 
                 {quickdrawNavId === 'escrow_history' && (
                   <div className="nyptid-card p-4">
-                    <div className="font-bold text-surface-100 mb-2">Escrow History</div>
+                    <div className="font-bold text-surface-100 mb-2">Order History</div>
                     <div className="space-y-2">
                       {historicalServiceOrdersForRole.slice(0, 12).map((order) => (
                         <div key={order.id} className="rounded-lg border border-surface-700 bg-surface-900/60 p-2.5">
@@ -3090,7 +3090,7 @@ export function MarketplacePage() {
                         size="xl"
                       />
                       <div>
-                        <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-nyptid-200">QuickDraw Contract</div>
+                        <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-nyptid-200">Service Details</div>
                         <div className="mt-2 text-3xl font-black text-surface-100">{selectedServiceListing.title}</div>
                         <div className="mt-2 text-sm text-surface-400">
                           by {selectedServiceListing.seller_profile?.display_name || selectedServiceListing.seller_profile?.username || 'Verified specialist'}
@@ -3285,7 +3285,7 @@ export function MarketplacePage() {
           >
             <div className="space-y-4">
               <div className="text-sm text-surface-400">
-                Deploy capital and hire cleared specialists with escrow-backed execution.
+                Hire professionals and hire cleared specialists with escrow-backed execution.
               </div>
 
               <div className="rounded-lg border border-surface-700 bg-surface-900/70 p-3 space-y-3">
