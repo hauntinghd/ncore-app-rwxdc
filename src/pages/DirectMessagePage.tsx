@@ -597,13 +597,14 @@ export function DirectMessagePage() {
       const rawNicknames = localStorage.getItem(nicknamesStorageKey);
       const rawNotes = localStorage.getItem(notesStorageKey);
       const rawMuted = localStorage.getItem(mutedStorageKey);
-      const rawClosed = closedSessionStorageKey ? window.sessionStorage.getItem(closedSessionStorageKey) : null;
+      const rawClosed = closedStorageKey ? localStorage.getItem(closedStorageKey) : null;
       setFriendNicknames(rawNicknames ? JSON.parse(rawNicknames) : {});
       setFriendNotes(rawNotes ? JSON.parse(rawNotes) : {});
       setClosedConversationIds(rawClosed ? JSON.parse(rawClosed) : []);
       setMutedConversationIds(rawMuted ? JSON.parse(rawMuted) : []);
-      if (closedStorageKey) {
-        localStorage.removeItem(closedStorageKey);
+      // Also clean up legacy sessionStorage key
+      if (closedSessionStorageKey) {
+        try { window.sessionStorage.removeItem(closedSessionStorageKey); } catch { /* noop */ }
       }
     } catch {
       setFriendNicknames({});
@@ -629,13 +630,13 @@ export function DirectMessagePage() {
   }, [mutedConversationIds, mutedStorageKey]);
 
   useEffect(() => {
-    if (!closedSessionStorageKey) return;
+    if (!closedStorageKey) return;
     try {
-      window.sessionStorage.setItem(closedSessionStorageKey, JSON.stringify(closedConversationIds));
+      localStorage.setItem(closedStorageKey, JSON.stringify(closedConversationIds));
     } catch {
-      // best-effort session persistence
+      // best-effort persistence
     }
-  }, [closedConversationIds, closedSessionStorageKey]);
+  }, [closedConversationIds, closedStorageKey]);
 
   useEffect(() => {
     if (!conversationsCacheKey) return;

@@ -43,18 +43,36 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('@supabase/supabase-js')) {
+            // Heavy RTC SDKs — only loaded when user joins a call
+            if (id.includes('agora-rtc-sdk-ng') || id.includes('agora-extension-ai-denoiser')) {
+              return 'vendor-agora';
+            }
+            if (id.includes('livekit-client')) {
+              return 'vendor-livekit';
+            }
+            if (id.includes('@supabase/supabase-js') || id.includes('@supabase/realtime') || id.includes('@supabase/postgrest') || id.includes('@supabase/gotrue') || id.includes('@supabase/storage')) {
               return 'vendor-supabase';
             }
             if (id.includes('react-router') || id.includes('react-router-dom')) {
               return 'vendor-router';
             }
-            if (id.includes('react') || id.includes('react-dom')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
               return 'vendor-react';
             }
-            if (id.includes('lucide-react')) {
+            if (id.includes('lucide-react') || id.includes('simple-icons')) {
               return 'vendor-icons';
             }
+            if (id.includes('jszip')) {
+              return 'vendor-jszip';
+            }
+          }
+          // Split RTC abstraction into its own chunk (loaded on demand)
+          if (id.includes('src/lib/rtc/')) {
+            return 'rtc-core';
+          }
+          // Split crypto into its own chunk
+          if (id.includes('src/lib/crypto/')) {
+            return 'crypto';
           }
           return undefined;
         },
