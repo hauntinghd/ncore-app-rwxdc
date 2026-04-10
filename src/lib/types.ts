@@ -8,6 +8,18 @@ export type ContentType = 'video' | 'text' | 'quiz';
 export type Visibility = 'public' | 'private';
 export type ScreenShareQualityCap = '720p30' | '1080p120' | '4k60';
 
+export interface ProfileActivity {
+  type: 'playing' | 'streaming' | 'listening' | 'watching' | 'custom';
+  name: string;
+  details?: string | null;
+  state?: string | null;
+  started_at?: string | null;
+  large_image_url?: string | null;
+  small_image_url?: string | null;
+  party_size?: number | null;
+  party_max?: number | null;
+}
+
 export interface Profile {
   id: string;
   username: string;
@@ -17,6 +29,7 @@ export interface Profile {
   bio: string;
   custom_status?: string | null;
   custom_status_emoji?: string | null;
+  activity?: ProfileActivity | null;
   platform_role: PlatformRole;
   rank: string;
   xp: number;

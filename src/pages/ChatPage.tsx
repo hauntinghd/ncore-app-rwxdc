@@ -102,8 +102,11 @@ function MessageGroup({
   const first = messages[0];
 
   const author = first.author as any;
-  const authorName = author?.display_name || author?.username || 'Unknown';
-  const authorAvatar = author?.avatar_url;
+  const metadata = (first as any).metadata;
+  const isBot = metadata?.is_bot_message === true;
+  const botName = metadata?.bot_username;
+  const authorName = isBot && botName ? botName : (author?.display_name || author?.username || 'Unknown');
+  const authorAvatar = isBot && metadata?.bot_avatar_url ? metadata.bot_avatar_url : author?.avatar_url;
 
   return (
     <div className="flex gap-3 px-4 py-1 group hover:bg-surface-800/30 transition-colors">
@@ -111,8 +114,11 @@ function MessageGroup({
         <Avatar src={authorAvatar} name={authorName} size="md" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-0.5">
+        <div className="flex items-center gap-2 mb-0.5">
           <span className="font-semibold text-surface-100 text-sm hover:underline cursor-pointer">{authorName}</span>
+          {isBot && (
+            <span className="px-1.5 py-0.5 rounded bg-nyptid-600/30 text-nyptid-300 text-[10px] font-bold leading-none">BOT</span>
+          )}
           <span className="text-xs text-surface-600">{formatMessageTime(first.created_at)}</span>
         </div>
         {messages.map(msg => (
@@ -1311,6 +1317,35 @@ export function ChatPage() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+            {/* Slash command autocomplete */}
+            {input.startsWith('/') && input.length > 1 && input.indexOf(' ') === -1 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 mx-0 bg-surface-800 border border-surface-700 rounded-xl shadow-xl overflow-hidden z-30">
+                <div className="px-3 py-2 border-b border-surface-700/50">
+                  <span className="text-[10px] font-bold text-surface-500 uppercase tracking-wider">Bot Commands</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {[
+                    { name: '/help', desc: 'Show available bot commands' },
+                    { name: '/poll', desc: 'Create a poll in this channel' },
+                    { name: '/remind', desc: 'Set a reminder' },
+                    { name: '/summarize', desc: 'Summarize recent messages' },
+                  ].filter(cmd => cmd.name.startsWith(input.toLowerCase())).map(cmd => (
+                    <button
+                      key={cmd.name}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); setInput(cmd.name + ' '); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-700/50 transition-colors"
+                    >
+                      <span className="text-nyptid-300 font-mono text-sm font-semibold">{cmd.name}</span>
+                      <span className="text-xs text-surface-500">{cmd.desc}</span>
+                    </button>
+                  ))}
+                  {['/help', '/poll', '/remind', '/summarize'].filter(c => c.startsWith(input.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-surface-500">No matching commands</div>
+                  )}
                 </div>
               </div>
             )}
