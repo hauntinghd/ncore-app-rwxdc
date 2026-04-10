@@ -9,6 +9,8 @@ import {
   FolderPlus,
   Grip,
   Hash,
+  MessageSquare,
+  Radio,
   LogOut,
   Megaphone,
   Mic,
@@ -64,6 +66,8 @@ interface SidebarContextMenuState {
 function ChannelIcon({ type }: { type: string }) {
   if (type === 'voice') return <Mic size={16} className="text-surface-400" />;
   if (type === 'announcement') return <Megaphone size={16} className="text-surface-400" />;
+  if (type === 'forum') return <MessageSquare size={16} className="text-surface-400" />;
+  if (type === 'stage') return <Radio size={16} className="text-surface-400" />;
   return <Hash size={16} className="text-surface-400" />;
 }
 
@@ -146,6 +150,8 @@ export function ChannelSidebar({
     if (!community?.id) return;
     if (channel.channel_type === 'voice') {
       navigate(`/app/community/${community.id}/voice/${channel.id}`);
+    } else if (channel.channel_type === 'forum') {
+      navigate(`/app/community/${community.id}/forum/${channel.id}`);
     } else {
       navigate(`/app/community/${community.id}/channel/${channel.id}`);
     }
