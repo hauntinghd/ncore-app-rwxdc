@@ -1,9 +1,40 @@
 {
     "releases": [
         {
+            "version": "11.7.95",
+            "date": "2026-04-10",
+            "badge": "Current Build",
+            "improvements": [
+                "RTC Provider Abstraction: Voice and video calling now runs through a provider-agnostic layer, enabling future migration from Agora to self-hosted LiveKit with a single environment variable flip.",
+                "LiveKit Integration: Full LiveKit provider implementation with room management, track wrapping, screen share, and token generation — ready to activate when self-hosted server is deployed.",
+                "Krisp-grade Noise Cancellation: RNNoise WASM AudioWorklet processor with voice activity detection, auto-mute threshold, and layered noise suppression pipeline. New AI engine selector in Voice & Video settings.",
+                "Security Shield v2: Homograph/IDN attack detection, unicode impersonation blocking, shortened URL warnings, script injection blocking, and extended executable file type filtering. 8 protection categories (up from 4).",
+                "Forum Channels: New forum channel type with threaded post/reply system, tag-based filtering, sort modes (Latest/Hot/Oldest), and dedicated ForumChannelPage.",
+                "Game Library: Steam-style game library with My Library, Store, and Wishlist tabs. Grid and list views, discount pricing, review labels (Overwhelmingly Positive → Negative), play/buy actions.",
+                "Developer Portal: Create and manage bots with auto-generated tokens, enable/disable controls, and delete. Configure webhooks with event subscriptions, HMAC signing, and failure tracking.",
+                "Bot Platform: Bot REST API for sending messages, listing channels, adding reactions, and reading members. HMAC-SHA256 signed webhook dispatch with auto-disable on failures. BOT badge on bot messages.",
+                "AI Catch Up: Channel summarization via configurable LLM endpoint. Click the lightning bolt in any channel to get a bullet-point summary of recent conversations.",
+                "Community Events: Scheduled events with RSVP (Going/Maybe), live event detection with animated LIVE badge, and smart time formatting.",
+                "E2E Encryption Foundation: ECDH P-256 key exchange, AES-256-GCM message encryption, HKDF key derivation, and safety number verification — all via WebCrypto with zero external dependencies.",
+                "Plugin SDK: Sandboxed iframe plugin runtime with manifest system, 5 permission scopes, postMessage bridge, and PluginManager singleton for registration and lifecycle management.",
+                "Rich Presence: Activity type support (Playing, Streaming, Listening, Watching) with details, timestamps, and party info. Displayed in friends list with accent color.",
+                "2FA Setup Flow: Full TOTP authenticator, WebAuthn hardware key, and recovery code UI in Security settings.",
+                "Active Sessions: View current session with auto-detected browser and OS, manage other sessions, revoke all button, and security tips.",
+                "Marketplace Expansion: 21 new database tables for job briefs, seller applications, service/game reviews with auto-rating triggers, game categories, wishlists, bundles, mods, tiered commissions (10%/7%/4%/3%), and forum tags.",
+                "Seller Analytics: Revenue dashboard with total earnings, pending/available balance, order stats, completion rate, average rating, and transaction ledger.",
+                "Startup Performance: PWA init deferred to after first paint. Agora (1.4MB) and LiveKit (485KB) SDKs split into on-demand chunks that only load when joining a call."
+            ],
+            "bugFixes": [
+                "Fixed closed DMs reopening on app restart — switched from sessionStorage (cleared on close) to localStorage for persistent closed conversation tracking.",
+                "Fixed forum/stage channel types not recognized in sidebar routing — added icons and navigation paths for forum and stage channels.",
+                "Fixed Avatar component prop mismatches in new pages (ForumChannelPage, GameLibraryPage, DeveloperPortalPage).",
+                "Fixed channel type database constraint using wrong column name (type vs channel_type)."
+            ]
+        },
+        {
             "version": "11.7.92",
             "date": "2026-04-08",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "User dock mute and deafen toggles now work even while idle, matching Discord-style pre-call behavior.",
                 "Pre-call mute/deafen preferences now persist and auto-apply when joining direct calls or server voice channels.",
