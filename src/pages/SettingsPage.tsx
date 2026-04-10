@@ -3384,16 +3384,72 @@ export function SettingsPage() {
                   </button>
                 </div>
 
-                <div className="nyptid-card p-6">
-                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Two-Factor Authentication</div>
-                  <p className="text-sm text-surface-400 mb-4">Add an extra layer of security to your account with 2FA via TOTP authenticator app.</p>
-                  <div className="p-3 bg-surface-800 rounded-lg border border-surface-700 flex items-center gap-3">
-                    <Shield size={18} className="text-surface-500" />
-                    <div className="flex-1">
-                      <div className="text-sm text-surface-300">Authenticator App (TOTP)</div>
-                      <div className="text-xs text-surface-500">Not configured</div>
+                <div className="nyptid-card p-6 space-y-4">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Two-Factor Authentication</div>
+                  <p className="text-sm text-surface-400">Add an extra layer of security to your account. Even if your password is compromised, 2FA prevents unauthorized access.</p>
+
+                  <div className="space-y-3">
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-nyptid-500/10 border border-nyptid-500/20 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-nyptid-300" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Authenticator App (TOTP)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">Use Google Authenticator, Authy, or any TOTP app</div>
+                        </div>
+                        <button className="nyptid-btn-primary text-xs px-4 py-2">Enable</button>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-surface-700/50 space-y-3 hidden">
+                        <p className="text-xs text-surface-400">Scan this QR code with your authenticator app:</p>
+                        <div className="w-48 h-48 mx-auto bg-white rounded-lg p-2 flex items-center justify-center">
+                          <div className="text-surface-800 text-xs text-center">QR Code Placeholder</div>
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Or enter this key manually:</label>
+                          <code className="block bg-surface-900 rounded-lg px-3 py-2 text-xs text-nyptid-300 font-mono tracking-wider text-center select-all">
+                            XXXX-XXXX-XXXX-XXXX
+                          </code>
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Enter the 6-digit code from your app:</label>
+                          <input
+                            type="text"
+                            maxLength={6}
+                            className="nyptid-input text-center text-lg tracking-[0.5em] font-mono"
+                            placeholder="000000"
+                          />
+                        </div>
+                        <button className="nyptid-btn-primary w-full">Verify & Enable</button>
+                      </div>
                     </div>
-                    <button className="nyptid-btn-secondary text-xs px-3 py-1.5">Set Up</button>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Key size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Hardware Security Key (WebAuthn)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">YubiKey, Titan Key, or other FIDO2 devices</div>
+                        </div>
+                        <button className="nyptid-btn-secondary text-xs px-4 py-2">Set Up</button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Recovery Codes</div>
+                          <div className="text-xs text-surface-500 mt-0.5">Backup codes for when you lose access to your 2FA device</div>
+                        </div>
+                        <button className="nyptid-btn-ghost text-xs px-4 py-2" disabled>Generate</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 

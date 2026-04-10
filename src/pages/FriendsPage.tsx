@@ -685,9 +685,14 @@ export function FriendsPage() {
                   visibleFriends.map((entry) => {
                     const friend = entry.profile;
                     const friendName = friend.display_name || friend.username;
-                    const statusText = friend.custom_status
-                      ? `${friend.custom_status_emoji ? `${friend.custom_status_emoji} ` : ''}${friend.custom_status}`
-                      : friend.bio || (friend.status === 'online' ? 'Online' : `Last seen ${formatRelativeTime(friend.last_seen)}`);
+                    const activity = (friend as any).activity as { type?: string; name?: string; details?: string } | null | undefined;
+                    const activityText = activity?.name
+                      ? `${activity.type === 'playing' ? 'Playing' : activity.type === 'streaming' ? 'Streaming' : activity.type === 'listening' ? 'Listening to' : activity.type === 'watching' ? 'Watching' : ''} ${activity.name}`.trim()
+                      : null;
+                    const statusText = activityText
+                      || (friend.custom_status
+                        ? `${friend.custom_status_emoji ? `${friend.custom_status_emoji} ` : ''}${friend.custom_status}`
+                        : friend.bio || (friend.status === 'online' ? 'Online' : `Last seen ${formatRelativeTime(friend.last_seen)}`));
                     return (
                       <div
                         key={friend.id}
@@ -697,7 +702,11 @@ export function FriendsPage() {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-surface-100 truncate">{friendName}</div>
                           <div className="text-xs text-surface-500 truncate">@{friend.username}</div>
-                          <div className="text-xs text-surface-400 truncate mt-0.5">{statusText || 'No status set.'}</div>
+                          {activityText ? (
+                            <div className="text-xs text-nyptid-300 truncate mt-0.5">{activityText}{activity?.details ? ` - ${activity.details}` : ''}</div>
+                          ) : (
+                            <div className="text-xs text-surface-400 truncate mt-0.5">{statusText || 'No status set.'}</div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button

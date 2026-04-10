@@ -14,6 +14,7 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
@@ -383,6 +384,9 @@ export function ChatPage() {
   const [showThreadsModal, setShowThreadsModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
+  const [showCatchUp, setShowCatchUp] = useState(false);
+  const [catchUpSummary, setCatchUpSummary] = useState<string | null>(null);
+  const [catchUpLoading, setCatchUpLoading] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [mentionSuggestionIndex, setMentionSuggestionIndex] = useState(0);
@@ -1176,6 +1180,33 @@ export function ChatPage() {
       </button>
       <button
         type="button"
+        onClick={async () => {
+          if (catchUpLoading) return;
+          setCatchUpLoading(true);
+          setShowCatchUp(true);
+          setCatchUpSummary(null);
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token || '';
+            const { data, error } = await supabase.functions.invoke('channel-summarize', {
+              body: { channel_id: channelId, message_count: 50 },
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (error) throw error;
+            setCatchUpSummary(data?.summary || 'No summary available.');
+          } catch {
+            setCatchUpSummary('Could not generate summary. Try again later.');
+          } finally {
+            setCatchUpLoading(false);
+          }
+        }}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Catch up on this channel"
+      >
+        <Zap size={15} />
+      </button>
+      <button
+        type="button"
         onClick={() => setShowPinnedModal(true)}
         className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
         title="Pinned messages"
@@ -1567,6 +1598,33 @@ export function ChatPage() {
               </div>
               <div className="mt-4 flex justify-end">
                 <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowPinnedModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showCatchUp && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowCatchUp(false)} />
+            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+              <div className="flex items-center gap-2 mb-3">
+                <Zap size={18} className="text-nyptid-400" />
+                <span className="text-lg font-semibold text-surface-100">Catch Up</span>
+              </div>
+              <p className="text-xs text-surface-500 mb-3">AI-generated summary of recent messages in #{channel?.name || 'channel'}</p>
+              {catchUpLoading ? (
+                <div className="flex items-center gap-3 py-6 justify-center">
+                  <div className="w-5 h-5 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-surface-400 text-sm">Generating summary...</span>
+                </div>
+              ) : (
+                <div className="bg-surface-900/60 rounded-lg border border-surface-700 p-4 text-sm text-surface-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto">
+                  {catchUpSummary || 'No summary available.'}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowCatchUp(false)}>
                   Close
                 </button>
               </div>
