@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
-import { registerDeviceToken } from '../lib/push';
+import { autoRegisterPushToken, registerDeviceToken } from '../lib/push';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 
 interface AuthContextType {
@@ -160,18 +160,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const defaultToken = (import.meta.env.VITE_DEFAULT_DEVICE_TOKEN || '').trim();
         const platform = (import.meta.env.VITE_DEFAULT_DEVICE_PLATFORM || '').trim() || null;
-        if (!defaultToken) return;
-        if (typeof window !== 'undefined') {
-          const alreadyRegistered = localStorage.getItem(DEFAULT_DEVICE_TOKEN_KEY);
-          if (alreadyRegistered === '1') return;
+        const alreadyRegistered = typeof window !== 'undefined'
+          ? localStorage.getItem(DEFAULT_DEVICE_TOKEN_KEY) === '1'
+          : false;
+
+        // 1. Honor a developer-injected token even if push is unavailable.
+        if (defaultToken && !alreadyRegistered) {
+          await registerDeviceToken(defaultToken, platform);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(DEFAULT_DEVICE_TOKEN_KEY, '1');
+          }
         }
-        await registerDeviceToken(defaultToken, platform);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(DEFAULT_DEVICE_TOKEN_KEY, '1');
+
+        // 2. Try the real push pipeline (Capacitor on mobile, web push in
+        //    browsers). Fails silently if no source is available.
+        const result = await autoRegisterPushToken();
+        if (!result.ok && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info('Push registration skipped:', result.error);
         }
       } catch (err) {
         // ignore registration errors
-        console.warn('Default device token registration failed', err);
+        console.warn('Push token registration failed', err);
       }
     }
 
