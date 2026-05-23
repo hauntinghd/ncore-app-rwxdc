@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, RefreshCcw, WifiOff, X } from 'lucide-react';
+import { Download, RefreshCcw, Share, Smartphone, WifiOff, X } from 'lucide-react';
 import {
   applyPwaUpdate,
   clearPwaInstallHintDismissal,
@@ -86,25 +86,44 @@ export function PwaExperienceBar({ isElectron }: PwaExperienceBarProps) {
               <>
                 <div className="text-sm font-semibold text-surface-100">{installLabel}</div>
                 <div className="text-xs text-surface-400 mt-0.5">{installHint}</div>
+                {runtime.isIOS ? (
+                  <ol className="mt-2 space-y-1.5 text-xs text-surface-300">
+                    <li className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-nyptid-300/20 text-nyptid-200 text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+                      <span>Tap the <Share size={12} className="inline align-[-2px]" /> Share icon at the bottom of Safari.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-nyptid-300/20 text-nyptid-200 text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
+                      <span>Scroll and pick <strong>Add to Home Screen</strong>.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-nyptid-300/20 text-nyptid-200 text-[10px] font-bold flex items-center justify-center flex-shrink-0">3</span>
+                      <span>Tap <strong>Add</strong>. NCore launches full-screen, sessions stay signed in, and notifications work.</span>
+                    </li>
+                  </ol>
+                ) : null}
                 <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="nyptid-btn-primary !px-3 !py-1.5 !text-xs"
-                    onClick={async () => {
-                      const result = await promptPwaInstall();
-                      if (result.ok) {
-                        dismissPwaInstallHint();
-                      }
-                    }}
-                  >
-                    Install
-                  </button>
+                  {!runtime.isIOS && (
+                    <button
+                      type="button"
+                      className="nyptid-btn-primary !px-3 !py-1.5 !text-xs"
+                      onClick={async () => {
+                        const result = await promptPwaInstall();
+                        if (result.ok) {
+                          dismissPwaInstallHint();
+                        }
+                      }}
+                    >
+                      <Smartphone size={12} />
+                      Install
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="nyptid-btn-secondary !px-3 !py-1.5 !text-xs"
                     onClick={() => dismissPwaInstallHint()}
                   >
-                    Later
+                    {runtime.isIOS ? 'Got it' : 'Later'}
                   </button>
                 </div>
               </>

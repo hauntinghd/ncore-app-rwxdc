@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.96",
+  "version": "11.7.104",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -29,7 +29,9 @@
     "build:exe:auto": "npm run version:bump && npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "release:web": "node scripts/release-web.cjs",
     "release:web:auto": "npm run version:bump && node scripts/release-web.cjs",
-    "release:update": "npm run build:exe:auto && npm run release:web"
+    "release:update": "npm run build:exe:auto && npm run release:web",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",
@@ -121,7 +123,8 @@
       "createStartMenuShortcut": true,
       "installerIcon": "electron/assets/ncore-icon.ico",
       "uninstallerIcon": "electron/assets/ncore-icon.ico",
-      "installerHeaderIcon": "electron/assets/ncore-icon.ico"
+      "installerHeaderIcon": "electron/assets/ncore-icon.ico",
+      "artifactName": "NCore-Setup-${version}.${ext}"
     }
   }
 }

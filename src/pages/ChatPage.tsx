@@ -1,9 +1,8 @@
-import { memo, useCallback, useState, useEffect, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useCallback, useState, useEffect, useId, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   BellOff,
   BellRing,
-  Hash,
   MessageSquareQuote,
   Paperclip,
   Pin,
@@ -18,6 +17,10 @@ import {
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
+import { ThreadsPanel } from '../components/chat/ThreadsPanel';
+import { useFocusTrap } from '../components/ui/useFocusTrap';
+import { SkeletonMessageRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
@@ -372,7 +375,7 @@ export function ChatPage() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMsg, setEditingMsg] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
-  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [typingUsers] = useState<string[]>([]);
   const [composerError, setComposerError] = useState('');
   const [communityRole, setCommunityRole] = useState<'owner' | 'admin' | 'moderator' | 'member'>('member');
   const [members, setMembers] = useState<ChatMember[]>([]);
@@ -385,6 +388,12 @@ export function ChatPage() {
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
   const [showCatchUp, setShowCatchUp] = useState(false);
+  const notificationModalRef = useFocusTrap(showNotificationModal, () => setShowNotificationModal(false));
+  const pinnedModalRef = useFocusTrap(showPinnedModal, () => setShowPinnedModal(false));
+  const catchUpModalRef = useFocusTrap(showCatchUp, () => setShowCatchUp(false));
+  const notificationTitleId = useId();
+  const pinnedTitleId = useId();
+  const catchUpTitleId = useId();
   const [catchUpSummary, setCatchUpSummary] = useState<string | null>(null);
   const [catchUpLoading, setCatchUpLoading] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
@@ -1239,22 +1248,24 @@ export function ChatPage() {
       <div className="flex h-full">
         <div className="flex min-w-0 flex-1 flex-col">
         {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+          <div className="flex-1 overflow-hidden py-4 space-y-1" aria-label="Loading messages">
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={1} />
+            <SkeletonMessageRow lines={3} />
+            <SkeletonMessageRow lines={1} />
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={1} />
           </div>
         ) : (
           <div ref={messageScrollRef} className="flex-1 overflow-y-auto py-4 scrollbar-thin space-y-1">
             {messageGroups.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <div className="w-16 h-16 bg-surface-800 rounded-2xl flex items-center justify-center mb-4">
-                  <Hash size={28} className="text-surface-400" />
-                </div>
-                <h3 className="text-lg font-bold text-surface-200 mb-1">
-                  Welcome to #{channel?.name || 'channel'}!
-                </h3>
-                <p className="text-surface-500 text-sm">
-                  This is the beginning of the channel. Send a message to get started.
-                </p>
+              <div className="flex items-center justify-center h-full">
+                <EmptyState
+                  illustration={EmptyIllustrations.EmptyChannel}
+                  title={`Welcome to #${channel?.name || 'channel'}`}
+                  description="Beginning of the channel. Say hi, drop a link, or start a voice call — this is your space."
+                />
               </div>
             )}
 
@@ -1527,28 +1538,25 @@ export function ChatPage() {
           </div>
         )}
 
-        {showThreadsModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/70" onClick={() => setShowThreadsModal(false)} />
-            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Threads</div>
-              <p className="text-sm text-surface-400 mt-2">
-                Thread channels are being rolled out. This channel will support full thread creation and management in an upcoming patch.
-              </p>
-              <div className="mt-4 flex justify-end">
-                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowThreadsModal(false)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ThreadsPanel
+          open={showThreadsModal}
+          onClose={() => setShowThreadsModal(false)}
+          channelId={channelId || ''}
+          channelName={channel?.name || ''}
+          authorId={profile?.id || null}
+        />
 
         {showNotificationModal && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowNotificationModal(false)} />
-            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Notification Settings</div>
+            <div
+              ref={notificationModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={notificationTitleId}
+              className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
+              <div id={notificationTitleId} className="text-lg font-semibold text-surface-100">Notification Settings</div>
               <p className="text-sm text-surface-400 mt-2">Choose how notifications work for this channel.</p>
               <div className="mt-4 space-y-2">
                 {[
@@ -1583,8 +1591,14 @@ export function ChatPage() {
         {showPinnedModal && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowPinnedModal(false)} />
-            <div className="relative w-full max-w-2xl rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Pinned Messages</div>
+            <div
+              ref={pinnedModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={pinnedTitleId}
+              className="relative w-full max-w-2xl rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
+              <div id={pinnedTitleId} className="text-lg font-semibold text-surface-100">Pinned Messages</div>
               <div className="mt-3 max-h-[60vh] overflow-y-auto space-y-2">
                 {pinnedMessages.map((message) => (
                   <div key={message.id} className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
@@ -1607,10 +1621,16 @@ export function ChatPage() {
         {showCatchUp && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowCatchUp(false)} />
-            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
+            <div
+              ref={catchUpModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={catchUpTitleId}
+              className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
               <div className="flex items-center gap-2 mb-3">
                 <Zap size={18} className="text-nyptid-400" />
-                <span className="text-lg font-semibold text-surface-100">Catch Up</span>
+                <span id={catchUpTitleId} className="text-lg font-semibold text-surface-100">Catch Up</span>
               </div>
               <p className="text-xs text-surface-500 mb-3">AI-generated summary of recent messages in #{channel?.name || 'channel'}</p>
               {catchUpLoading ? (

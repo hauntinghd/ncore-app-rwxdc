@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Library, Download, Play, Clock, Star, Heart, Search, Grid3X3, List, ExternalLink, Gamepad2, TrendingUp } from 'lucide-react';
+import { Library, Download, Play, Heart, Search, Grid3X3, List, Gamepad2, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppShell } from '../components/layout/AppShell';
@@ -144,9 +144,10 @@ export default function GameLibraryPage() {
   }
 
   function launchGame(game: GameListing) {
-    if (game.installer_url && window.desktopBridge?.launchExternalUrl) {
-      window.desktopBridge.launchExternalUrl(game.installer_url);
-    } else if (game.installer_url) {
+    if (!game.installer_url) return;
+    if (window.desktopBridge?.openExternalUrl) {
+      void window.desktopBridge.openExternalUrl(game.installer_url);
+    } else {
       window.open(game.installer_url, '_blank', 'noopener');
     }
   }

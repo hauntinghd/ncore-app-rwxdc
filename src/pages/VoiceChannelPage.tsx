@@ -16,6 +16,11 @@ import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { serverVoiceSession, useServerVoiceSession } from '../lib/serverVoiceSession';
+import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
+import { InCallDevicePicker } from '../components/call/InCallDevicePicker';
+import { NetworkQualityBars } from '../components/call/NetworkQualityBars';
+import { VadThresholdSlider } from '../components/call/VadThresholdSlider';
+import { usePushToTalk } from '../components/call/usePushToTalk';
 import type { Channel, VoiceSession } from '../lib/types';
 
 function LocalVideoMount() {
@@ -99,6 +104,13 @@ export function VoiceChannelPage() {
   const navigate = useNavigate();
   const session = useServerVoiceSession();
   const [channel, setChannel] = useState<Channel | null>(null);
+  const [pttEnabled, setPttEnabled] = useState<boolean>(() => loadCallSettings().pttEnabled);
+  const [pttKeybind] = useState<string>(() => loadCallSettings().pttKeybind || 'Space');
+  const pttHeld = usePushToTalk({
+    enabled: pttEnabled,
+    keybind: pttKeybind,
+    onMuted: async (muted) => { await serverVoiceSession.setMuted(muted, { playSound: false, syncRemote: true }); },
+  });
 
   useEffect(() => {
     if (!channelId) return;
@@ -329,6 +341,25 @@ export function VoiceChannelPage() {
               </button>
 
               <button
+                type="button"
+                onClick={() => {
+                  const next = !pttEnabled;
+                  setPttEnabled(next);
+                  saveCallSettings({ ...loadCallSettings(), pttEnabled: next });
+                }}
+                className={`h-12 px-3 rounded-full text-xs font-semibold transition-all ${pttEnabled ? 'bg-nyptid-300 text-surface-950' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
+                title={pttEnabled ? `Push-to-talk on (${pttKeybind})` : 'Push-to-talk off'}
+              >
+                PTT {pttEnabled ? 'On' : 'Off'}
+              </button>
+
+              <InCallDevicePicker
+                onMicChange={(id) => serverVoiceSession.setInputDevice(id)}
+                onCameraChange={(id) => serverVoiceSession.setCameraDevice(id)}
+                onSpeakerChange={(id) => serverVoiceSession.setOutputDevice(id)}
+              />
+
+              <button
                 onClick={() => void handleLeave()}
                 title="Leave voice channel"
                 className="w-12 h-12 rounded-full bg-red-600 flex items-center justify-center text-white hover:bg-red-500 transition-colors"
@@ -336,7 +367,27 @@ export function VoiceChannelPage() {
                 <PhoneOff size={20} />
               </button>
 
-              <div className="absolute right-4 flex items-center gap-2">
+              <div className="absolute right-4 flex items-center gap-2 flex-wrap justify-end max-w-[50%]">
+                <NetworkQualityBars
+                  uplink={session.uplinkQuality}
+                  downlink={session.downlinkQuality}
+                  rttMs={session.lastPingMs}
+                  compact
+                />
+                {session.noiseSuppressionEnabled && (
+                  <VadThresholdSlider
+                    onChange={(value) => serverVoiceSession.setVadThreshold(value)}
+                  />
+                )}
+                {pttEnabled && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium transition-colors ${pttHeld ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200' : 'border-surface-700 bg-surface-900/80 text-surface-300'}`}
+                    title={pttHeld ? 'Transmitting' : `Hold ${pttKeybind} to talk`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${pttHeld ? 'bg-emerald-400 animate-pulse' : 'bg-surface-500'}`} />
+                    {pttHeld ? 'Transmitting' : `PTT ${pttKeybind}`}
+                  </span>
+                )}
                 <span className="text-xs text-surface-500">
                   {session.dbSessions.length} in channel
                 </span>

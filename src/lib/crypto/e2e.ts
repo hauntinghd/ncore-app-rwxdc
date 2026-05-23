@@ -207,8 +207,12 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
 // Encoding utilities
 // ---------------------------------------------------------------------------
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+function arrayBufferToBase64(buffer: ArrayBuffer | ArrayBufferView): string {
+  const bytes = buffer instanceof Uint8Array
+    ? buffer
+    : ArrayBuffer.isView(buffer)
+      ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+      : new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);

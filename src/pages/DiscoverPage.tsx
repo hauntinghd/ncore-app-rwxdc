@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Compass,
   Flame,
-  Globe,
   Lock,
   Plus,
   Radar,
@@ -17,6 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -558,10 +558,12 @@ export function DiscoverPage() {
                       ))}
                     </div>
                   ) : trendingCommunities.length === 0 ? (
-                    <div className="rounded-[28px] border border-dashed border-surface-700 bg-surface-900/60 px-6 py-14 text-center">
-                      <Globe size={42} className="mx-auto text-surface-600" />
-                      <div className="mt-4 text-xl font-bold text-surface-100">No servers matched this slice</div>
-                      <div className="mt-2 text-sm text-surface-500">Change the category or search to broaden the directory.</div>
+                    <div className="rounded-[28px] border border-dashed border-surface-700 bg-surface-900/60">
+                      <EmptyState
+                        illustration={EmptyIllustrations.NoCommunities}
+                        title="No servers matched this slice"
+                        description="Change the category or search above to broaden the directory."
+                      />
                     </div>
                   ) : (
                     <div className="grid gap-5 xl:grid-cols-2">

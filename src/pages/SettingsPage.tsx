@@ -658,7 +658,7 @@ const ROLLED_OUT_SECTION_CONTENT: Partial<Record<SectionId, RolloutSection>> = {
   },
 };
 
-const CONNECTION_PROVIDERS: ConnectionProvider[] = [
+export const CONNECTION_PROVIDERS: ConnectionProvider[] = [
   { name: 'Roblox', icon: siRoblox },
   { name: 'Spotify', icon: siSpotify },
   { name: 'Twitch', icon: siTwitch },
@@ -695,7 +695,7 @@ function buildRolloutToggleDefaults(): Record<string, boolean> {
   return defaults;
 }
 
-function BrandIconGlyph({ icon, label }: { icon: SimpleIcon | null; label: string }) {
+export function BrandIconGlyph({ icon, label }: { icon: SimpleIcon | null; label: string }) {
   if (!icon) {
     return (
       <span className="inline-flex h-5 w-5 items-center justify-center rounded text-[10px] font-black text-surface-200">
@@ -942,6 +942,33 @@ function SettingRow({ label, description, children }: { label: string; descripti
   );
 }
 
+const KEY_CODE_LABELS: Record<string, string> = {
+  Space: 'Space',
+  AltLeft: 'Left Alt',
+  AltRight: 'Right Alt',
+  ControlLeft: 'Left Ctrl',
+  ControlRight: 'Right Ctrl',
+  ShiftLeft: 'Left Shift',
+  ShiftRight: 'Right Shift',
+  MetaLeft: 'Left Meta',
+  MetaRight: 'Right Meta',
+  Backquote: '` (Backtick)',
+  CapsLock: 'Caps Lock',
+  Tab: 'Tab',
+  Enter: 'Enter',
+};
+
+function humanizeKeyCode(code: string): string {
+  if (!code) return 'Unbound';
+  if (KEY_CODE_LABELS[code]) return KEY_CODE_LABELS[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Numpad ${code.slice(6)}`;
+  if (code.startsWith('Arrow')) return `${code.slice(5)} Arrow`;
+  if (code.startsWith('F') && /^F\d+$/.test(code)) return code;
+  return code;
+}
+
 export function SettingsPage() {
   const { profile, user, updateProfile, signOut } = useAuth();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
@@ -988,6 +1015,7 @@ export function SettingsPage() {
   });
 
   const [callSettings, setCallSettings] = useState(loadCallSettings);
+  const [capturingPttKeybind, setCapturingPttKeybind] = useState(false);
   const [audioInputs, setAudioInputs] = useState<MediaDeviceOption[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceOption[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceOption[]>([]);
@@ -1070,7 +1098,39 @@ export function SettingsPage() {
     }, 1800);
     return () => window.clearInterval(timer);
   }, [showUpdateLauncher]);
-  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!capturingPttKeybind) return undefined;
+    const handleKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.code === 'Escape') {
+        setCapturingPttKeybind(false);
+        return;
+      }
+      setCallSettings((prev) => ({ ...prev, pttKeybind: event.code }));
+      setCapturingPttKeybind(false);
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [capturingPttKeybind]);
+
+  // Hydrate the startup toggles from the Electron main process so they reflect
+  // the real OS-level login-item state, not stale localStorage.
+  useEffect(() => {
+    const bridge = typeof window !== 'undefined' ? window.desktopBridge : undefined;
+    if (!bridge?.getStartupConfig) return;
+    let cancelled = false;
+    void bridge.getStartupConfig().then((result) => {
+      if (cancelled || !result?.ok) return;
+      setRolloutSettings((prev) => ({
+        ...prev,
+        win_open_startup: Boolean(result.openAtLogin),
+        win_start_minimized: Boolean(result.openAsHidden),
+      }));
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [standingResourceModal, setStandingResourceModal] = useState<StandingResourceId | null>(null);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
   const comingSoonSection = rolledOutSection ? null : COMING_SOON_SECTION_CONTENT[activeSection];
@@ -1078,6 +1138,17 @@ export function SettingsPage() {
 
   function setRolloutToggle(key: string, value: boolean) {
     setRolloutSettings((prev) => ({ ...prev, [key]: value }));
+    // Forward the startup-related toggles to the Electron main process so they
+    // actually take effect (setLoginItemSettings persists across app launches).
+    if (key === 'win_open_startup' || key === 'win_start_minimized') {
+      const bridge = typeof window !== 'undefined' ? window.desktopBridge : undefined;
+      if (bridge?.setStartupConfig) {
+        void bridge.setStartupConfig({
+          openAtLogin: key === 'win_open_startup' ? value : undefined,
+          openAsHidden: key === 'win_start_minimized' ? value : undefined,
+        });
+      }
+    }
   }
 
   function activateSection(section: SectionId) {
@@ -2265,7 +2336,7 @@ export function SettingsPage() {
     setRedeemingInviteCode(true);
     setGrowthUnlockMessage('');
     try {
-      const { data, error } = await (supabase as any).rpc('redeem_growth_invite_code', {
+      const { error } = await (supabase as any).rpc('redeem_growth_invite_code', {
         p_code: code,
         p_source_channel: resolveGrowthSourceChannel(),
       });
@@ -3173,6 +3244,84 @@ export function SettingsPage() {
                             <div className="text-[10px] mt-0.5 opacity-70">{engine.desc}</div>
                           </button>
                         ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-surface-700 pt-4 mt-4">
+                    <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Mic size={14} />
+                      Voice Detection
+                    </div>
+
+                    <div className="py-4 border-b border-surface-700/60">
+                      <div className="flex items-center justify-between gap-4 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-surface-200">Noise Gate Sensitivity</div>
+                          <div className="text-xs text-surface-500 mt-0.5 leading-relaxed">
+                            How much ambient noise to suppress before your voice is considered speech. Higher is more aggressive.
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 text-xs font-medium text-surface-300 tabular-nums">
+                          {callSettings.vadThreshold === 0
+                            ? 'Off'
+                            : callSettings.vadThreshold < 0.35
+                              ? 'Loose'
+                              : callSettings.vadThreshold < 0.65
+                                ? 'Moderate'
+                                : 'Aggressive'} · {Math.round(callSettings.vadThreshold * 100)}%
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={callSettings.vadThreshold}
+                        onChange={(e) => setCallSettings((p) => ({ ...p, vadThreshold: Number(e.target.value) }))}
+                        className="w-full accent-nyptid-300"
+                        aria-label="Voice activity gate threshold"
+                      />
+                    </div>
+
+                    <SettingRow
+                      label="Push-to-Talk"
+                      description="Hold a key to talk. Your mic stays muted unless the key is pressed."
+                    >
+                      <ToggleSwitch
+                        checked={callSettings.pttEnabled}
+                        onChange={(v) => setCallSettings((p) => ({ ...p, pttEnabled: v }))}
+                      />
+                    </SettingRow>
+
+                    <div className="py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-surface-200">Push-to-Talk Keybind</div>
+                          <div className="text-xs text-surface-500 mt-0.5 leading-relaxed">
+                            {capturingPttKeybind
+                              ? 'Press any key to bind it. Press Escape to cancel.'
+                              : 'The key you hold while push-to-talk is enabled.'}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center min-w-[88px] px-3 py-1.5 rounded-lg border text-xs font-semibold tabular-nums ${
+                              capturingPttKeybind
+                                ? 'border-nyptid-300/60 bg-nyptid-300/15 text-nyptid-200 animate-pulse'
+                                : 'border-surface-600 bg-surface-900/60 text-surface-200'
+                            }`}
+                          >
+                            {capturingPttKeybind ? 'Press a key…' : humanizeKeyCode(callSettings.pttKeybind)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCapturingPttKeybind((v) => !v)}
+                            className="nyptid-btn-secondary !text-xs !px-3 !py-1.5"
+                          >
+                            {capturingPttKeybind ? 'Cancel' : 'Rebind'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

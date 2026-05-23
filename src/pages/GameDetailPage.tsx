@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Heart, Download, Star, ThumbsUp, ThumbsDown, Monitor, Cpu, HardDrive, Tag, Calendar, User, ExternalLink } from 'lucide-react';
+import { ChevronLeft, Heart, Download, ThumbsUp, ThumbsDown, Monitor, Cpu, HardDrive } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MarketplaceGameListing } from '../lib/types';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { Skeleton } from '../components/ui/Skeleton';
 import GameReviewForm from '../components/marketplace/GameReviewForm';
 
 interface GameReview {
@@ -100,7 +101,6 @@ export default function GameDetailPage() {
   }
 
   const positiveCount = reviews.filter((r) => r.recommended).length;
-  const negativeCount = reviews.filter((r) => !r.recommended).length;
   const totalReviews = reviews.length;
   const positivePct = totalReviews > 0 ? Math.round((positiveCount / totalReviews) * 100) : 0;
 
@@ -115,7 +115,27 @@ export default function GameDetailPage() {
   }
 
   if (loading) {
-    return <AppShell><div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" /></div></AppShell>;
+    return (
+      <AppShell>
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-5xl mx-auto p-6 space-y-6">
+            <Skeleton className="h-64 w-full" rounded="lg" />
+            <div className="grid md:grid-cols-3 gap-6">
+              <div className="md:col-span-2 space-y-3">
+                <Skeleton className="h-7 w-2/3" />
+                <Skeleton className="h-3 w-1/3" />
+                <Skeleton className="h-24 w-full" rounded="lg" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full" rounded="lg" />
+                <Skeleton className="h-10 w-full" rounded="lg" />
+                <Skeleton className="h-32 w-full" rounded="lg" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
   }
 
   if (!game) {

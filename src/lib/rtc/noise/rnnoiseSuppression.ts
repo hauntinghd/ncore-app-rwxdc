@@ -21,7 +21,8 @@ import type { NoiseSuppressionBinding } from '../rtcProvider';
 
 const WORKLET_URL = '/audio-processors/rnnoise-worklet-processor.js';
 const WASM_URL = '/audio-processors/rnnoise.wasm';
-const PERFORMANCE_BUDGET_MS = 8; // Must process within 8ms of a 10ms frame
+// Performance budget reference: the worklet must process within 8ms of a
+// 10ms audio frame. Currently informational; the worklet enforces it itself.
 
 interface RNNoiseState {
   context: AudioContext;
@@ -174,6 +175,14 @@ export async function createRNNoiseBinding(
             // noop
           }
           state = null;
+        },
+        setVadThreshold: (value: number) => {
+          const clamped = Math.max(0, Math.min(1, Number(value) || 0));
+          try {
+            workletNode.port.postMessage({ type: 'set-threshold', threshold: clamped });
+          } catch {
+            // worklet closed; ignore
+          }
         },
       },
       processedTrack,

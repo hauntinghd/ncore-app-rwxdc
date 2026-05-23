@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bot, Plus, Key, Webhook, Trash2, Copy, Check, RefreshCw, Eye, EyeOff, Globe, AlertTriangle } from 'lucide-react';
+import { Bot, Plus, Key, Webhook, Trash2, Copy, Check, Eye, EyeOff, Globe, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppShell } from '../components/layout/AppShell';

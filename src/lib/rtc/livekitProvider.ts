@@ -95,7 +95,7 @@ function wrapLocalVideoTrack(track: LocalVideoTrack): IRTCLocalVideoTrack {
   return {
     kind: 'video',
     play(container: HTMLElement) {
-      track.attach(container);
+      track.attach(container as HTMLMediaElement);
     },
     stop() {
       track.detach();
@@ -145,7 +145,7 @@ function wrapRemoteVideoTrack(track: RemoteVideoTrack): IRTCRemoteVideoTrack {
   return {
     kind: 'video',
     play(container: HTMLElement) {
-      track.attach(container);
+      track.attach(container as HTMLMediaElement);
     },
     stop() {
       track.detach().forEach((el) => el.remove());
@@ -296,7 +296,7 @@ class LiveKitClient implements IRTCClient {
       this.room.on(RoomEvent.ParticipantDisconnected, fn);
       this.eventCleanups.push(() => this.room.off(RoomEvent.ParticipantDisconnected, fn));
     } else if (event === 'user-published') {
-      const fn = (pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+      const fn = (_track: unknown, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         const uid = participant.identity;
         const mediaType: RTCMediaType = pub.kind === Track.Kind.Audio ? 'audio' : 'video';
         const existing = this.participants.get(uid) || { uid, audioTrack: null, videoTrack: null };
@@ -311,10 +311,10 @@ class LiveKitClient implements IRTCClient {
 
         (handler as RTCClientEvents['user-published'])(uid, mediaType, existing);
       };
-      this.room.on(RoomEvent.TrackSubscribed, fn);
-      this.eventCleanups.push(() => this.room.off(RoomEvent.TrackSubscribed, fn));
+      this.room.on(RoomEvent.TrackSubscribed, fn as any);
+      this.eventCleanups.push(() => this.room.off(RoomEvent.TrackSubscribed, fn as any));
     } else if (event === 'user-unpublished') {
-      const fn = (pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+      const fn = (_track: unknown, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         const uid = participant.identity;
         const mediaType: RTCMediaType = pub.kind === Track.Kind.Audio ? 'audio' : 'video';
         const existing = this.participants.get(uid);
@@ -324,8 +324,8 @@ class LiveKitClient implements IRTCClient {
         }
         (handler as RTCClientEvents['user-unpublished'])(uid, mediaType);
       };
-      this.room.on(RoomEvent.TrackUnsubscribed, fn);
-      this.eventCleanups.push(() => this.room.off(RoomEvent.TrackUnsubscribed, fn));
+      this.room.on(RoomEvent.TrackUnsubscribed, fn as any);
+      this.eventCleanups.push(() => this.room.off(RoomEvent.TrackUnsubscribed, fn as any));
     } else if (event === 'volume-indicator') {
       const fn = (speakers: Array<{ identity?: string; audioLevel?: number } & any>) => {
         const volumes = speakers

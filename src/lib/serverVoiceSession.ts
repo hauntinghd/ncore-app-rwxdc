@@ -61,6 +61,8 @@ export interface ServerVoiceSessionState {
   averagePingMs: number | null;
   lastPingMs: number | null;
   outboundPacketLossPct: number | null;
+  uplinkQuality: number;
+  downlinkQuality: number;
   privacyCode: string[];
 }
 
@@ -113,6 +115,8 @@ const initialState: ServerVoiceSessionState = {
   averagePingMs: null,
   lastPingMs: null,
   outboundPacketLossPct: null,
+  uplinkQuality: 0,
+  downlinkQuality: 0,
   privacyCode: [],
 };
 
@@ -129,12 +133,6 @@ function formatRtcError(error: unknown): string {
   return [e?.name || 'UnknownError', e?.code ? `code=${e.code}` : '', e?.message || String(error || '')]
     .filter(Boolean)
     .join(' | ');
-}
-
-function screenShareQualityRank(quality: ScreenShareQuality): number {
-  if (quality === '4k60') return 3;
-  if (quality === '1080p120') return 2;
-  return 1;
 }
 
 function buildDisplayMediaVideoConstraints(quality: ScreenShareQuality): MediaTrackConstraints {
@@ -200,10 +198,49 @@ class ServerVoiceSessionStore {
   private latencySamples: number[] = [];
   private screenShareOperation: Promise<void> | null = null;
 
+  private bindTokenRenewalHandlers(
+    client: IRTCClient,
+    channelName: string,
+    uid: string,
+    context: 'voice' | 'screen',
+  ) {
+    const renew = async (reason: 'will-expire' | 'did-expire') => {
+      try {
+        const provider = await getRTCProvider();
+        const freshToken = await provider.resolveToken(channelName, uid);
+        if (!freshToken) return;
+        await client.renewToken(freshToken);
+        queueRuntimeEvent('server_voice_token_renewed', {
+          channel_id: channelName,
+          reason,
+          context,
+        }, { sampleRate: 0.5 });
+      } catch (error) {
+        console.warn(`Agora server-voice ${context} token ${reason} renew failed:`, error);
+        queueRuntimeEvent('server_voice_token_renew_failed', {
+          channel_id: channelName,
+          reason,
+          context,
+          message: formatRtcError(error),
+        }, { sampleRate: 1 });
+        if (reason === 'did-expire' && context === 'voice') {
+          this.setState({
+            connectionError: 'Voice channel token refresh failed. Rejoin to continue.',
+          });
+        }
+      }
+    };
+
+    const willExpireHandler = () => { void renew('will-expire'); };
+    const didExpireHandler = () => { void renew('did-expire'); };
+    client.on('token-privilege-will-expire', willExpireHandler);
+    client.on('token-privilege-did-expire', didExpireHandler);
+  }
+
   private async configureRtcOptimizations(client: IRTCClient) {
     const clientAny = client as any;
     try {
-      await client.enableDualStream();
+      await client.enableDualStream?.();
     } catch {
       // noop
     }
@@ -568,7 +605,7 @@ class ServerVoiceSessionStore {
 
     if (activeScreenClient) {
       try {
-        activeScreenClient.removeAllListeners();
+        activeScreenClient.removeAllListeners?.();
       } catch {
         // noop
       }
@@ -819,6 +856,13 @@ class ServerVoiceSessionStore {
       }
       await client.join({ channelName: channelId, token, uid: this.localUid });
       rtcJoined = true;
+      this.bindTokenRenewalHandlers(client, channelId, this.localUid, 'voice');
+      client.on('network-quality', (quality) => {
+        this.setState({
+          uplinkQuality: Number(quality.uplinkNetworkQuality) || 0,
+          downlinkQuality: Number(quality.downlinkNetworkQuality) || 0,
+        });
+      });
       queueRuntimeEvent('server_voice_joined', {
         channel_id: channelId,
         has_rtc: true,
@@ -871,7 +915,7 @@ class ServerVoiceSessionStore {
       await client.publish([audioTrack]);
       if (joinToken !== this.lifecycleToken) {
         try {
-          await client.unpublish(audioTrack);
+          await client.unpublish([audioTrack]);
         } catch {
           // noop
         }
@@ -988,7 +1032,7 @@ class ServerVoiceSessionStore {
 
     if (activeClient) {
       try {
-        activeClient.removeAllListeners();
+        activeClient.removeAllListeners?.();
       } catch {
         // noop
       }
@@ -1021,17 +1065,63 @@ class ServerVoiceSessionStore {
   }
 
   async toggleMute() {
-    const nextMuted = !this.state.isMuted;
-    if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
-      await this.localAudioTrack.setEnabled(!nextMuted);
+    await this.setMuted(!this.state.isMuted, { persist: true, playSound: true, syncRemote: true });
+  }
+
+  setVadThreshold(value: number) {
+    try {
+      this.audioDenoiserBinding?.setVadThreshold?.(value);
+    } catch (error) {
+      console.warn('Failed to update VAD threshold:', error);
     }
-    persistVoiceTogglePreferences({ startMuted: nextMuted });
-    this.setState({ isMuted: nextMuted });
-    playVoiceToggleSound('mute', nextMuted);
+  }
+
+  async setInputDevice(deviceId: string) {
+    const track = this.localAudioTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch microphone:', error);
+    }
+  }
+
+  async setCameraDevice(deviceId: string) {
+    const track = this.localVideoTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch camera:', error);
+    }
+  }
+
+  async setOutputDevice(deviceId: string) {
+    for (const [, remote] of this.remoteAudioTracks.entries()) {
+      const any = remote as any;
+      if (typeof any.setPlaybackDevice === 'function') {
+        try {
+          await any.setPlaybackDevice(deviceId);
+        } catch (error) {
+          console.warn('Failed to switch playback device:', error);
+        }
+      }
+    }
+  }
+
+  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean; syncRemote?: boolean }) {
+    if (this.state.isMuted === muted) return;
+    if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
+      await this.localAudioTrack.setEnabled(!muted);
+    }
+    if (options?.persist) persistVoiceTogglePreferences({ startMuted: muted });
+    this.setState({ isMuted: muted });
+    if (options?.playSound) playVoiceToggleSound('mute', muted);
+    if (!options?.syncRemote) return;
     if (!this.state.channelId || !this.localProfileId) return;
     await supabase
       .from('voice_sessions')
-      .update({ is_muted: nextMuted })
+      .update({ is_muted: muted })
       .eq('channel_id', this.state.channelId)
       .eq('user_id', this.localProfileId);
   }
@@ -1154,6 +1244,7 @@ class ServerVoiceSessionStore {
             this.screenUid = `${this.localUid}::screen`;
             const token = await provider.resolveToken(this.state.channelId, this.screenUid);
             await this.screenClient.join({ channelName: this.state.channelId, token, uid: this.screenUid });
+            this.bindTokenRenewalHandlers(this.screenClient, this.state.channelId, this.screenUid, 'screen');
 
             const publishTracks: Array<IRTCLocalVideoTrack | IRTCLocalAudioTrack> = [];
             if (this.screenTrack) publishTracks.push(this.screenTrack);
@@ -1168,7 +1259,7 @@ class ServerVoiceSessionStore {
             attemptErrors.push(`${attempt.label}: ${formatRtcError(error)}`);
             if (this.screenClient) {
               try {
-                this.screenClient.removeAllListeners();
+                this.screenClient.removeAllListeners?.();
               } catch {
                 // noop
               }

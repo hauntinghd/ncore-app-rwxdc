@@ -205,11 +205,6 @@ export function ChannelSidebar({
     onClose?.();
   }
 
-  function handleFeatureNotice(title: string, body: string) {
-    onOpenFeatureNotice?.(title, body);
-    closeMenus();
-  }
-
   return (
     <div className="relative flex h-full min-h-0 w-60 flex-shrink-0 flex-col border-r border-surface-800 bg-surface-900">
       {community && (

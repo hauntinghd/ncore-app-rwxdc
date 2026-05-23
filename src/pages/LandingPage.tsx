@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
-  Users,
   Workflow,
   Zap,
 } from 'lucide-react';
@@ -142,7 +141,12 @@ export function LandingPage() {
   const appHref = useMemo(() => resolveSurfaceUrl('app', '/app/dm'), []);
   const marketplaceHref = useMemo(() => resolveSurfaceUrl('marketplace', '/'), []);
 
-  const desktopInstallerName = `NCore Setup ${buildVersion}.exe`;
+  // Matches the current nsis.artifactName pattern (NCore-Setup-${version}.exe).
+  // Kept as a fallback only — the real href is resolved from latest.yml via
+  // fetchLatestInstallerAssetPath below, which always reflects whatever the
+  // feed actually serves. If the feed fetch fails, the user still lands on
+  // /updates/ (the index page) rather than a dead 404.
+  const desktopInstallerName = `NCore-Setup-${buildVersion}.exe`;
   const desktopInstallerFallbackHref = `/updates/${encodeURIComponent(desktopInstallerName)}`;
   const resolvedInstallerHref = latestInstallerHref || desktopInstallerFallbackHref;
   const localFeedBase = typeof window !== 'undefined'

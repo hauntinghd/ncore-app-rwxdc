@@ -9,6 +9,23 @@
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/:path*", "destination": "/index.html" }
   ],
+  "redirects": [
+    {
+      "source": "/updates/NCore%20Setup%20:version.exe",
+      "destination": "/updates/NCore-Setup-:version.exe",
+      "permanent": false
+    },
+    {
+      "source": "/updates/NCore%20Setup%20:version.exe.blockmap",
+      "destination": "/updates/NCore-Setup-:version.exe.blockmap",
+      "permanent": false
+    },
+    {
+      "source": "/download",
+      "destination": "/updates/",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/",
@@ -80,6 +97,24 @@
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
         { "key": "Pragma", "value": "no-cache" },
         { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/updates",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
+      ]
+    },
+    {
+      "source": "/updates/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
+      ]
+    },
+    {
+      "source": "/updates/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
       ]
     },
     {

@@ -13,7 +13,7 @@ import { buildCommunityInviteLink } from '../../lib/inviteLinks';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { supabase } from '../../lib/supabase';
 import type { ChannelCategory, ChannelType, Community, Profile, VoiceSession } from '../../lib/types';
-import { COMMUNITY_CATEGORIES, generateSlug } from '../../lib/utils';
+import { generateSlug } from '../../lib/utils';
 import {
   COMMUNITY_BLUEPRINT_OPTIONS,
   detectCommunityTemplate,

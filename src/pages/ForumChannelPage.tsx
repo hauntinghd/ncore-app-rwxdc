@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { MessageSquare, Plus, ArrowUp, ArrowDown, Clock, Flame, Tag, ChevronLeft, Send, Pin } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,9 +40,8 @@ interface ForumTag {
 }
 
 export default function ForumChannelPage() {
-  const { communityId, channelId } = useParams<{ communityId: string; channelId: string }>();
+  const { channelId } = useParams<{ communityId: string; channelId: string }>();
   const { profile } = useAuth();
-  const navigate = useNavigate();
 
   const [channel, setChannel] = useState<Channel | null>(null);
   const [posts, setPosts] = useState<ForumPost[]>([]);

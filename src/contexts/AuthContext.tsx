@@ -13,9 +13,14 @@ interface AuthContextType {
   profileLoading: boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithMagicLink: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
+  clearSignInThrottle: () => void;
+  sendPasswordResetEmail: (email: string) => Promise<{ error: Error | null }>;
+  updatePassword: (newPassword: string) => Promise<{ error: Error | null }>;
+  resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -292,6 +297,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }
 
+  async function signInWithMagicLink(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.signInWithOtp({
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: origin ? `${origin}/app/dm` : undefined,
+      },
+    });
+    return { error: error as Error | null };
+  }
+
+  function clearSignInThrottle() {
+    resetSignInThrottleState();
+  }
+
+  async function sendPasswordResetEmail(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo: origin ? `${origin}/reset-password` : undefined,
+    });
+    return { error: error as Error | null };
+  }
+
+  async function updatePassword(newPassword: string) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return { error: error as Error | null };
+  }
+
+  async function resendConfirmationEmail(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: origin ? `${origin}/app/dm` : undefined,
+      },
+    });
+    return { error: error as Error | null };
+  }
+
   async function updateProfile(updates: Partial<Profile>) {
     if (!user) return { error: new Error('Not authenticated') };
 
@@ -315,7 +363,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, session, profile, loading, profileLoading,
-      signUp, signIn, signOut, updateProfile, refreshProfile,
+      signUp, signIn, signInWithMagicLink, signOut, updateProfile, refreshProfile,
+      clearSignInThrottle, sendPasswordResetEmail, updatePassword, resendConfirmationEmail,
     }}>
       {children}
     </AuthContext.Provider>

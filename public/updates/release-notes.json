@@ -1,9 +1,129 @@
 {
     "releases": [
         {
+            "version": "11.7.104",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Installer wrapper metadata now reads 'NYPTID Industries Advanced Technologies' in the Windows File Properties dialog, UAC elevation prompt, and installed-programs list (where possible without a code-signing certificate)",
+                "Added electron-builder afterAllArtifactBuild hook that patches the NSIS setup wrapper with CompanyName + LegalCopyright + LegalTrademarks via rcedit, so both the runtime NCore.exe and the installer itself show consistent company branding",
+                "Wired win.publisherName in build config so the metadata lines up cleanly once a code-signing certificate is added"
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.103",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Download page fix: the landing page's Download Desktop button now uses the current no-space installer filename (NCore-Setup-<version>.exe). Previously it could generate the old 'NCore Setup <version>.exe' fallback URL before the version feed fetch resolved, producing a 404",
+                "New dedicated /updates/ download page reads latest.yml dynamically, shows the current version + installer size, and works even if the landing page is cached",
+                "/download shortcut: https://ncore.nyptidindustries.com/download routes to the downloads page",
+                "Legacy-filename redirects: any bookmarked or cached link to 'NCore Setup X.Y.Z.exe' now 302s to the new NCore-Setup-X.Y.Z.exe path instead of 404ing"
+            ],
+            "bugFixes": [
+                "Download button on nyptidindustries.com was 404ing for users who clicked before latest.yml resolved"
+            ]
+        },
+        {
+            "version": "11.7.102",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "The arc-reactor update animation now appears the instant you click the green Restart/Install button — not just during auto-triggered updates",
+                "Overlay window is explicitly kept alive during the quit-for-update handoff so the animation stays on screen until NSIS takes over",
+                "Install path runs a Defender / SmartScreen preflight check before calling NSIS; if the pending installer was already removed, the overlay flips straight to the recovery UI (Download manually / Show folder / Retry) instead of flashing the animation and dying"
+            ],
+            "bugFixes": [
+                "Fixed: clicking 'Restart now' from Settings or the overlay itself previously closed all windows before the overlay could render, so users saw no animation at all",
+                "Fixed: close-all-windows tear-down during install was also destroying the overlay; it now has a keep-alive flag for the update path"
+            ]
+        },
+        {
+            "version": "11.7.101",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Update overlay now recovers from 'Windows cannot find the installer' errors — the arc-reactor window shows a clear error state with 'Download manually', 'Show folder', and 'Retry' buttons so you can finish updating even when Windows Defender quietly removes the downloaded installer",
+                "Installer filename no longer contains spaces (NCore-Setup-11.7.101.exe) — eliminates one common source of 'cannot find' shell errors when launching the NSIS installer",
+                "Defender / SmartScreen guidance surfaced in the overlay: tells you to whitelist the ncore-updater folder under Windows Security → Exclusions to prevent the problem recurring"
+            ],
+            "bugFixes": [
+                "quitAndInstall() failures are now caught and surfaced with a recovery UI instead of silently killing the update",
+                "Pending-installer folder is checked before install is attempted; if empty, the overlay immediately surfaces the error with a manual-download link"
+            ]
+        },
+        {
+            "version": "11.7.100",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Discord-style update overlay — when NCore updates itself, a small frameless window appears with an arc-reactor animation (spinning concentric rings, pulsing core) showing the NCore logo, a live progress bar, version chip, and Restart Now / Later buttons",
+                "Overlay survives the install handoff so you have a clear 'we are working on it' surface during the brief moment between the main app quitting and NSIS relaunching the new exe",
+                "Honors prefers-reduced-motion: skips the spinning animations for users who opt out"
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.99",
+            "date": "2026-04-17",
+            "badge": "Previous",
+            "improvements": [
+                "Real threads panel — messages with replies branch into threads you can open, browse, and reply in; replies stream live",
+                "Seen indicator on DMs — own messages show 'Seen' the moment the other side catches up",
+                "Block and Mute from the Friends list; a new Blocked tab lets you review and unblock / unmute",
+                "Tablet layout — iPad and any viewport >= 1024px now gets the desktop split-pane UI (no more bottom-tab mobile on a 12.9\" screen)",
+                "Optional error sink: set VITE_ERROR_WEBHOOK_URL and runtime errors get POSTed to Sentry / Discord / any HTTP receiver (rate-limited client-side)",
+                "New GitHub Actions CI: lint + typecheck + build run on every PR and main push",
+                "Hot-path DB indexes migration (messages / direct_messages / user_growth_capabilities / profiles / security cases) — idempotent, re-runnable"
+            ],
+            "bugFixes": [
+                "TypeScript: noUnusedLocals is now on; 39 dead imports / variables cleaned up across the app",
+                "Error boundaries on CommunityPage and AuthPage stats replace the silent infinite-spinner states",
+                ".env.example added so new developer setup doesn't guess what variables are required"
+            ]
+        },
+        {
+            "version": "11.7.98",
+            "date": "2026-04-17",
+            "badge": "Previous",
+            "improvements": [
+                "Forgot-password + magic-link + resend-confirmation flows in-app — no more getting locked out",
+                "Push-to-talk, VAD threshold slider, in-call device switcher, and live network-quality bars",
+                "Noise suppression now runs through Jitsi RNNoise (open-source, transparent) before Agora — cleaner voice at 48 kHz stereo 192 kbps",
+                "Calls no longer drop at 60 minutes — token renewal is wired end-to-end on DM + server-voice",
+                "Windows install now starts with your PC by default and lives in the tray — 'always on' with one click",
+                "iOS PWA polish — safe-area everywhere, 100dvh layout, no zoom-on-input, Add-to-Home-Screen hint",
+                "Error boundaries + retry UX replace infinite spinners on Community, Friends, and Discover"
+            ],
+            "bugFixes": [
+                "Fixed owner account login after a Bolt/StackBlitz reset silently renamed the email row",
+                "Electron renderer now runs sandboxed with a strict CSP — defence-in-depth against renderer-process exploits",
+                "TypeScript: 26 pre-existing errors cleared, full project typechecks clean",
+                "Removed dead agora-token-debug and agora-token-relaxed edge function code paths"
+            ]
+        },
+        {
+            "version": "11.7.97",
+            "date": "2026-04-10",
+            "badge": "Previous",
+            "improvements": [
+                "Notifications now clear completely after Mark All Read instead of staying in the list grayed out. Only new notifications appear after clearing.",
+                "Server creation overhauled to Discord-style 3-step wizard: pick template, choose purpose (friends/community), name your server and create. Under 10 seconds.",
+                "QuickDraw marketplace fully renamed for professionalism: Specialist Desk → My Dashboard, Contract Grid → Browse Services, Founder Command → Hire Talent, Issue New Contract → Post a Job.",
+                "Steam-style Game Detail Page with hero banner, screenshot gallery, system requirements, publisher card, price/buy/wishlist, and user reviews with thumbs ratio bar.",
+                "Cosmetic auto-generation system creates randomized nameplate, frame, flair, banner, and badge variants with unique gradients, ring styles, and pricing.",
+                "Game listings now support screenshots, system requirements, short descriptions, and genre tags for richer store browsing."
+            ],
+            "bugFixes": [
+                "Fixed notification list not clearing visually after marking all as read.",
+                "Fixed server creation modal showing too many fields upfront instead of a simple step-by-step flow."
+            ]
+        },
+        {
             "version": "11.7.95",
             "date": "2026-04-10",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "RTC Provider Abstraction: Voice and video calling now runs through a provider-agnostic layer, enabling future migration from Agora to self-hosted LiveKit with a single environment variable flip.",
                 "LiveKit Integration: Full LiveKit provider implementation with room management, track wrapping, screen share, and token generation — ready to activate when self-hosted server is deployed.",

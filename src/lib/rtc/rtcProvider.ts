@@ -146,6 +146,12 @@ export interface IRTCClient {
   /** Remove event listener. */
   off<K extends keyof RTCClientEvents>(event: K, handler: RTCClientEvents[K]): void;
 
+  /** Remove all listeners, optionally scoped to one event name. */
+  removeAllListeners?(event?: keyof RTCClientEvents): void;
+
+  /** Enable dual-stream mode (high + low quality for receiver-side switching). */
+  enableDualStream?(): Promise<void>;
+
   /** The underlying provider-specific client for escape-hatch access. */
   readonly _raw: unknown;
 }
@@ -158,6 +164,11 @@ export interface NoiseSuppressionBinding {
   engine: 'ai' | 'fallback' | 'off';
   detail: string;
   teardown: () => Promise<void>;
+  /**
+   * Optional live-tune: set the RNNoise VAD threshold (0..1) without tearing
+   * down the audio pipeline. No-op for engines that don't support it.
+   */
+  setVadThreshold?: (value: number) => void;
 }
 
 // ---------------------------------------------------------------------------

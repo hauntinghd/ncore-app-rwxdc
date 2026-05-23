@@ -17,9 +17,10 @@
     /* Linting */
     "strict": true,
     "noImplicitAny": false,
-    "noUnusedLocals": false,
+    "noUnusedLocals": true,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/lib/rtc/noise/rnnoise-worklet-processor.ts"]
 }

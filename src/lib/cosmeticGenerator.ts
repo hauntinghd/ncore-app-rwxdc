@@ -121,7 +121,7 @@ export async function ensureCosmeticPool(minCount: number = 20): Promise<number>
     .eq('kind', 'cosmetic')
     .eq('active', true);
 
-  const existingSkus = new Set((existing || []).map((p: any) => p.sku));
+  const existingSkus = new Set<string>((existing || []).map((p: any) => String(p.sku)));
   const currentCount = existingSkus.size;
 
   if (currentCount >= minCount) return 0;

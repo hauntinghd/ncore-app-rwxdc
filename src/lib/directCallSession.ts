@@ -52,6 +52,8 @@ export interface DirectCallSessionState {
   participantCount: number;
   averagePingMs: number | null;
   lastPingMs: number | null;
+  uplinkQuality: number;
+  downlinkQuality: number;
   outboundPacketLossPct: number | null;
   privacyCode: string[];
   startedAt: number | null;
@@ -89,6 +91,8 @@ const initialState: DirectCallSessionState = {
   participantCount: 0,
   averagePingMs: null,
   lastPingMs: null,
+  uplinkQuality: 0,
+  downlinkQuality: 0,
   outboundPacketLossPct: null,
   privacyCode: [],
   startedAt: null,
@@ -288,39 +292,6 @@ class DirectCallSessionStore {
     const audioTrack = mediaAudioTrack ? await provider.createCustomAudioTrack(mediaAudioTrack) : null;
 
     return { videoTrack, audioTrack };
-  }
-
-  private async applyEnhancedNoiseSuppression(track: MediaStreamTrack, enabled: boolean) {
-    if (!enabled || typeof track?.applyConstraints !== 'function') return;
-    try {
-      await track.applyConstraints({
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      } as MediaTrackConstraints);
-    } catch {
-      // Ignore unsupported constraint errors.
-    }
-
-    // Best-effort voice isolation hint for runtimes that support it.
-    try {
-      await track.applyConstraints({
-        advanced: [
-          { voiceIsolation: true } as any,
-          { googNoiseSuppression: true } as any,
-          { googNoiseSuppression2: true } as any,
-          { googEchoCancellation: true } as any,
-          { googEchoCancellation2: true } as any,
-          { googAutoGainControl: true } as any,
-          { googAutoGainControl2: true } as any,
-          { googHighpassFilter: true } as any,
-          { googTypingNoiseDetection: true } as any,
-        ],
-      } as MediaTrackConstraints);
-    } catch {
-      // Ignore unsupported constraint errors.
-    }
   }
 
   private normalizePacketLoss(value: unknown): number | null {
@@ -814,8 +785,14 @@ class DirectCallSessionStore {
       const token = await provider.resolveToken(channelName, userId);
       await this.client.join({ channelName, token, uid: userId });
       this.bindTokenRenewalHandlers(this.client, channelName, String(userId), 'call');
+      this.client.on('network-quality', (quality) => {
+        this.setState({
+          uplinkQuality: Number(quality.uplinkNetworkQuality) || 0,
+          downlinkQuality: Number(quality.downlinkNetworkQuality) || 0,
+        });
+      });
 
-      const tracksToPublish: Array<ILocalAudioTrack | ILocalVideoTrack> = [];
+      const tracksToPublish: Array<IRTCLocalAudioTrack | IRTCLocalVideoTrack> = [];
 
       try {
         this.audioTrack = await this.createLocalAudioTrack(callSettings);
@@ -910,13 +887,58 @@ class DirectCallSessionStore {
   }
 
   async toggleMute() {
-    const newMuted = !this.state.isMuted;
-    if (this.audioTrack) {
-      await this.audioTrack.setEnabled(!newMuted);
+    await this.setMuted(!this.state.isMuted, { persist: true, playSound: true });
+  }
+
+  setVadThreshold(value: number) {
+    try {
+      this.audioDenoiserBinding?.setVadThreshold?.(value);
+    } catch (error) {
+      console.warn('Failed to update VAD threshold:', error);
     }
-    persistVoiceTogglePreferences({ startMuted: newMuted });
-    this.setState({ isMuted: newMuted });
-    playVoiceToggleSound('mute', newMuted);
+  }
+
+  async setInputDevice(deviceId: string) {
+    const track = this.audioTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch microphone:', error);
+    }
+  }
+
+  async setCameraDevice(deviceId: string) {
+    const track = this.videoTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch camera:', error);
+    }
+  }
+
+  async setOutputDevice(deviceId: string) {
+    for (const [, remote] of this.remoteAudioTracks.entries()) {
+      const any = remote as any;
+      if (typeof any.setPlaybackDevice === 'function') {
+        try {
+          await any.setPlaybackDevice(deviceId);
+        } catch (error) {
+          console.warn('Failed to switch playback device:', error);
+        }
+      }
+    }
+  }
+
+  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean }) {
+    if (this.state.isMuted === muted) return;
+    if (this.audioTrack) {
+      await this.audioTrack.setEnabled(!muted);
+    }
+    if (options?.persist) persistVoiceTogglePreferences({ startMuted: muted });
+    this.setState({ isMuted: muted });
+    if (options?.playSound) playVoiceToggleSound('mute', muted);
   }
 
   async toggleDeafen() {
@@ -1250,7 +1272,7 @@ class DirectCallSessionStore {
           attemptErrors.push(`${attempt.label}: ${formatRtcError(error)}`);
           if (this.screenClient) {
             try {
-              this.screenClient.removeAllListeners();
+              this.screenClient.removeAllListeners?.();
             } catch {
               // noop
             }
@@ -1569,7 +1591,7 @@ class DirectCallSessionStore {
     if (!activeClient) return;
 
     try {
-      activeClient.removeAllListeners();
+      activeClient.removeAllListeners?.();
     } catch {
       // noop
     }
@@ -1586,7 +1608,7 @@ class DirectCallSessionStore {
 
     if (activeScreenClient) {
       try {
-        activeScreenClient.removeAllListeners();
+        activeScreenClient.removeAllListeners?.();
       } catch {
         // noop
       }

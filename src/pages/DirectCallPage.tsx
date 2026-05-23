@@ -8,6 +8,10 @@ import { trackGrowthEvent } from '../lib/growthEvents';
 import { supabase } from '../lib/supabase';
 import { directCallSession, ScreenShareQuality, useDirectCallSession } from '../lib/directCallSession';
 import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
+import { InCallDevicePicker } from '../components/call/InCallDevicePicker';
+import { NetworkQualityBars } from '../components/call/NetworkQualityBars';
+import { VadThresholdSlider } from '../components/call/VadThresholdSlider';
+import { usePushToTalk } from '../components/call/usePushToTalk';
 import { clampScreenShareQuality, compareScreenShareQuality, useEntitlements } from '../lib/entitlements';
 import {
   buildLegacyCallStateUpdate,
@@ -150,6 +154,13 @@ export function DirectCallPage() {
   const [loadingAccess, setLoadingAccess] = useState(true);
   const [screenQuality, setScreenQuality] = useState<ScreenShareQuality>(() => loadCallSettings().screenShareQuality || '720p30');
   const [noiseSuppressionPreference, setNoiseSuppressionPreference] = useState<boolean>(() => loadCallSettings().noiseSuppression);
+  const [pttEnabled, setPttEnabled] = useState<boolean>(() => loadCallSettings().pttEnabled);
+  const [pttKeybind] = useState<string>(() => loadCallSettings().pttKeybind || 'Space');
+  const pttHeld = usePushToTalk({
+    enabled: pttEnabled,
+    keybind: pttKeybind,
+    onMuted: async (muted) => { await directCallSession.setMuted(muted, { playSound: false }); },
+  });
   const [participantProfilesByUid, setParticipantProfilesByUid] = useState<Record<string, CallParticipantProfile>>({});
   const [screenSources, setScreenSources] = useState<ScreenSourceOption[]>([]);
   const [screenSourceId, setScreenSourceId] = useState('');
@@ -1141,6 +1152,29 @@ export function DirectCallPage() {
         })(), document.body)}
 
         <div className="border-t border-surface-800 bg-surface-900 py-4">
+          {isThisConversationSession && session.phase === 'active' && (
+            <div className="flex flex-wrap items-center justify-center gap-3 mb-3 px-3">
+              <NetworkQualityBars
+                uplink={session.uplinkQuality}
+                downlink={session.downlinkQuality}
+                rttMs={session.lastPingMs}
+              />
+              {noiseSuppressionPreference && (
+                <VadThresholdSlider
+                  onChange={(value) => directCallSession.setVadThreshold(value)}
+                />
+              )}
+              {pttEnabled && (
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${pttHeld ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200' : 'border-surface-700 bg-surface-900/80 text-surface-300'}`}
+                  title={pttHeld ? 'Transmitting (key held)' : `Hold ${pttKeybind} to talk`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${pttHeld ? 'bg-emerald-400 animate-pulse' : 'bg-surface-500'}`} />
+                  {pttHeld ? 'Transmitting' : `PTT: ${pttKeybind}`}
+                </span>
+              )}
+            </div>
+          )}
           <div className="relative flex items-center justify-center gap-3 flex-wrap px-3">
             <div className="absolute left-3 text-xs text-surface-500">
               {isThisConversationSession && session.phase === 'active' ? (
@@ -1245,6 +1279,25 @@ export function DirectCallPage() {
               <Waves size={14} />
               {noiseSuppressionEnabled ? 'Noise Suppression On' : 'Noise Suppression Off'}
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !pttEnabled;
+                setPttEnabled(next);
+                saveCallSettings({ ...loadCallSettings(), pttEnabled: next });
+              }}
+              className={`h-10 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${pttEnabled ? 'bg-nyptid-300 text-surface-950' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
+              title={pttEnabled ? `Push-to-talk on (${pttKeybind})` : 'Push-to-talk off'}
+            >
+              PTT {pttEnabled ? 'On' : 'Off'}
+            </button>
+
+            <InCallDevicePicker
+              onMicChange={(id) => directCallSession.setInputDevice(id)}
+              onCameraChange={(id) => directCallSession.setCameraDevice(id)}
+              onSpeakerChange={(id) => directCallSession.setOutputDevice(id)}
+            />
 
             <button
               onClick={handleHangup}

@@ -68,5 +68,19 @@ interface Window {
     onIncomingCall: (cb: (payload: any) => void) => () => void;
     onDesktopNotificationClick: (cb: (payload: any) => void) => () => void;
     onUpdateReady: (cb: (payload: DesktopUpdateRuntimeState) => void) => () => void;
+    getStartupConfig: () => Promise<{
+      ok: boolean;
+      openAtLogin?: boolean;
+      openAsHidden?: boolean;
+      supported?: boolean;
+      message?: string;
+    }>;
+    setStartupConfig: (config: { openAtLogin?: boolean; openAsHidden?: boolean }) => Promise<{
+      ok: boolean;
+      openAtLogin?: boolean;
+      openAsHidden?: boolean;
+      supported?: boolean;
+      message?: string;
+    }>;
   };
 }

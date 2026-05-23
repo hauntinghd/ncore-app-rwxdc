@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint + typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Non-secret build-time values. Real production values are injected by
+      # Vercel at deploy time; these exist so `vite build` doesn't throw on
+      # missing env in CI.
+      VITE_SUPABASE_URL: https://kxheuoaurlaociszyrof.supabase.co
+      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4aGV1b2F1cmxhb2Npc3p5cm9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MDY2MzcsImV4cCI6MjA5MTM4MjYzN30.6XjYw1wex46WM7g74E6rRhRCcO8GEV0oIodebPrqjwE
+      VITE_AGORA_APP_ID: ${{ vars.CI_VITE_AGORA_APP_ID }}
+      VITE_AGORA_TOKEN_FUNCTION: agora-token
+      VITE_RTC_PROVIDER: agora
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (web)
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncore-web-dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error

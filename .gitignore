@@ -37,5 +37,14 @@ public/updates/*.apk
 
 # Local scratch/debug artifacts
 .bolt
+.codex_tmp
 tmp_*
 agora-extension-ai-denoiser-*.tgz
+
+# Build output from deployed helpers
+deploy/rnnoise/build
+
+# Sensitive deployment helpers (password hashes, raw secrets) MUST stay local
+deploy/migrate_passwords*.sql
+deploy/*secrets*.env
+deploy/livekit/.env

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, MapPin, Users, Plus, Check, X, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, Users, Plus, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -17,12 +17,6 @@ interface ScheduledEvent {
   status: string;
   rsvp_count: number;
   created_at: string;
-}
-
-interface EventRsvp {
-  event_id: string;
-  user_id: string;
-  status: string;
 }
 
 interface Props {

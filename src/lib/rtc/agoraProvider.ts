@@ -34,6 +34,12 @@ import type {
 
 import { resolveAgoraJoinToken, describeAgoraJoinFailure } from '../agoraAuth';
 import { createAIDenoiserBinding } from '../agoraAIDenoiser';
+import { createRNNoiseBinding } from './noise/rnnoiseSuppression';
+import { loadCallSettings } from '../callSettings';
+
+// Tracks RNNoise bindings by audio track so createNoiseSuppression can surface
+// the active engine to the UI without re-processing.
+const rnnoiseBindingByTrack = new WeakMap<IRTCLocalAudioTrack, NoiseSuppressionBinding>();
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded Agora SDK
@@ -293,6 +299,13 @@ class AgoraClient implements IRTCClient {
       this.client.on('exception', (evt: any) => {
         (handler as RTCClientEvents['exception'])(evt?.code || 0, evt?.msg || '', evt?.uid || '');
       });
+    } else if (event === 'network-quality') {
+      this.client.on('network-quality', (stats: any) => {
+        (handler as RTCClientEvents['network-quality'])({
+          uplinkNetworkQuality: Number(stats?.uplinkNetworkQuality || 0),
+          downlinkNetworkQuality: Number(stats?.downlinkNetworkQuality || 0),
+        });
+      });
     }
   }
 
@@ -328,8 +341,12 @@ export class AgoraProvider implements IRTCProvider {
 
   async createAudioTrack(config?: RTCAudioTrackConfig): Promise<IRTCLocalAudioTrack> {
     const AgoraRTC = await getAgoraModule();
+    const nsEnabled = config?.noiseSuppression ?? true;
 
-    // Try getUserMedia first for enhanced noise suppression support.
+    // Try getUserMedia first so we can run the Jitsi RNNoise WASM worklet
+    // in front of Agora. When it succeeds, Agora sees an already-cleaned track
+    // and doesn't need to run its own denoiser — this matches the
+    // "open-source RNNoise" requirement and keeps the pipeline transparent.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -337,27 +354,59 @@ export class AgoraProvider implements IRTCProvider {
             ? { exact: config.deviceId }
             : undefined,
           echoCancellation: config?.echoCancellation ?? true,
-          noiseSuppression: config?.noiseSuppression ?? true,
+          noiseSuppression: nsEnabled,
           autoGainControl: config?.autoGainControl ?? true,
-        },
+          channelCount: 2,
+          sampleRate: 48000,
+          sampleSize: 16,
+        } as MediaTrackConstraints,
         video: false,
       });
-      const mediaTrack = stream.getAudioTracks()[0];
-      if (mediaTrack) {
-        await applyEnhancedConstraints(mediaTrack, config?.noiseSuppression ?? true);
-        const agoraTrack = AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: mediaTrack });
-        return wrapLocalAudioTrack(agoraTrack);
+      const rawTrack = stream.getAudioTracks()[0];
+      if (rawTrack) {
+        await applyEnhancedConstraints(rawTrack, nsEnabled);
+
+        let finalTrack: MediaStreamTrack = rawTrack;
+        let rnnoiseBinding: NoiseSuppressionBinding | null = null;
+        if (nsEnabled) {
+          try {
+            const storedThreshold = Number(loadCallSettings().vadThreshold);
+            const vadThreshold = Number.isFinite(storedThreshold)
+              ? Math.max(0, Math.min(1, storedThreshold))
+              : 0.5;
+            const result = await createRNNoiseBinding(rawTrack, true, { vadThreshold });
+            if (result.processedTrack && result.binding.engine === 'ai') {
+              finalTrack = result.processedTrack;
+              rnnoiseBinding = result.binding;
+            } else {
+              await result.binding.teardown().catch(() => {});
+            }
+          } catch (rnnoiseError) {
+            console.warn('RNNoise pre-processing failed, falling back to raw mic:', rnnoiseError);
+          }
+        }
+
+        const agoraTrack = AgoraRTC.createCustomAudioTrack({
+          mediaStreamTrack: finalTrack,
+          encoderConfig: 'high_quality_stereo',
+        } as any);
+        const wrapped = wrapLocalAudioTrack(agoraTrack);
+        if (rnnoiseBinding) {
+          rnnoiseBindingByTrack.set(wrapped, rnnoiseBinding);
+        }
+        return wrapped;
       }
     } catch {
       // Fall through to Agora SDK track creation.
     }
 
-    // Fallback: Agora native track creation.
+    // Fallback: Agora native track creation with its built-in ANS.
     const agoraTrack = await AgoraRTC.createMicrophoneAudioTrack({
       microphoneId: config?.deviceId && config.deviceId !== 'default' ? config.deviceId : undefined,
       AEC: config?.echoCancellation ?? true,
-      ANS: config?.noiseSuppression ?? true,
+      ANS: nsEnabled,
       AGC: config?.autoGainControl ?? true,
+      encoderConfig: 'high_quality_stereo',
     } as any);
     return wrapLocalAudioTrack(agoraTrack);
   }
@@ -414,6 +463,16 @@ export class AgoraProvider implements IRTCProvider {
     track: IRTCLocalAudioTrack,
     enabled: boolean,
   ): Promise<NoiseSuppressionBinding> {
+    // If the track was created with RNNoise already in its graph, report that
+    // and skip Agora's AI denoiser — double-processing degrades audio.
+    const existing = rnnoiseBindingByTrack.get(track);
+    if (existing && enabled) {
+      return existing;
+    }
+    if (existing && !enabled) {
+      await existing.teardown().catch(() => {});
+      rnnoiseBindingByTrack.delete(track);
+    }
     const rawTrack = track._raw as ILocalAudioTrack;
     return createAIDenoiserBinding(rawTrack, enabled);
   }
@@ -448,7 +507,8 @@ async function applyEnhancedConstraints(track: MediaStreamTrack, nsEnabled: bool
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
-      channelCount: 1,
+      channelCount: 2,
+      sampleRate: 48000,
     } as MediaTrackConstraints);
   } catch {
     // ignore

@@ -7,11 +7,14 @@ import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
 import { detectWebSurface, type WebSurface } from './lib/webSurface';
 import { readPendingInviteCode } from './lib/inviteLinks';
 import { createDurationTracker, queueRuntimeEvent, reportRuntimeError } from './lib/runtimeTelemetry';
+import { supabase } from './lib/supabase';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
 const LoginPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.SignupPage })));
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
 const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
@@ -81,6 +84,8 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/invite/:inviteCode" element={<InvitePage />} />
         <Route path="/:inviteCode" element={<InvitePage />} />
@@ -313,6 +318,28 @@ function RealtimeBridge() {
       route: `${location.pathname}${location.search}`,
     }, { userId: profile?.id, sampleRate: 0.2 });
   }, [isElectron, location.pathname, location.search, profile?.id, session]);
+
+  // iOS Safari evicts localStorage for sites not opened in ~7 days (for non-installed
+  // origins) and pauses Supabase's auto-refresh while the tab is backgrounded. When
+  // the PWA returns to foreground, proactively refresh the session so we don't leave
+  // the user on a silently-expired token.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void (async () => {
+        try {
+          const { data } = await supabase.auth.refreshSession();
+          if (!data?.session) {
+            queueRuntimeEvent('auth_session_stale_on_resume', {}, { userId: profile?.id, sampleRate: 1 });
+          }
+        } catch (err) {
+          reportRuntimeError('auth_resume_refresh_failed', err, {}, { userId: profile?.id, sampleRate: 1 });
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [profile?.id]);
 
   return null;
 }

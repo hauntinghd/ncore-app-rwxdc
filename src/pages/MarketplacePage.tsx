@@ -76,6 +76,11 @@ interface QuickdrawContractDraft {
 
 const QUICKDRAW_DRAFTS_STORAGE_PREFIX = 'ncore.marketplace.quickdraw.drafts';
 
+// Feature flag — Quickdraw is half-built (no posting/bidding UI). Flip to true
+// when the marketplace contract flow is production-ready. Hides the nav entry
+// and coerces deep links to /marketplace/quickdraw back to the cosmetics track.
+const QUICKDRAW_ENABLED = false;
+
 interface LevelUnlockTier {
   level: number;
   title: string;
@@ -150,7 +155,7 @@ const QUICKDRAW_BRIEFINGS: Record<Exclude<QuickdrawBriefingId, null>, { title: s
 
 function getTrackFromPath(pathname: string): MarketplaceTrack {
   const path = String(pathname || '').toLowerCase();
-  if (path.endsWith('/marketplace/quickdraw')) return 'quickdraw';
+  if (path.endsWith('/marketplace/quickdraw')) return QUICKDRAW_ENABLED ? 'quickdraw' : 'cosmetics';
   if (path.endsWith('/marketplace/games')) return 'games';
   return 'cosmetics';
 }
@@ -1598,8 +1603,8 @@ export function MarketplacePage() {
                 <p className="text-sm text-surface-300 mt-1 max-w-2xl">
                   {activeTrackMeta.summary}
                 </p>
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-3xl">
-                  {(['quickdraw', 'games', 'cosmetics'] as MarketplaceTrack[]).map((track) => {
+                <div className={`mt-3 grid grid-cols-1 ${QUICKDRAW_ENABLED ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2 max-w-3xl`}>
+                  {((QUICKDRAW_ENABLED ? ['quickdraw', 'games', 'cosmetics'] : ['games', 'cosmetics']) as MarketplaceTrack[]).map((track) => {
                     const meta = marketplaceTrackMeta[track];
                     const isActive = activeTrack === track;
                     const targetPath = track === 'cosmetics'

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Users, MessageSquare, Award, TrendingUp, ArrowRight, Zap, Star } from 'lucide-react';
+import { Users, MessageSquare, Award, TrendingUp, ArrowRight, Zap, Star } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
@@ -15,7 +15,7 @@ export function DashboardPage() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [recentNotifs, setRecentNotifs] = useState<Notification[]>([]);
   const [achievements, setAchievements] = useState<UserAchievement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   useEffect(() => {
     if (!profile) return;

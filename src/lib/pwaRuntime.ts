@@ -17,6 +17,7 @@ export interface PwaRuntimeSnapshot {
   isIOS: boolean;
   isAndroid: boolean;
   isMobile: boolean;
+  isTablet: boolean;
   isSafari: boolean;
   isOnline: boolean;
   deviceTier: DeviceTier;
@@ -44,6 +45,7 @@ const state: PwaRuntimeSnapshot = {
   isIOS: false,
   isAndroid: false,
   isMobile: false,
+  isTablet: false,
   isSafari: false,
   isOnline: true,
   deviceTier: 'high',
@@ -73,7 +75,14 @@ function updatePlatformSnapshot() {
   const ua = navigator.userAgent.toLowerCase();
   const isIOS = /iphone|ipad|ipod/.test(ua);
   const isAndroid = /android/.test(ua);
-  const isMobile = isIOS || isAndroid || /mobile/.test(ua);
+  // Treat tablets (iPad, Android tablets, and any viewport >= 1024 CSS px) as
+  // desktop-like for layout purposes — they should get split-pane sidebars
+  // rather than the bottom-tab mobile UI. iPadOS ships Safari with a Mac UA,
+  // so fall back to viewport width.
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const uaMentionsTablet = /ipad|tablet/.test(ua) || (isAndroid && !/mobile/.test(ua));
+  const isTablet = uaMentionsTablet || viewportWidth >= 1024;
+  const isMobile = (isIOS || isAndroid || /mobile/.test(ua)) && !isTablet;
   const isSafari = /safari/.test(ua) && !/crios|fxios|edgios|opr\//.test(ua);
   const standaloneViaMedia = window.matchMedia?.('(display-mode: standalone)').matches ?? false;
   const standaloneViaNavigator = Boolean((navigator as any).standalone);
@@ -82,6 +91,7 @@ function updatePlatformSnapshot() {
   state.isIOS = isIOS;
   state.isAndroid = isAndroid;
   state.isMobile = isMobile;
+  state.isTablet = isTablet;
   state.isSafari = isSafari;
   state.isStandalone = isStandalone;
   state.isOnline = navigator.onLine;
@@ -308,6 +318,20 @@ function setupRuntimeListeners() {
     state.isOnline = false;
     notify();
   });
+
+  // Re-evaluate tablet / mobile on viewport resize (iPad rotation, window drag
+  // on Windows, browser-tool panels toggling).
+  let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+  const scheduleResizeRecompute = () => {
+    if (resizeDebounce) clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(() => {
+      updatePlatformSnapshot();
+      applyRuntimeClasses();
+      notify();
+    }, 120);
+  };
+  window.addEventListener('resize', scheduleResizeRecompute);
+  window.addEventListener('orientationchange', scheduleResizeRecompute);
   const standaloneMql = window.matchMedia ? window.matchMedia('(display-mode: standalone)') : null;
   if (standaloneMql) {
     const onStandaloneChange = () => {

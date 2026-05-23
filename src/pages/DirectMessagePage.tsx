@@ -20,6 +20,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { SidebarUserDock, type SidebarVoiceDockState } from '../components/layout/SidebarUserDock';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
+import { SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
@@ -165,6 +166,7 @@ export function DirectMessagePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [conversations, setConversations] = useState<DirectConversation[]>([]);
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [activeConversation, setActiveConversation] = useState<DirectConversation | null>(null);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1315,6 +1317,7 @@ export function DirectMessagePage() {
 
     if (membershipError) {
       console.warn('DM membership lookup failed; keeping cached conversations if available.', membershipError);
+      setConversationsLoaded(true);
       return;
     }
 
@@ -1324,6 +1327,7 @@ export function DirectMessagePage() {
 
     if (requestedConversationIds.length === 0) {
       setConversations([]);
+      setConversationsLoaded(true);
       return;
     }
 
@@ -1512,6 +1516,7 @@ export function DirectMessagePage() {
     });
 
     setConversations(deduped as DirectConversation[]);
+    setConversationsLoaded(true);
   }
 
   async function loadUserRelationships() {
@@ -2362,6 +2367,34 @@ export function DirectMessagePage() {
     }
   }
 
+  // Compute "Seen by other" cutoff: the max last_read_at across all non-self
+  // conversation members. The last own-sent message with created_at <= cutoff
+  // gets a "Seen" indicator. Works for both 1:1 and group DMs.
+  const seenCutoffMs = useMemo(() => {
+    if (!activeConversation || !profile?.id) return 0;
+    let maxTs = 0;
+    for (const member of (activeConversation.members || []) as any[]) {
+      if (String(member?.user_id) === String(profile.id)) continue;
+      const raw = member?.last_read_at;
+      if (!raw) continue;
+      const t = new Date(raw).getTime();
+      if (Number.isFinite(t) && t > maxTs) maxTs = t;
+    }
+    return maxTs;
+  }, [activeConversation, profile?.id]);
+
+  const lastSeenOwnMessageId = useMemo(() => {
+    if (seenCutoffMs <= 0 || !profile?.id) return '';
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (String(msg.author_id) !== String(profile.id)) continue;
+      const msgTs = new Date(msg.created_at).getTime();
+      if (Number.isFinite(msgTs) && msgTs <= seenCutoffMs) return String(msg.id);
+      break; // only the newest own message can be "seen" — stop after the first non-seen hit
+    }
+    return '';
+  }, [messages, seenCutoffMs, profile?.id]);
+
   const renderedMessages = useMemo(() => (
     messages.map((msg, i) => {
       const prev = messages[i - 1];
@@ -2434,11 +2467,24 @@ export function DirectMessagePage() {
               )}
               {msg.is_edited && <span className="text-xs opacity-60 ml-1">(edited)</span>}
             </div>
+            {isOwn && String(msg.id) === lastSeenOwnMessageId && (
+              <div
+                className="mt-1 px-1 text-[11px] font-medium text-nyptid-200/80 flex items-center gap-1"
+                aria-label="Message seen"
+                title="Seen"
+              >
+                <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 12 7 18 15 6" />
+                  <polyline points="9 12 13 16 23 4" />
+                </svg>
+                Seen
+              </div>
+            )}
           </div>
         </div>
       );
     })
-  ), [messages, profile?.id]);
+  ), [messages, profile?.id, lastSeenOwnMessageId]);
 
   async function startCall(video: boolean) {
     if (!conversationId) return;
@@ -3048,7 +3094,15 @@ export function DirectMessagePage() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {visibleConversations.length === 0 ? (
+            {!conversationsLoaded && visibleConversations.length === 0 ? (
+              <div className="py-2" aria-label="Loading conversations">
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+              </div>
+            ) : visibleConversations.length === 0 ? (
               <div className="text-center py-8 px-4">
                 <p className="text-surface-500 text-sm">No conversations yet</p>
                 <button
