@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Copy, Palette, Plus, Save, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { CustomRolesSection } from '../components/community/CustomRolesSection';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildCommunityInviteLink } from '../lib/inviteLinks';
@@ -1153,6 +1154,8 @@ function buildInviteLink(code: string): string {
               })}
             </div>
           </div>
+
+          <CustomRolesSection communityId={communityId ?? ''} canManage={isAdmin} />
 
           <div className="nyptid-card p-5 border border-red-500/30">
             <div className="flex items-center gap-2 mb-3">
