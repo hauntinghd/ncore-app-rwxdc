@@ -1066,7 +1066,7 @@ export function ChatPage() {
 
   const handleTogglePin = useCallback(async (message: Message) => {
     if (!message?.id) return;
-    const nextPinned = !Boolean(message.is_pinned);
+    const nextPinned = !message.is_pinned;
     const { error: updateError } = await supabase
       .from('messages')
       .update({ is_pinned: nextPinned } as any)

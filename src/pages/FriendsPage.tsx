@@ -176,8 +176,8 @@ export function FriendsPage() {
         new Set((myConversationMembers || []).map((row: any) => String(row.conversation_id)).filter(Boolean)),
       );
 
-      let conversationIdToFriendId = new Map<string, string>();
-      let friendIdToConversationId = new Map<string, string>();
+      const conversationIdToFriendId = new Map<string, string>();
+      const friendIdToConversationId = new Map<string, string>();
       if (myConversationIds.length > 0) {
         const [{ data: directConversations }, { data: conversationMembers }] = await Promise.all([
           supabase
@@ -205,7 +205,7 @@ export function FriendsPage() {
         }
       }
 
-      let activeCallByConversationId = new Map<string, CallRow>();
+      const activeCallByConversationId = new Map<string, CallRow>();
       const conversationIds = Array.from(friendIdToConversationId.values());
       if (conversationIds.length > 0) {
         const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();

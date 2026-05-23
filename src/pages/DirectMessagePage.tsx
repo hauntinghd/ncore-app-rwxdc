@@ -3712,7 +3712,7 @@ export function DirectMessagePage() {
                         }}
                         disabled={Boolean(updatingGroupRoleUserId)}
                         className={`text-xs rounded-md px-2 py-1 transition-colors text-nyptid-200 hover:bg-nyptid-300/15 ${
-                          Boolean(updatingGroupRoleUserId) ? 'opacity-50 cursor-not-allowed' : ''
+                          updatingGroupRoleUserId ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {changingRoleThis ? '...' : memberRole === 'admin' ? 'Demote' : 'Promote'}
@@ -3726,7 +3726,7 @@ export function DirectMessagePage() {
                         }}
                         disabled={Boolean(transferringGroupOwnerId)}
                         className={`text-xs rounded-md px-2 py-1 transition-colors text-amber-200 hover:bg-amber-500/15 ${
-                          Boolean(transferringGroupOwnerId) ? 'opacity-50 cursor-not-allowed' : ''
+                          transferringGroupOwnerId ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {transferringGroupOwnerId === String(member.user_id) ? '...' : 'Transfer'}

@@ -2205,7 +2205,9 @@ export function SettingsPage() {
       }
 
       let requestBody = buildRequestBody(authState.accessToken);
-      let { data, error: invokeError } = await invokeCheckout(requestBody);
+      const initial = await invokeCheckout(requestBody);
+      const invokeError = initial.error;
+      let data = initial.data;
       if (invokeError) {
         const detail = await extractInvokeErrorMessage(invokeError, 'Could not start Boost checkout.');
         if (!isInvalidJwtMessage(detail)) {
@@ -2278,7 +2280,9 @@ export function SettingsPage() {
       }
 
       let requestBody = buildRequestBody(authState.accessToken);
-      let { data, error: invokeError } = await invokePortal(requestBody);
+      const initial = await invokePortal(requestBody);
+      const invokeError = initial.error;
+      let data = initial.data;
       if (invokeError) {
         const detail = await extractInvokeErrorMessage(invokeError, 'Could not open billing portal.');
         if (!isInvalidJwtMessage(detail)) {

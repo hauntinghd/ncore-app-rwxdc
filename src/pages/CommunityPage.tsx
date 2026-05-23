@@ -1157,7 +1157,7 @@ export function CommunityPage() {
                               transferringOwnerId === member.user_id
                                 ? 'bg-amber-500/20 text-amber-200'
                                 : 'bg-surface-700 text-surface-300 hover:bg-surface-600'
-                            } ${Boolean(transferringOwnerId) ? 'opacity-70 cursor-not-allowed' : ''}`}
+                            } ${transferringOwnerId ? 'opacity-70 cursor-not-allowed' : ''}`}
                           >
                             {transferringOwnerId === member.user_id ? 'Transferring...' : 'Transfer Ownership'}
                           </button>
