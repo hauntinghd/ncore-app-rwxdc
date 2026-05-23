@@ -18,6 +18,7 @@ import {
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
+import { MarkdownContent } from '../components/ui/MarkdownContent';
 import { ThreadsPanel } from '../components/chat/ThreadsPanel';
 import { useFocusTrap } from '../components/ui/useFocusTrap';
 import { SkeletonMessageRow } from '../components/ui/Skeleton';
@@ -29,7 +30,6 @@ import {
   getActiveMentionQuery,
   insertMentionSuggestion,
   resolveMentionTargetIds,
-  splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
@@ -77,18 +77,7 @@ interface LightweightMessageReaction {
 }
 
 function renderMessageContent(content: string) {
-  return splitMentionText(content).map((segment, index) => (
-    segment.isMention ? (
-      <span
-        key={`${segment.text}:${index}`}
-        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
-      >
-        {segment.text}
-      </span>
-    ) : (
-      <span key={`${segment.text}:${index}`}>{segment.text}</span>
-    )
-  ));
+  return <MarkdownContent content={content} />;
 }
 
 function MessageGroup({

@@ -3,6 +3,7 @@ import { ArrowLeft, Hash, Loader2, MessageSquare, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Avatar } from '../ui/Avatar';
 import { EmptyState, EmptyIllustrations } from '../ui/EmptyState';
+import { MarkdownContent } from '../ui/MarkdownContent';
 import { useFocusTrap } from '../ui/useFocusTrap';
 import { formatRelativeTime } from '../../lib/utils';
 
@@ -389,7 +390,7 @@ function ThreadList({
                   <span className="truncate">{formatRelativeTime(root.created_at)}</span>
                 </div>
                 <div className="mt-0.5 text-sm text-surface-200 line-clamp-2 break-words">
-                  {root.content || <span className="italic text-surface-500">(no content)</span>}
+                  {root.content ? <MarkdownContent content={root.content} /> : <span className="italic text-surface-500">(no content)</span>}
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-[11px] text-surface-500">
                   <span className="inline-flex items-center gap-1">
@@ -455,8 +456,8 @@ function ThreadDetail({
                 <span className="text-surface-500">{formatRelativeTime(msg.created_at)}</span>
                 {idx === 0 && <span className="text-[10px] uppercase tracking-wide text-nyptid-300">Root</span>}
               </div>
-              <div className="mt-1 text-sm text-surface-100 whitespace-pre-wrap break-words">
-                {msg.content || <span className="italic text-surface-500">(no content)</span>}
+              <div className="mt-1 text-sm text-surface-100 break-words">
+                {msg.content ? <MarkdownContent content={msg.content} /> : <span className="italic text-surface-500">(no content)</span>}
               </div>
             </div>
           </div>

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Profile, Channel } from '../lib/types';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { MarkdownContent } from '../components/ui/MarkdownContent';
 
 type SortMode = 'latest' | 'hot' | 'oldest';
 
@@ -296,7 +297,9 @@ export default function ForumChannelPage() {
                   <span className="text-surface-100 font-medium text-sm">{activePost.profile?.display_name || activePost.profile?.username}</span>
                   <span className="text-surface-600 text-xs">{formatTimeAgo(activePost.created_at)}</span>
                 </div>
-                <div className="text-surface-300 text-sm whitespace-pre-wrap break-words">{activePost.content.replace(/^\*\*.+?\*\*\s*\n*/, '')}</div>
+                <div className="text-surface-300 text-sm break-words">
+                  <MarkdownContent content={activePost.content.replace(/^\*\*.+?\*\*\s*\n*/, '')} />
+                </div>
                 {activePost.tags.length > 0 && (
                   <div className="flex gap-1.5 mt-2">
                     {activePost.tags.map((tag) => (
@@ -323,7 +326,9 @@ export default function ForumChannelPage() {
                       <span className="text-surface-200 font-medium text-sm">{reply.profile?.display_name || reply.profile?.username}</span>
                       <span className="text-surface-600 text-xs">{formatTimeAgo(reply.created_at)}</span>
                     </div>
-                    <p className="text-surface-300 text-sm whitespace-pre-wrap break-words">{reply.content}</p>
+                    <p className="text-surface-300 text-sm break-words">
+                      <MarkdownContent content={reply.content} />
+                    </p>
                   </div>
                 </div>
               ))
