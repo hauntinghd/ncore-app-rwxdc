@@ -3,6 +3,7 @@ import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
 import { autoRegisterPushToken, registerDeviceToken } from '../lib/push';
+import { ensureIdentityKey, isE2EEnabled, resetIdentityCache } from '../lib/crypto/e2eManager';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 
 interface AuthContextType {
@@ -204,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfileLoading(false);
         });
         void registerDefaultDeviceTokenOnce();
+        if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
       } else {
         setProfile(null);
         setProfileLoading(false);
@@ -229,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfileLoading(false);
         });
         void registerDefaultDeviceTokenOnce();
+        if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         queueRuntimeEvent('auth_session_recovered', {
           user_id: session.user.id,
@@ -240,6 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        resetIdentityCache();
       } else if (!session) {
         clearCachedProfile(user?.id);
         setProfile(null);

@@ -584,6 +584,8 @@ export interface DirectMessage {
   updated_at: string;
   author?: Profile;
   attachments?: DirectMessageAttachment[];
+  ciphertext?: unknown;
+  e2e_version?: number | null;
 }
 
 export interface DirectMessageAttachment {

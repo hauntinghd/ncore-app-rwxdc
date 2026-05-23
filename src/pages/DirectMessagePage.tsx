@@ -39,9 +39,16 @@ import {
   hasBroadcastMention,
   insertMentionSuggestion,
   resolveMentionTargetIds,
-  splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
+import { MarkdownContent } from '../components/ui/MarkdownContent';
+import {
+  E2E_PLACEHOLDER,
+  decryptFromConversation,
+  encryptForConversation,
+  isE2EEnabled,
+  type ConversationCipherEnvelope,
+} from '../lib/crypto/e2eManager';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
 import { runServerVoiceAction, useServerVoiceShellState } from '../lib/serverVoiceShell';
 import { loadCallSettings } from '../lib/callSettings';
@@ -134,18 +141,7 @@ function buildRealtimeDirectMessage(row: any, authorMap: Map<string, Lightweight
 }
 
 function renderDirectMessageContent(content: string) {
-  return splitMentionText(content).map((segment, index) => (
-    segment.isMention ? (
-      <span
-        key={`${segment.text}:${index}`}
-        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
-      >
-        {segment.text}
-      </span>
-    ) : (
-      <span key={`${segment.text}:${index}`}>{segment.text}</span>
-    )
-  ));
+  return <MarkdownContent content={content} />;
 }
 
 function isUuid(value: unknown): boolean {
@@ -169,6 +165,7 @@ export function DirectMessagePage() {
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [activeConversation, setActiveConversation] = useState<DirectConversation | null>(null);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [decryptedById, setDecryptedById] = useState<Map<string, string>>(() => new Map());
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -1531,10 +1528,50 @@ export function DirectMessagePage() {
     setUserRelationships(map);
   }
 
+  useEffect(() => {
+    if (!isE2EEnabled() || !profile?.id) return;
+    if (messages.length === 0) return;
+    let cancelled = false;
+
+    const pending = messages.filter((msg) => {
+      if (!msg?.id || decryptedById.has(msg.id)) return false;
+      return Boolean(msg.ciphertext) && (msg.e2e_version ?? 0) >= 1;
+    });
+    if (pending.length === 0) return;
+
+    void (async () => {
+      const updates = new Map<string, string>();
+      for (const msg of pending) {
+        const envelope = msg.ciphertext as ConversationCipherEnvelope | null | undefined;
+        const plaintext = await decryptFromConversation({ myUserId: profile.id, envelope });
+        if (plaintext != null) updates.set(msg.id, plaintext);
+      }
+      if (cancelled || updates.size === 0) return;
+      setDecryptedById((prev) => {
+        const next = new Map(prev);
+        for (const [id, value] of updates) next.set(id, value);
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, profile?.id, decryptedById]);
+
+  const resolveMessageContent = useCallback(
+    (msg: DirectMessage): string => {
+      const decrypted = decryptedById.get(msg.id);
+      if (decrypted != null) return decrypted;
+      return msg.content || '';
+    },
+    [decryptedById],
+  );
+
   async function loadMessages(convId: string) {
     const primary = await supabase
       .from('direct_messages')
-      .select(`id, conversation_id, author_id, content, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS}), attachments:direct_message_attachments(*)`)
+      .select(`id, conversation_id, author_id, content, ciphertext, e2e_version, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS}), attachments:direct_message_attachments(*)`)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true })
       .limit(100);
@@ -1548,7 +1585,7 @@ export function DirectMessagePage() {
       }
       const fallback = await supabase
         .from('direct_messages')
-        .select(`id, conversation_id, author_id, content, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS})`)
+        .select(`id, conversation_id, author_id, content, ciphertext, e2e_version, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS})`)
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true })
         .limit(100);
@@ -1918,13 +1955,42 @@ export function DirectMessagePage() {
     setSending(true);
     setErrorMessage('');
 
+    // Resolve other conversation members for E2E fan-out. We use the in-
+    // memory list when present, otherwise we'll skip encryption silently
+    // — the message still sends as plaintext.
+    const otherMemberIds = Array.from(new Set(
+      ((activeConversation?.members || []) as Array<{ user_id?: string | null }>)
+        .map((member) => String(member?.user_id || '').trim())
+        .filter((userId) => userId && userId !== profile.id),
+    ));
+
+    let insertContent = content;
+    let envelope: ConversationCipherEnvelope | null = null;
+    if (isE2EEnabled() && otherMemberIds.length > 0) {
+      const { envelope: produced } = await encryptForConversation({
+        myUserId: profile.id,
+        recipientUserIds: otherMemberIds,
+        plaintext: content,
+      });
+      if (produced) {
+        envelope = produced;
+        insertContent = E2E_PLACEHOLDER;
+      }
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      conversation_id: conversationId,
+      author_id: profile.id,
+      content: insertContent,
+    };
+    if (envelope) {
+      insertPayload.ciphertext = envelope;
+      insertPayload.e2e_version = 1;
+    }
+
     const { data: insertedMessage, error } = await supabase
       .from('direct_messages')
-      .insert({
-        conversation_id: conversationId,
-        author_id: profile.id,
-        content,
-      })
+      .insert(insertPayload)
       .select('id')
       .maybeSingle();
 
@@ -1948,6 +2014,15 @@ export function DirectMessagePage() {
       attachments: [],
     };
     upsertDirectMessage(optimisticMessage);
+    if (envelope) {
+      // Cache the plaintext locally so when the encrypted version comes
+      // back over realtime we don't briefly show the placeholder.
+      setDecryptedById((prev) => {
+        const next = new Map(prev);
+        next.set(String(insertedMessage.id), content);
+        return next;
+      });
+    }
     scrollToBottom('auto');
 
     const activityAtIso = new Date().toISOString();
@@ -2427,7 +2502,7 @@ export function DirectMessagePage() {
               ? 'bg-nyptid-300 text-surface-950 rounded-tr-sm'
               : 'bg-surface-700 text-surface-200 rounded-tl-sm'}`}>
               {msg.content && (
-                <div className="whitespace-pre-wrap break-words">{renderDirectMessageContent(msg.content)}</div>
+                <div className="whitespace-pre-wrap break-words">{renderDirectMessageContent(resolveMessageContent(msg))}</div>
               )}
               {attachments.length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
