@@ -14,3 +14,12 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
+
+[profile.release]
+# Desktop distribution builds should favor startup and download size over a
+# marginal gain in compile speed. Symbols are not useful in the shipped EXE.
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+opt-level = "z"
+panic = "abort"

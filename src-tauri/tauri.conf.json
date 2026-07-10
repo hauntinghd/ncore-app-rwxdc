@@ -31,6 +31,10 @@
     "targets": ["nsis"],
     "icon": ["../electron/assets/ncore-icon.ico"],
     "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "currentUser"
       }
