@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { Plus, Compass, MessageSquare, Settings, Crown, ShoppingBag, UserPlus } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { useAuth } from '../../contexts/AuthContext';
@@ -9,6 +10,21 @@ interface ServerRailProps {
   activeCommunityId?: string;
   onCreateCommunity: () => void;
   mobile?: boolean;
+}
+
+function CommunityIcon({ community }: { community: Community }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const initials = community.name.slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [community.icon_url]);
+
+  if (!community.icon_url || imageFailed) {
+    return <span className="text-[11px] font-bold" aria-label={community.name}>{initials}</span>;
+  }
+
+  return <img src={community.icon_url} alt="" className="h-full w-full object-cover" onError={() => setImageFailed(true)} />;
 }
 
 export function ServerRail({ communities, activeCommunityId, onCreateCommunity, mobile = false }: ServerRailProps) {
@@ -80,11 +96,7 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
                 className={`h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-200 flex items-center justify-center overflow-hidden ${activeCommunityId === community.id ? 'ring-2 ring-nyptid-300 border-nyptid-300/70' : ''}`}
                 title={community.name}
               >
-                {community.icon_url ? (
-                  <img src={community.icon_url} alt={community.name} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="text-[11px] font-bold">{community.name.slice(0, 2).toUpperCase()}</span>
-                )}
+                <CommunityIcon community={community} />
               </button>
             ))}
 
@@ -170,11 +182,7 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
             onClick={() => navigate(`/app/community/${community.id}`)}
             className={`server-icon relative ${activeCommunityId === community.id ? 'active' : ''}`}
           >
-            {community.icon_url ? (
-              <img src={community.icon_url} alt={community.name} className="w-full h-full rounded-inherit object-cover" />
-            ) : (
-              community.name.slice(0, 2).toUpperCase()
-            )}
+            <CommunityIcon community={community} />
             {activeCommunityId === community.id && (
               <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1 h-8 bg-nyptid-300 rounded-r-full" />
             )}

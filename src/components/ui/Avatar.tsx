@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { getInitials, getStatusColor } from '../../lib/utils';
 import type { UserStatus } from '../../lib/types';
 
@@ -27,12 +28,17 @@ const statusSizeClasses = {
 
 export function Avatar({ src, name, size = 'md', status, className = '' }: AvatarProps) {
   const initials = getInitials(name);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [src]);
 
   return (
     <div className={`relative flex-shrink-0 ${className}`}>
       <div className={`${sizeClasses[size]} rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-nyptid-700 to-nyptid-900 font-semibold text-nyptid-200`}>
-        {src ? (
-          <img src={src} alt={name} className="w-full h-full object-cover" />
+        {src && !imageFailed ? (
+          <img src={src} alt="" className="w-full h-full object-cover" onError={() => setImageFailed(true)} />
         ) : (
           <span>{initials}</span>
         )}
