@@ -1,9 +1,20 @@
 {
     "releases": [
         {
-            "version": "11.7.106",
+            "version": "11.7.107",
             "date": "2026-07-10",
             "badge": "Current Build",
+            "improvements": [
+                "Password recovery now accepts the eight-digit email code provided by Supabase."
+            ],
+            "bugFixes": [
+                "Fixed password reset code entry rejecting valid eight-digit codes."
+            ]
+        },
+        {
+            "version": "11.7.106",
+            "date": "2026-07-10",
+            "badge": "Previous",
             "improvements": [
                 "Password recovery now supports secure six-digit email codes instead of relying on a clickable reset link.",
                 "Authenticator-app MFA enrollment and sign-in verification now use Supabase native MFA.",
