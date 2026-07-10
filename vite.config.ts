@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 
 const appVersion = process.env.npm_package_version || '0.0.0';
 const buildTime = new Date().toISOString();
-const isElectronBuild = process.env.NCORE_ELECTRON_BUILD === '1';
+const isDesktopBuild = process.env.NCORE_ELECTRON_BUILD === '1' || process.env.NCORE_DESKTOP_BUILD === '1';
 
 function stampPwaAssets(): Plugin {
   return {
@@ -29,7 +29,7 @@ function stampPwaAssets(): Plugin {
 export default defineConfig({
   // Electron packaged builds need relative assets (file://).
   // Web/PWA builds must use absolute assets so deep links like /app/dm load correctly.
-  base: isElectronBuild ? './' : '/',
+  base: isDesktopBuild ? './' : '/',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_TIME__: JSON.stringify(buildTime),

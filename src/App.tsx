@@ -8,6 +8,7 @@ import { detectWebSurface, type WebSurface } from './lib/webSurface';
 import { readPendingInviteCode } from './lib/inviteLinks';
 import { createDurationTracker, queueRuntimeEvent, reportRuntimeError } from './lib/runtimeTelemetry';
 import { supabase } from './lib/supabase';
+import { isDesktopRuntime } from './lib/desktopRuntime';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
@@ -67,7 +68,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface: WebSurface }) {
+function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: WebSurface }) {
   const location = useLocation();
   const authHash = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
   const isRecoveryCallback = authHash.get('type') === 'recovery' || authHash.has('error');
@@ -80,7 +81,7 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
           element={
             isRecoveryCallback ? (
               <Navigate to={`/reset-password${location.hash}`} replace />
-            ) : isElectron ? (
+            ) : isDesktop ? (
               <Navigate to="/app" replace />
             ) : webSurface === 'app' ? (
               <Navigate to="/app/dm" replace />
@@ -137,27 +138,24 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
 }
 
 export default function App() {
-  const isElectron =
-    typeof window !== 'undefined' &&
-    (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
-  const webSurface = detectWebSurface(isElectron);
+  const isDesktop = isDesktopRuntime();
+  const webSurface = detectWebSurface(isDesktop);
 
-  const Router = isElectron ? HashRouter : BrowserRouter;
+  const Router = isDesktop ? HashRouter : BrowserRouter;
 
   return (
     <Router>
       <AuthProvider>
         <RealtimeBridge />
-        <PwaExperienceBar isElectron={isElectron} />
-        <AppRoutes isElectron={isElectron} webSurface={webSurface} />
+        <PwaExperienceBar isElectron={isDesktop} />
+        <AppRoutes isDesktop={isDesktop} webSurface={webSurface} />
       </AuthProvider>
     </Router>
   );
 }
 
 function RealtimeBridge() {
-  const isElectron =
-    typeof window !== 'undefined' && (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
+  const isDesktop = isDesktopRuntime();
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -238,7 +236,7 @@ function RealtimeBridge() {
 
   // Start/stop realtime listener in main process when running in Electron
   useEffect(() => {
-    if (!isElectron) return;
+    if (!isDesktop) return;
     if (!session) return;
     const token = (session as any).access_token;
     if (!token) return;
@@ -310,24 +308,24 @@ function RealtimeBridge() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isElectron, session]);
+  }, [isDesktop, session]);
 
   useEffect(() => {
-    if (!isElectron || !session || !profile) return;
+    if (!isDesktop || !session || !profile) return;
     try {
       void window.desktopBridge?.realtimeSetStatus(profile.status || 'online');
     } catch (err) {
       console.warn('desktopBridge.realtimeSetStatus failed', err);
     }
-  }, [isElectron, session, profile?.status, profile?.id]);
+  }, [isDesktop, session, profile?.status, profile?.id]);
 
   useEffect(() => {
     queueRuntimeEvent('session_bridge_ready', {
-      is_electron: isElectron,
+      is_desktop: isDesktop,
       has_session: Boolean(session),
       route: `${location.pathname}${location.search}`,
     }, { userId: profile?.id, sampleRate: 0.2 });
-  }, [isElectron, location.pathname, location.search, profile?.id, session]);
+  }, [isDesktop, location.pathname, location.search, profile?.id, session]);
 
   // iOS Safari evicts localStorage for sites not opened in ~7 days (for non-installed
   // origins) and pauses Supabase's auto-refresh while the tab is backgrounded. When
