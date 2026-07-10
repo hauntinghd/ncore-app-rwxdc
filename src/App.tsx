@@ -15,6 +15,7 @@ const LoginPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: 
 const SignupPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.SignupPage })));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
+const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage').then((m) => ({ default: m.MfaChallengePage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
 const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
@@ -36,11 +37,12 @@ const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default:
 const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { user, profile, loading, profileLoading, mfaPending } = useAuth();
   const location = useLocation();
 
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  if (mfaPending && location.pathname !== '/mfa') return <Navigate to="/mfa" state={{ from: location }} replace />;
   if (user && !profileLoading && !profile?.username && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />;
   }
@@ -48,10 +50,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { user, profile, loading, profileLoading, mfaPending } = useAuth();
   const location = useLocation();
 
   if (loading || (user && profileLoading)) return <LoadingScreen />;
+  if (user && mfaPending) return <Navigate to="/mfa" replace />;
   if (user && profile?.username) {
     const params = new URLSearchParams(location.search);
     const inviteCode = String(params.get('invite') || readPendingInviteCode() || '').trim();
@@ -65,13 +68,19 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface: WebSurface }) {
+  const location = useLocation();
+  const authHash = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
+  const isRecoveryCallback = authHash.get('type') === 'recovery' || authHash.has('error');
+
   return (
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route
           path="/"
           element={
-            isElectron ? (
+            isRecoveryCallback ? (
+              <Navigate to={`/reset-password${location.hash}`} replace />
+            ) : isElectron ? (
               <Navigate to="/app" replace />
             ) : webSurface === 'app' ? (
               <Navigate to="/app/dm" replace />
@@ -86,6 +95,7 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/mfa" element={<ProtectedRoute><MfaChallengePage /></ProtectedRoute>} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/invite/:inviteCode" element={<InvitePage />} />
         <Route path="/:inviteCode" element={<InvitePage />} />

@@ -12,6 +12,7 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   profileLoading: boolean;
+  mfaPending: boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signInWithMagicLink: (email: string) => Promise<{ error: Error | null }>;
@@ -22,6 +23,7 @@ interface AuthContextType {
   sendPasswordResetEmail: (email: string) => Promise<{ error: Error | null }>;
   updatePassword: (newPassword: string) => Promise<{ error: Error | null }>;
   resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
+  refreshMfaState: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -89,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [mfaPending, setMfaPending] = useState(false);
   const DEFAULT_DEVICE_TOKEN_KEY = '__ncore_default_device_token_registered';
 
   function getProfileCacheKey(userId: string): string {
@@ -156,6 +159,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function refreshMfaState(): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (error || !data) {
+        setMfaPending(false);
+        return false;
+      }
+      const pending = data.currentLevel === 'aal1' && data.nextLevel === 'aal2';
+      setMfaPending(pending);
+      return pending;
+    } catch {
+      setMfaPending(false);
+      return false;
+    }
+  }
+
   useEffect(() => {
     async function registerDefaultDeviceTokenOnce() {
       try {
@@ -206,10 +225,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         void registerDefaultDeviceTokenOnce();
         if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
+        void refreshMfaState();
       } else {
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        setMfaPending(false);
       }
     });
 
@@ -232,6 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         void registerDefaultDeviceTokenOnce();
         if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
+        void refreshMfaState();
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         queueRuntimeEvent('auth_session_recovered', {
           user_id: session.user.id,
@@ -244,11 +266,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfileLoading(false);
         setLoading(false);
         resetIdentityCache();
+        setMfaPending(false);
       } else if (!session) {
         clearCachedProfile(user?.id);
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        setMfaPending(false);
       }
     });
 
@@ -300,6 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, { sampleRate: 1 });
     } else {
       resetSignInThrottleState();
+      await refreshMfaState();
     }
     return { error: error as Error | null };
   }
@@ -331,7 +356,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: origin ? `${origin}/reset-password` : undefined,
+      // The base origin is generally already on Supabase's redirect allow
+      // list. AppRoutes detects the recovery fragment and forwards it to the
+      // reset screen without losing the one-time token.
+      redirectTo: origin || undefined,
     });
     return { error: error as Error | null };
   }
@@ -376,9 +404,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, session, profile, loading, profileLoading,
+      user, session, profile, loading, profileLoading, mfaPending,
       signUp, signIn, signInWithMagicLink, signOut, updateProfile, refreshProfile,
-      clearSignInThrottle, sendPasswordResetEmail, updatePassword, resendConfirmationEmail,
+      clearSignInThrottle, sendPasswordResetEmail, updatePassword, resendConfirmationEmail, refreshMfaState,
     }}>
       {children}
     </AuthContext.Provider>

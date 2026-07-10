@@ -34,6 +34,7 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
+    "@capacitor/push-notifications": "^8.1.1",
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "@supabase/supabase-js": "^2.57.4",
     "electron-updater": "^6.6.2",

@@ -970,7 +970,7 @@ function humanizeKeyCode(code: string): string {
 }
 
 export function SettingsPage() {
-  const { profile, user, updateProfile, signOut } = useAuth();
+  const { profile, user, updateProfile, signOut, refreshMfaState } = useAuth();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
   const {
     capabilities: growthCapabilities,
@@ -998,6 +998,12 @@ export function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordSaved, setPasswordSaved] = useState(false);
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [totpEnrollment, setTotpEnrollment] = useState<{ factorId: string; qrCode: string; secret: string } | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [totpError, setTotpError] = useState('');
+  const [totpMessage, setTotpMessage] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -1114,6 +1120,11 @@ export function SettingsPage() {
     window.addEventListener('keydown', handleKey, true);
     return () => window.removeEventListener('keydown', handleKey, true);
   }, [capturingPttKeybind]);
+
+  useEffect(() => {
+    if (activeSection !== 'security' || !user) return;
+    void loadTotpFactors();
+  }, [activeSection, user?.id]);
 
   // Hydrate the startup toggles from the Electron main process so they reflect
   // the real OS-level login-item state, not stale localStorage.
@@ -1561,6 +1572,65 @@ export function SettingsPage() {
     setNewPassword('');
     setConfirmPassword('');
     setTimeout(() => setPasswordSaved(false), 3000);
+  }
+
+  async function loadTotpFactors() {
+    const { data, error: factorsError } = await supabase.auth.mfa.listFactors();
+    if (factorsError) {
+      setTotpError(factorsError.message || 'Could not load multi-factor authentication status.');
+      return;
+    }
+    setTotpEnabled(Boolean(data?.totp?.some((factor) => factor.status === 'verified')));
+  }
+
+  async function beginTotpEnrollment() {
+    setTotpError('');
+    setTotpMessage('');
+    setTotpLoading(true);
+    const { data, error: enrollError } = await supabase.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: 'NCore Authenticator',
+    });
+    if (enrollError || !data?.totp?.qr_code || !data.totp.secret) {
+      setTotpError(enrollError?.message || 'Could not start authenticator setup.');
+      setTotpLoading(false);
+      return;
+    }
+    setTotpEnrollment({ factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
+    setTotpCode('');
+    setTotpLoading(false);
+  }
+
+  async function verifyTotpEnrollment() {
+    if (!totpEnrollment || totpCode.trim().length !== 6) {
+      setTotpError('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    setTotpError('');
+    setTotpMessage('');
+    setTotpLoading(true);
+    const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: totpEnrollment.factorId });
+    if (challengeError || !challenge) {
+      setTotpError(challengeError?.message || 'Could not start authenticator verification.');
+      setTotpLoading(false);
+      return;
+    }
+    const { error: verifyError } = await supabase.auth.mfa.verify({
+      factorId: totpEnrollment.factorId,
+      challengeId: challenge.id,
+      code: totpCode.trim(),
+    });
+    if (verifyError) {
+      setTotpError(verifyError.message || 'That code was not accepted.');
+      setTotpLoading(false);
+      return;
+    }
+    setTotpEnrollment(null);
+    setTotpCode('');
+    setTotpEnabled(true);
+    setTotpMessage('Authenticator app enabled. You will be asked for a code when signing in.');
+    await refreshMfaState();
+    setTotpLoading(false);
   }
 
   async function handleSaveServerProfile() {
@@ -3541,6 +3611,9 @@ export function SettingsPage() {
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Two-Factor Authentication</div>
                   <p className="text-sm text-surface-400">Add an extra layer of security to your account. Even if your password is compromised, 2FA prevents unauthorized access.</p>
 
+                  {totpError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{totpError}</div>}
+                  {totpMessage && <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-200">{totpMessage}</div>}
+
                   <div className="space-y-3">
                     <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
                       <div className="flex items-center gap-3">
@@ -3551,18 +3624,25 @@ export function SettingsPage() {
                           <div className="text-sm font-medium text-surface-200">Authenticator App (TOTP)</div>
                           <div className="text-xs text-surface-500 mt-0.5">Use Google Authenticator, Authy, or any TOTP app</div>
                         </div>
-                        <button className="nyptid-btn-primary text-xs px-4 py-2">Enable</button>
+                        {totpEnabled ? (
+                          <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-300">Enabled</span>
+                        ) : (
+                          <button onClick={() => void beginTotpEnrollment()} disabled={totpLoading} className="nyptid-btn-primary text-xs px-4 py-2">
+                            {totpLoading && !totpEnrollment ? 'Starting...' : 'Enable'}
+                          </button>
+                        )}
                       </div>
 
-                      <div className="mt-4 pt-4 border-t border-surface-700/50 space-y-3 hidden">
+                      {totpEnrollment && (
+                      <div className="mt-4 pt-4 border-t border-surface-700/50 space-y-3">
                         <p className="text-xs text-surface-400">Scan this QR code with your authenticator app:</p>
                         <div className="w-48 h-48 mx-auto bg-white rounded-lg p-2 flex items-center justify-center">
-                          <div className="text-surface-800 text-xs text-center">QR Code Placeholder</div>
+                          <img src={totpEnrollment.qrCode} alt="Authenticator app setup QR code" className="w-full h-full" />
                         </div>
                         <div>
                           <label className="text-xs text-surface-400 block mb-1">Or enter this key manually:</label>
                           <code className="block bg-surface-900 rounded-lg px-3 py-2 text-xs text-nyptid-300 font-mono tracking-wider text-center select-all">
-                            XXXX-XXXX-XXXX-XXXX
+                            {totpEnrollment.secret}
                           </code>
                         </div>
                         <div>
@@ -3570,12 +3650,19 @@ export function SettingsPage() {
                           <input
                             type="text"
                             maxLength={6}
+                            value={totpCode}
+                            onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
                             className="nyptid-input text-center text-lg tracking-[0.5em] font-mono"
                             placeholder="000000"
                           />
                         </div>
-                        <button className="nyptid-btn-primary w-full">Verify & Enable</button>
+                        <button onClick={() => void verifyTotpEnrollment()} disabled={totpLoading} className="nyptid-btn-primary w-full">
+                          {totpLoading ? 'Verifying...' : 'Verify & Enable'}
+                        </button>
                       </div>
+                      )}
                     </div>
 
                     <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
@@ -3598,9 +3685,9 @@ export function SettingsPage() {
                         </div>
                         <div className="flex-1">
                           <div className="text-sm font-medium text-surface-200">Recovery Codes</div>
-                          <div className="text-xs text-surface-500 mt-0.5">Backup codes for when you lose access to your 2FA device</div>
+                          <div className="text-xs text-surface-500 mt-0.5">One-time recovery needs a server-verified flow before it can be offered safely.</div>
                         </div>
-                        <button className="nyptid-btn-ghost text-xs px-4 py-2" disabled>Generate</button>
+                        <span className="text-xs text-surface-500">Next security release</span>
                       </div>
                     </div>
                   </div>
@@ -4772,4 +4859,3 @@ export function SettingsPage() {
     </AppShell>
   );
 }
-
