@@ -1,9 +1,21 @@
 {
     "releases": [
         {
-            "version": "11.7.108",
+            "version": "11.7.109",
             "date": "2026-07-10",
             "badge": "Current Build",
+            "improvements": [
+                "NCore now has a visible Check update action in the top bar while the desktop app is open.",
+                "Updates download in the background with live checking and progress states, then offer a restart to install."
+            ],
+            "bugFixes": [
+                "Fixed the desktop update action only appearing after the background updater had already started."
+            ]
+        },
+        {
+            "version": "11.7.108",
+            "date": "2026-07-10",
+            "badge": "Previous",
             "improvements": [
                 "Profiles can safely resume or repeat setup without getting stuck on a partially created account.",
                 "Broken avatars and community icons now fall back to initials instead of showing failed-image text."
