@@ -1,9 +1,22 @@
 {
     "releases": [
         {
-            "version": "11.7.109",
+            "version": "11.7.110",
             "date": "2026-07-10",
             "badge": "Current Build",
+            "improvements": [
+                "Updated the desktop runtime to Electron 40 and modernized the production build toolchain.",
+                "Strengthened local development tooling with current Vite, React plugin, router, and dependency patches."
+            ],
+            "bugFixes": [
+                "Resolved all known npm audit vulnerabilities across shipped and development dependencies.",
+                "Removed outdated WebSocket and dependency-chain security issues from the release build."
+            ]
+        },
+        {
+            "version": "11.7.109",
+            "date": "2026-07-10",
+            "badge": "Previous",
             "improvements": [
                 "NCore now has a visible Check update action in the top bar while the desktop app is open.",
                 "Updates download in the background with live checking and progress states, then offer a restart to install."
