@@ -172,7 +172,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     : false;
   const updateInstallInProgress = installingFromTopbar || updateRuntimeState.installing;
   const updateDownloadInProgress = updateRuntimeState.checking || updateRuntimeState.downloading;
-  const showTopbarUpdateButton = !updateRuntimeState.portable && (updateRuntimeState.ready || updateInstallInProgress || updateDownloadInProgress);
+  const canManuallyCheckForUpdates = Boolean(window.desktopBridge?.downloadLatestUpdate);
+  const showTopbarUpdateButton = canManuallyCheckForUpdates;
 
   function markReleaseUpdatesRead(version = latestReleaseVersion) {
     const normalized = String(version || '').trim();
@@ -606,6 +607,40 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     }
   }
 
+  async function handleCheckForUpdateFromTopbar() {
+    const downloadLatestUpdate = window.desktopBridge?.downloadLatestUpdate;
+    if (!downloadLatestUpdate || updateDownloadInProgress || updateInstallInProgress) return;
+
+    setUpdateRuntimeState((previous) => ({
+      ...previous,
+      checking: true,
+      message: 'Checking for the latest NCore update...',
+    }));
+
+    try {
+      const result = await downloadLatestUpdate();
+      setUpdateRuntimeState((previous) => ({
+        ...previous,
+        portable: Boolean(result?.portable ?? previous.portable),
+        ready: Boolean(result?.ready),
+        checking: Boolean(result?.checking),
+        downloading: Boolean(result?.downloading),
+        installing: Boolean(result?.installing),
+        progress: Number(result?.progress || 0),
+        version: String(result?.currentVersion || previous.version || ''),
+        latestVersion: String(result?.latestVersion || previous.latestVersion || ''),
+        message: String(result?.message || (result?.noUpdate ? 'NCore is already up to date.' : previous.message || 'Checking for updates...')),
+      }));
+    } catch {
+      setUpdateRuntimeState((previous) => ({
+        ...previous,
+        checking: false,
+        downloading: false,
+        message: 'Could not check for updates. Try again.',
+      }));
+    }
+  }
+
   return (
     <>
     <div
@@ -688,8 +723,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         {showTopbarUpdateButton && (
           <button
             type="button"
-            onClick={handleInstallUpdateFromTopbar}
-            disabled={!updateRuntimeState.ready || updateInstallInProgress}
+            onClick={updateRuntimeState.ready ? handleInstallUpdateFromTopbar : handleCheckForUpdateFromTopbar}
+            disabled={updateInstallInProgress || updateDownloadInProgress}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
               updateRuntimeState.ready || updateInstallInProgress
                 ? 'border-green-500/40 bg-green-500/15 text-green-100 hover:bg-green-500/25'
@@ -699,7 +734,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
               ? 'Applying update and restarting NCore...'
               : updateDownloadInProgress
                 ? (updateRuntimeState.message || 'NCore is downloading the latest update in the background.')
-                : 'Apply downloaded update and restart NCore'}
+                : (updateRuntimeState.message || 'Check for and download the latest NCore update')}
           >
             {updateInstallInProgress || updateDownloadInProgress
               ? <RefreshCw size={13} className="animate-spin" />
@@ -711,7 +746,9 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                   ? (updateRuntimeState.downloading
                     ? `Downloading${updateRuntimeState.progress ? ` ${Math.round(updateRuntimeState.progress)}%` : '...'}`
                     : 'Checking...')
-                  : `Update${updateRuntimeState.version ? ` v${updateRuntimeState.version}` : ' Ready'}`}
+                  : updateRuntimeState.message.includes('already up to date')
+                    ? 'Up to date'
+                    : 'Check update'}
             </span>
           </button>
         )}
