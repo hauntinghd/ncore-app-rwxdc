@@ -1,6 +1,34 @@
 {
     "releases": [
         {
+            "version": "11.7.106",
+            "date": "2026-07-10",
+            "badge": "Current Build",
+            "improvements": [
+                "Password recovery now supports secure six-digit email codes instead of relying on a clickable reset link.",
+                "Authenticator-app MFA enrollment and sign-in verification now use Supabase native MFA.",
+                "Desktop update delivery now includes the Capacitor push-notifications dependency required for successful production builds."
+            ],
+            "bugFixes": [
+                "Fixed recovery callbacks that could leave users on a blank screen after a reset email.",
+                "Fixed the missing Capacitor push-notifications package that blocked production builds."
+            ]
+        },
+        {
+            "version": "11.7.105",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Password recovery now supports secure six-digit email codes instead of relying on a clickable reset link.",
+                "Authenticator-app MFA enrollment and sign-in verification now use Supabase native MFA.",
+                "Desktop update delivery now includes the Capacitor push-notifications dependency required for successful production builds."
+            ],
+            "bugFixes": [
+                "Fixed recovery callbacks that could leave users on a blank screen after a reset email.",
+                "Fixed the missing Capacitor push-notifications package that blocked production builds."
+            ]
+        },
+        {
             "version": "11.7.104",
             "date": "2026-04-18",
             "badge": "Latest Build",
