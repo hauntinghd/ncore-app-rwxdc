@@ -1,6 +1,6 @@
 # NCore password-recovery code email setup
 
-NCore's `/forgot-password` screen verifies six-digit recovery codes with
+NCore's `/forgot-password` screen verifies eight-digit recovery codes with
 `supabase.auth.verifyOtp({ email, token, type: 'recovery' })`.
 
 To send that code instead of an easily consumed magic link, change the
@@ -12,7 +12,7 @@ To send that code instead of an easily consumed magic link, change the
 
 ```html
 <h2>Reset your NCore password</h2>
-<p>Enter this code in NCore to reset your password:</p>
+<p>Enter this 8-digit code in NCore to reset your password:</p>
 <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px;">{{ .Token }}</p>
 <p>This code expires shortly. If you did not request it, you can ignore this email.</p>
 ```

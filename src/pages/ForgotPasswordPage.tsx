@@ -33,8 +33,8 @@ export function ForgotPasswordPage() {
   async function handleCodeSubmit(event: React.FormEvent) {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
-    if (code.trim().length !== 6) {
-      setError('Enter the 6-digit code from the reset email.');
+    if (!/^\d{8}$/.test(code.trim())) {
+      setError('Enter the 8-digit code from the reset email.');
       return;
     }
     setError('');
@@ -53,7 +53,7 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <AuthShell title="Reset your password" subtitle={sent || codeEntry ? 'Enter the 6-digit code we sent to your email.' : 'We’ll email you a 6-digit code to reset your password.'}>
+    <AuthShell title="Reset your password" subtitle={sent || codeEntry ? 'Enter the 8-digit code we sent to your email.' : 'We’ll email you an 8-digit code to reset your password.'}>
       <form className="space-y-4" onSubmit={sent || codeEntry ? handleCodeSubmit : handleSubmit}>
         {error && (
           <div className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200 flex items-start gap-2">
@@ -65,7 +65,7 @@ export function ForgotPasswordPage() {
           <div className="rounded-lg border border-green-500/35 bg-green-500/10 px-3 py-2 text-sm text-green-200 flex items-start gap-2">
             <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
             <span>
-              If an account exists for <strong>{email}</strong>, a 6-digit reset code is on its way. Check your inbox (and spam), then enter it below.
+              If an account exists for <strong>{email}</strong>, an 8-digit reset code is on its way. Check your inbox (and spam), then enter it below.
             </span>
           </div>
         )}
@@ -96,10 +96,10 @@ export function ForgotPasswordPage() {
             <span className="text-sm text-surface-300">Reset code</span>
             <input
               value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 8))}
               inputMode="numeric"
               autoComplete="one-time-code"
-              placeholder="000000"
+              placeholder="00000000"
               className="nyptid-input mt-1 text-center text-xl tracking-[0.45em] font-mono"
               required
               autoFocus
