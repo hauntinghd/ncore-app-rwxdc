@@ -1,9 +1,22 @@
 {
     "releases": [
         {
-            "version": "11.7.107",
+            "version": "11.7.108",
             "date": "2026-07-10",
             "badge": "Current Build",
+            "improvements": [
+                "Profiles can safely resume or repeat setup without getting stuck on a partially created account.",
+                "Broken avatars and community icons now fall back to initials instead of showing failed-image text."
+            ],
+            "bugFixes": [
+                "Fixed profile setup relying on a one-time insert instead of a retry-safe upsert.",
+                "Fixed remote image failures degrading the Direct Messages and community navigation UI."
+            ]
+        },
+        {
+            "version": "11.7.107",
+            "date": "2026-07-10",
+            "badge": "Previous",
             "improvements": [
                 "Password recovery now accepts the eight-digit email code provided by Supabase."
             ],
