@@ -28,6 +28,18 @@ export function installTauriDesktopBridge(): void {
   if (!isTauriRuntime() || typeof window === 'undefined' || window.desktopBridge) return;
 
   window.desktopBridge = {
+    async authStorageGetItem(key: string) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke<DesktopAuthStorageResult>('secure_storage_get', { key });
+    },
+    async authStorageSetItem(key: string, value: string) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke<{ ok: boolean; message?: string }>('secure_storage_set', { key, value });
+    },
+    async authStorageRemoveItem(key: string) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return invoke<{ ok: boolean; message?: string }>('secure_storage_remove', { key });
+    },
     async openExternalUrl(url: string) {
       try {
         const { openUrl } = await import('@tauri-apps/plugin-opener');

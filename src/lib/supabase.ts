@@ -39,8 +39,11 @@ const desktopAuthStorage = {
     try {
       const legacyValue = window.localStorage.getItem(key);
       if (typeof legacyValue === 'string' && legacyValue.length > 0) {
-        await bridge.authStorageSetItem(key, legacyValue);
-        return legacyValue;
+        const migrated = await bridge.authStorageSetItem(key, legacyValue);
+        if (migrated?.ok) {
+          window.localStorage.removeItem(key);
+          return legacyValue;
+        }
       }
     } catch {
       // ignore migration fallback failures
@@ -52,7 +55,13 @@ const desktopAuthStorage = {
     const bridge = window.desktopBridge;
     try {
       if (bridge?.authStorageSetItem) {
-        await bridge.authStorageSetItem(key, value);
+        const result = await bridge.authStorageSetItem(key, value);
+        if (result?.ok) {
+          // Desktop sessions belong in the OS credential vault. Keeping a
+          // duplicate in WebView localStorage would defeat that protection.
+          window.localStorage.removeItem(key);
+          return;
+        }
       }
     } catch {
       // best effort persistence
@@ -68,7 +77,11 @@ const desktopAuthStorage = {
     const bridge = window.desktopBridge;
     try {
       if (bridge?.authStorageRemoveItem) {
-        await bridge.authStorageRemoveItem(key);
+        const result = await bridge.authStorageRemoveItem(key);
+        if (result?.ok) {
+          window.localStorage.removeItem(key);
+          return;
+        }
       }
     } catch {
       // best effort removal
