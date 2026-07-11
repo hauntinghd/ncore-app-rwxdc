@@ -9,6 +9,8 @@ and removing a large, independent browser-update surface.
 - A Tauri v2 Windows shell with one-instance behavior.
 - Native external-link handling through the OS opener.
 - Native notification and durable-store plugins, ready for the renderer ports.
+- Supabase desktop sessions stored in Windows Credential Manager, rather than
+  WebView localStorage.
 - Desktop runtime detection, so the desktop uses hash routing and does not
   register the browser PWA service worker.
 
@@ -22,9 +24,11 @@ background behavior.
 
 ## Remaining parity work
 
-- Move auth persistence to Tauri Stronghold rather than browser storage.
 - Publish signed Tauri updater metadata and migrate the existing update feed
   from `latest.yml` to Tauri's signed updater manifest.
+- Establish a protected release-signing key and a desktop artifact host. The
+  current web updater host has a 100 MB per-file limit while the first native
+  NSIS package is 111 MB, so it cannot be used unchanged.
 - Port the custom desktop capture source picker; until then, use WebView2's
   normal `getDisplayMedia` chooser.
 - Port background realtime notification delivery and streamer-mode controls.
