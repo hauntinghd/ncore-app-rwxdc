@@ -34,8 +34,12 @@ android/.gradle
 public/updates/*.exe
 public/updates/*.blockmap
 public/updates/*.apk
+public/updates/tauri/*.exe
+public/updates/tauri/*.sig
 
 # Local scratch/debug artifacts
+test-results
+playwright-report
 .bolt
 .codex_tmp
 tmp_*
@@ -47,6 +51,8 @@ deploy/rnnoise/build
 # Local Rust/Tauri build output and generated schemas
 src-tauri/target/
 src-tauri/gen/
+public-tauri/
+dist-tauri/
 
 # Sensitive deployment helpers (password hashes, raw secrets) MUST stay local
 deploy/migrate_passwords*.sql
