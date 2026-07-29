@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
   Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, Volume2, VolumeX, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
+import { MessageSearchPanel } from '../chat/MessageSearchPanel';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -131,6 +132,12 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const callSession = useDirectCallShellState();
   const useMainProcessDesktopNotifications = typeof window !== 'undefined' && Boolean(window.desktopBridge?.realtimeStart);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  // Scope search to the community the user is looking at, when there is one.
+  const activeCommunityIdFromPath = useMemo(() => {
+    const match = /^\/app\/community\/([0-9a-f-]{36})/i.exec(location.pathname);
+    return match ? match[1] : null;
+  }, [location.pathname]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -764,12 +771,17 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           <input
             type="text"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search..."
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              if (event.target.value) setShowSearchPanel(true);
+            }}
+            onFocus={() => setShowSearchPanel(true)}
+            placeholder="Search messages..."
+            aria-label="Search messages"
             className="w-48 rounded-lg border border-surface-700 bg-surface-950 py-1.5 pr-4 pl-9 text-sm text-surface-300 placeholder-surface-600 transition-all focus:border-nyptid-300 focus:outline-none"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute top-1/2 right-2 -translate-y-1/2 text-surface-500 hover:text-surface-300">
+            <button onClick={() => setSearchQuery('')} aria-label="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 text-surface-500 hover:text-surface-300">
               <X size={14} />
             </button>
           )}
@@ -982,6 +994,13 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           </span>
         </div>
       )}
+
+      <MessageSearchPanel
+        isOpen={showSearchPanel}
+        onClose={() => setShowSearchPanel(false)}
+        communityId={activeCommunityIdFromPath}
+        initialQuery={searchQuery}
+      />
     </>
   );
 }

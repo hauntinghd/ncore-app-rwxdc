@@ -1,5 +1,5 @@
 import { memo, useCallback, useState, useEffect, useId, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   BellOff,
   BellRing,
@@ -48,6 +48,8 @@ interface MessageGroupProps {
   onOpenContextMenu: (event: ReactMouseEvent, message: Message) => void;
   currentUserId?: string;
   canModerateMessages?: boolean;
+  /** Message to flash after a jump from search or a mention. */
+  highlightMessageId?: string | null;
 }
 
 interface ChatMember {
@@ -90,6 +92,7 @@ function MessageGroup({
   onOpenContextMenu,
   currentUserId,
   canModerateMessages = false,
+  highlightMessageId = null,
 }: MessageGroupProps) {
   const [showEmojiFor, setShowEmojiFor] = useState<string | null>(null);
   const first = messages[0];
@@ -117,7 +120,13 @@ function MessageGroup({
         {messages.map(msg => (
           <div
             key={msg.id}
-            className="relative group/msg"
+            id={`message-${msg.id}`}
+            data-message-id={msg.id}
+            className={`relative group/msg ${
+              highlightMessageId === msg.id
+                ? '-mx-2 rounded-lg bg-nyptid-300/10 px-2 ring-1 ring-nyptid-300/40'
+                : ''
+            }`}
             onContextMenu={(event) => onOpenContextMenu(event, msg)}
           >
             <div className="text-sm text-surface-300 leading-relaxed break-words">
@@ -351,6 +360,9 @@ async function insertNotificationsWithRetry(rows: any[]) {
 
 export function ChatPage() {
   const { communityId, channelId } = useParams<{ communityId: string; channelId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const jumpToMessageId = searchParams.get('message');
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const { profile } = useAuth();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
@@ -448,6 +460,29 @@ export function ChatPage() {
     [members, profile],
   );
   const messageGroups = useMemo(() => groupMessages(messages), [messages]);
+
+  // Jump-to-message, used by search results and mention links. The target has
+  // to already be in the loaded window; if it is older than that, we leave the
+  // param in place rather than silently scrolling to the wrong place.
+  useEffect(() => {
+    if (!jumpToMessageId || loading) return;
+    if (!messages.some((message) => message.id === jumpToMessageId)) return;
+
+    const node = document.getElementById(`message-${jumpToMessageId}`);
+    if (!node) return;
+
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedMessageId(jumpToMessageId);
+
+    // Drop the param so a refresh or a later scroll does not re-trigger it.
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('message');
+    setSearchParams(nextParams, { replace: true });
+
+    const timer = setTimeout(() => setHighlightedMessageId(null), 2400);
+    return () => clearTimeout(timer);
+  }, [jumpToMessageId, loading, messages, searchParams, setSearchParams]);
+
   const mentionTargets = useMemo(() => {
     const deduped = new Map<string, {
       id: string;
@@ -1144,10 +1179,12 @@ export function ChatPage() {
         onOpenContextMenu={openMessageContextMenu}
         currentUserId={profile?.id}
         canModerateMessages={canModerateMessages}
+        highlightMessageId={highlightedMessageId}
       />
     ))
   ), [
     canModerateMessages,
+    highlightedMessageId,
     handleDelete,
     handleEditSelect,
     handleReact,
