@@ -1,6 +1,7 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, Suspense, lazy, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CustomEmojiProvider } from './contexts/CustomEmojiContext';
 import { LoadingScreen } from './components/ui/Spinner';
 import { probeRunPodBackend } from './lib/runpod';
 import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
@@ -145,9 +146,11 @@ export default function App() {
   return (
     <Router>
       <AuthProvider>
-        <RealtimeBridge />
-        <PwaExperienceBar isElectron={isDesktop} />
-        <AppRoutes isDesktop={isDesktop} webSurface={webSurface} />
+        <CustomEmojiProvider>
+          <RealtimeBridge />
+          <PwaExperienceBar isElectron={isDesktop} />
+          <AppRoutes isDesktop={isDesktop} webSurface={webSurface} />
+        </CustomEmojiProvider>
       </AuthProvider>
     </Router>
   );

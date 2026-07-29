@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Copy, Palette, Plus, Save, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { CustomEmojiSection } from '../components/community/CustomEmojiSection';
 import { CustomRolesSection } from '../components/community/CustomRolesSection';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -1156,6 +1157,8 @@ function buildInviteLink(code: string): string {
           </div>
 
           <CustomRolesSection communityId={communityId ?? ''} canManage={isAdmin} />
+
+          <CustomEmojiSection communityId={communityId ?? ''} canManage={isAdmin} />
 
           <div className="nyptid-card p-5 border border-red-500/30">
             <div className="flex items-center gap-2 mb-3">

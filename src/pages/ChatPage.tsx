@@ -36,7 +36,15 @@ import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityS
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
-import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
+import { formatFileSize, formatMessageTime, formatShortTime } from '../lib/utils';
+import { EmojiPicker, ReactionEmoji } from '../components/chat/EmojiPicker';
+import { useCustomEmojis } from '../contexts/CustomEmojiContext';
+import {
+  filterEmojiSuggestions,
+  getActiveEmojiQuery,
+  insertEmojiToken,
+  type CustomEmoji,
+} from '../lib/customEmoji';
 
 interface MessageGroupProps {
   messages: Message[];
@@ -50,6 +58,8 @@ interface MessageGroupProps {
   canModerateMessages?: boolean;
   /** Message to flash after a jump from search or a mention. */
   highlightMessageId?: string | null;
+  /** Sorts this community's custom emoji first in the reaction picker. */
+  communityId?: string | null;
 }
 
 interface ChatMember {
@@ -93,6 +103,7 @@ function MessageGroup({
   currentUserId,
   canModerateMessages = false,
   highlightMessageId = null,
+  communityId = null,
 }: MessageGroupProps) {
   const [showEmojiFor, setShowEmojiFor] = useState<string | null>(null);
   const first = messages[0];
@@ -181,7 +192,7 @@ function MessageGroup({
                     onClick={() => onReact(msg.id, emoji)}
                     className="flex items-center gap-1 px-2 py-0.5 bg-surface-700 hover:bg-surface-600 rounded-full text-xs transition-colors"
                   >
-                    {emoji} <span className="text-surface-300">{count}</span>
+                    <ReactionEmoji value={emoji} /> <span className="text-surface-300">{count}</span>
                   </button>
                 ))}
               </div>
@@ -236,16 +247,14 @@ function MessageGroup({
             </div>
 
             {showEmojiFor === msg.id && (
-              <div className="flex flex-wrap gap-1 mt-2 p-2 bg-surface-800 border border-surface-700 rounded-xl w-fit shadow-xl z-20">
-                {EMOJI_LIST.map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={() => { onReact(msg.id, emoji); setShowEmojiFor(null); }}
-                    className="w-8 h-8 flex items-center justify-center hover:bg-surface-700 rounded-lg text-lg transition-colors"
-                  >
-                    {emoji}
-                  </button>
-                ))}
+              <div className="relative z-20 mt-2 w-fit">
+                <EmojiPicker
+                  communityId={communityId}
+                  onSelect={(emoji) => {
+                    onReact(msg.id, emoji);
+                    setShowEmojiFor(null);
+                  }}
+                />
               </div>
             )}
           </div>
@@ -360,6 +369,7 @@ async function insertNotificationsWithRetry(rows: any[]) {
 
 export function ChatPage() {
   const { communityId, channelId } = useParams<{ communityId: string; channelId: string }>();
+  const { emojis: usableEmojis } = useCustomEmojis();
   const [searchParams, setSearchParams] = useSearchParams();
   const jumpToMessageId = searchParams.get('message');
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
@@ -400,6 +410,7 @@ export function ChatPage() {
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [mentionSuggestionIndex, setMentionSuggestionIndex] = useState(0);
+  const [emojiSuggestionIndex, setEmojiSuggestionIndex] = useState(0);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -515,6 +526,17 @@ export function ChatPage() {
     () => (activeMentionQuery ? buildMentionSuggestions(mentionTargets, activeMentionQuery.query) : []),
     [activeMentionQuery, mentionTargets],
   );
+  const activeEmojiQuery = useMemo(
+    () => getActiveEmojiQuery(input, composerSelectionStart),
+    [input, composerSelectionStart],
+  );
+  const emojiSuggestions = useMemo(
+    () => (activeEmojiQuery ? filterEmojiSuggestions(usableEmojis, activeEmojiQuery.query) : []),
+    [activeEmojiQuery, usableEmojis],
+  );
+  useEffect(() => {
+    setEmojiSuggestionIndex(0);
+  }, [activeEmojiQuery?.query, activeEmojiQuery?.start, channelId]);
 
   useEffect(() => {
     setMentionSuggestionIndex(0);
@@ -1132,6 +1154,19 @@ export function ChatPage() {
     });
   }, [activeMentionQuery, input]);
 
+  const commitEmojiSuggestion = useCallback((emoji: CustomEmoji) => {
+    if (!activeEmojiQuery) return;
+    const next = insertEmojiToken(input, activeEmojiQuery, emoji);
+    setInput(next.value);
+    requestAnimationFrame(() => {
+      const target = inputRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(next.caretPosition, next.caretPosition);
+      setComposerSelectionStart(next.caretPosition);
+    });
+  }, [activeEmojiQuery, input]);
+
   const handleComposerChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = event.target.value.slice(0, maxMessageLength);
     setInput(nextValue);
@@ -1139,6 +1174,23 @@ export function ChatPage() {
   }, [maxMessageLength]);
 
   function handleKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (activeEmojiQuery && emojiSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setEmojiSuggestionIndex((prev) => (prev + 1) % emojiSuggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setEmojiSuggestionIndex((prev) => (prev - 1 + emojiSuggestions.length) % emojiSuggestions.length);
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        commitEmojiSuggestion(emojiSuggestions[emojiSuggestionIndex] || emojiSuggestions[0]);
+        return;
+      }
+    }
     if (activeMentionQuery && mentionSuggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -1180,10 +1232,12 @@ export function ChatPage() {
         currentUserId={profile?.id}
         canModerateMessages={canModerateMessages}
         highlightMessageId={highlightedMessageId}
+        communityId={communityId}
       />
     ))
   ), [
     canModerateMessages,
+    communityId,
     highlightedMessageId,
     handleDelete,
     handleEditSelect,
@@ -1350,6 +1404,34 @@ export function ChatPage() {
             </div>
           )}
           <div className="relative">
+            {activeEmojiQuery && emojiSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 shadow-2xl z-20">
+                <div className="border-b border-surface-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-surface-500">
+                  Custom emoji
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {emojiSuggestions.map((emoji, index) => (
+                    <button
+                      key={`emoji-${emoji.id}`}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        commitEmojiSuggestion(emoji);
+                      }}
+                      className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                        index === emojiSuggestionIndex
+                          ? 'bg-nyptid-300/10 text-surface-100'
+                          : 'text-surface-300 hover:bg-surface-800'
+                      }`}
+                    >
+                      <img src={emoji.imageUrl} alt="" className="h-6 w-6 object-contain" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm">:{emoji.name}:</span>
+                      <span className="truncate text-[11px] text-surface-500">{emoji.communityName}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {activeMentionQuery && mentionSuggestions.length > 0 && (
               <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 shadow-2xl z-20">
                 <div className="border-b border-surface-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-surface-500">

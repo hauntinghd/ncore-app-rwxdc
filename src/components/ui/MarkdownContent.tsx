@@ -1,5 +1,7 @@
 import { Fragment, memo, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { parseMarkdown, type MarkdownNode } from '../../lib/markdown';
+import { CUSTOM_EMOJI_TOKEN, isEmojiOnly, type CustomEmoji } from '../../lib/customEmoji';
+import { useCustomEmojis } from '../../contexts/CustomEmojiContext';
 
 interface MarkdownContentProps {
   content: string;
@@ -33,6 +35,70 @@ function isSafeHref(href: string): boolean {
 interface RenderState {
   renderMention: (text: string) => ReactNode;
   onLinkClick?: MarkdownContentProps['onLinkClick'];
+  emojiById: Map<string, CustomEmoji>;
+  /** Emoji-only messages render large, the way Discord does. */
+  jumbo: boolean;
+}
+
+/**
+ * Replace `<:name:id>` tokens inside a text run with images.
+ *
+ * This runs on text nodes rather than in the markdown parser, so emoji work
+ * inside bold, blockquotes, and links, but stay literal inside code spans and
+ * fenced blocks — where a token is almost certainly being discussed, not used.
+ */
+function renderTextWithEmoji(value: string, state: RenderState, key: string): ReactNode {
+  CUSTOM_EMOJI_TOKEN.lastIndex = 0;
+  if (!CUSTOM_EMOJI_TOKEN.test(value)) return <Fragment key={key}>{value}</Fragment>;
+
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let index = 0;
+
+  CUSTOM_EMOJI_TOKEN.lastIndex = 0;
+  let match = CUSTOM_EMOJI_TOKEN.exec(value);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      parts.push(<Fragment key={`${key}-t${index}`}>{value.slice(lastIndex, match.index)}</Fragment>);
+    }
+
+    const [token, name, id] = match;
+    const emoji = state.emojiById.get(id);
+    const size = state.jumbo ? 'h-11 w-11' : 'h-[1.375em] w-[1.375em]';
+
+    if (emoji) {
+      parts.push(
+        <img
+          key={`${key}-e${index}`}
+          src={emoji.imageUrl}
+          alt={`:${name}:`}
+          title={`:${name}:`}
+          loading="lazy"
+          draggable={false}
+          className={`inline-block ${size} object-contain align-text-bottom`}
+        />,
+      );
+    } else {
+      // Emoji from a community the viewer is not in. Show the readable name
+      // rather than a broken image or the raw token.
+      parts.push(
+        <span key={`${key}-e${index}`} className="text-surface-400" title="Emoji from another community">
+          :{name}:
+        </span>,
+      );
+    }
+
+    lastIndex = match.index + token.length;
+    index += 1;
+    match = CUSTOM_EMOJI_TOKEN.exec(value);
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(<Fragment key={`${key}-t${index}`}>{value.slice(lastIndex)}</Fragment>);
+  }
+
+  return <Fragment key={key}>{parts}</Fragment>;
 }
 
 function renderNodes(nodes: MarkdownNode[], state: RenderState, keyPrefix: string): ReactNode[] {
@@ -40,7 +106,7 @@ function renderNodes(nodes: MarkdownNode[], state: RenderState, keyPrefix: strin
     const key = `${keyPrefix}-${index}`;
     switch (node.type) {
       case 'text':
-        return <Fragment key={key}>{node.value}</Fragment>;
+        return renderTextWithEmoji(node.value, state, key);
       case 'mention':
         return <Fragment key={key}>{state.renderMention(node.value)}</Fragment>;
       case 'softbreak':
@@ -166,7 +232,9 @@ export const MarkdownContent = memo(function MarkdownContent({
   onLinkClick,
 }: MarkdownContentProps) {
   const tree = useMemo(() => parseMarkdown(content), [content]);
-  const rendered = renderNodes(tree, { renderMention, onLinkClick }, 'm');
+  const { byId: emojiById } = useCustomEmojis();
+  const jumbo = useMemo(() => isEmojiOnly(content), [content]);
+  const rendered = renderNodes(tree, { renderMention, onLinkClick, emojiById, jumbo }, 'm');
   return (
     <span className={className} style={{ whiteSpace: 'pre-wrap', ...style }}>
       {rendered}
