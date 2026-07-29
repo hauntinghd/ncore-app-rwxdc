@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.110",
+  "version": "11.7.116",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "vite",
     "audio:assets:sync": "node scripts/sync-ai-denoiser-assets.cjs",
-    "build": "npm run audio:assets:sync && vite build",
+    "audio:voice-cues": "node scripts/generate-voice-cues.cjs",
+    "build": "npm run audio:assets:sync && npm run audio:voice-cues && vite build",
     "build:electron:web": "npm run audio:assets:sync && set NCORE_ELECTRON_BUILD=1&& vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -26,8 +27,9 @@
     "version:bump": "node scripts/bump-version.cjs patch",
     "build:exe": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false",
     "build:exe:portable": "npm run icons:sync && npm run build:electron:web && electron-builder --win portable --x64 -c.win.signAndEditExecutable=false",
-    "build:tauri:web": "npm run audio:assets:sync && set NCORE_DESKTOP_BUILD=1&& vite build",
+    "build:tauri:web": "npm run audio:assets:sync && npm run audio:voice-cues && node scripts/prepare-tauri-public.cjs && set NCORE_DESKTOP_BUILD=1&& vite build",
     "build:tauri": "npm run icons:sync && tauri build",
+    "build:tauri:release": "npm run version:bump && npm run build:tauri && node scripts/sync-tauri-update-feed.cjs",
     "build:exe:auto:nobump": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "build:exe:auto": "npm run version:bump && npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "release:web": "node scripts/release-web.cjs",

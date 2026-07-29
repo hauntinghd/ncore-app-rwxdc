@@ -1,0 +1,11 @@
+{
+  "version": "11.7.116",
+  "notes": "NCore 11.7.116: restores DM and member-community visibility, hides Check update until a signed release exists, and replaces weak voice toggle tones with dedicated mute and deafen cues.",
+  "pub_date": "2026-07-11T17:56:03.710Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRWUJRUUYrZzVEMksvMWZHV0NWZmcyQVB5eDl5blVMejJyTnlCeVBXa21mQ3BjN1VEVUtWeEdrZ1V3MVVHWmd0ZFFwNGVFWU1GS1BQTEllTlFkb2hEQmFaU3JDTEs5b1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNzkyNTYzCWZpbGU6TkNvcmVfMTEuNy4xMTZfeDY0LXNldHVwLmV4ZQpSdkFuWVNVV1N3VEVFUDM0ZnRmSGNiYk9hOE11Z3dzcW1KcUp6dy9vb3FWQWh0K3dMVGlndTdFZElyWUtndnRuVjlHaDhid1VkaDBONDh2WmNsMkVDZz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.116_x64-setup.exe"
+    }
+  }
+}

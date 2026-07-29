@@ -27,6 +27,10 @@ export function isDesktopRuntime(): boolean {
 export function installTauriDesktopBridge(): void {
   if (!isTauriRuntime() || typeof window === 'undefined' || window.desktopBridge) return;
 
+  let updaterState: DesktopUpdateRuntimeState = { ok: true, message: 'Ready to check for updates.' };
+  let pendingUpdate: Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater')['check']>> | null = null;
+  const emitUpdate = () => undefined;
+
   window.desktopBridge = {
     async authStorageGetItem(key: string) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -47,6 +51,36 @@ export function installTauriDesktopBridge(): void {
         return { ok: true };
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : 'Could not open link.' };
+      }
+    },
+    async getUpdateRuntimeState() { return updaterState; },
+    async downloadLatestUpdate() {
+      try {
+        updaterState = { ok: true, checking: true, message: 'Checking for a signed NCore update...' };
+        const { check } = await import('@tauri-apps/plugin-updater');
+        const update = await check();
+        if (!update) {
+          updaterState = { ok: true, message: 'NCore is up to date.' };
+          return updaterState;
+        }
+        pendingUpdate = update;
+        updaterState = { ok: true, ready: true, latestVersion: update.version, message: `NCore ${update.version} is ready to install.` };
+        emitUpdate();
+        return updaterState;
+      } catch (error) {
+        updaterState = { ok: false, message: error instanceof Error ? error.message : 'Could not check for an update.' };
+        return updaterState;
+      }
+    },
+    async installDownloadedUpdate() {
+      if (!pendingUpdate) return { ok: false, message: 'Check for an update first.' };
+      try {
+        updaterState = { ...updaterState, ready: false, installing: true, message: 'Installing signed NCore update...' };
+        await pendingUpdate.downloadAndInstall();
+        return { ok: true };
+      } catch (error) {
+        updaterState = { ok: false, message: error instanceof Error ? error.message : 'Could not install the update.' };
+        return { ok: false, message: updaterState.message };
       }
     },
   } as Window['desktopBridge'];

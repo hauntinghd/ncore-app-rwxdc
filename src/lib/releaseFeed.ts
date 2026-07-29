@@ -17,6 +17,11 @@ export interface MobileLatestEntry {
   updatedAt?: string;
 }
 
+export interface NativeDesktopLatestEntry {
+  version: string;
+  url: string;
+}
+
 function clean(value: unknown): string {
   return String(value || '').trim().replace(/^['"]|['"]$/g, '');
 }
@@ -296,6 +301,26 @@ export async function fetchLatestInstallerAssetPath(feedBase: string): Promise<s
   }
 
   return '';
+}
+
+/**
+ * The public download button must follow the native Tauri updater contract,
+ * not the legacy Electron latest.yml feed. The latter can point at an older
+ * installer even after a newer signed desktop release has shipped.
+ */
+export async function fetchLatestNativeDesktopInstaller(feedBase: string): Promise<NativeDesktopLatestEntry | null> {
+  const normalizedBase = normalizeUpdateFeedBase(feedBase, DEFAULT_UPDATE_FEED_URL);
+  try {
+    const response = await fetch(`${normalizedBase}/tauri/latest.json?ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const version = clean(payload?.version);
+    const url = clean(payload?.platforms?.['windows-x86_64']?.url);
+    if (!version || !/^https:\/\//i.test(url)) return null;
+    return { version, url };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchLatestMobileInstaller(feedBase: string): Promise<MobileLatestEntry | null> {

@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 const appVersion = process.env.npm_package_version || '0.0.0';
 const buildTime = new Date().toISOString();
 const isDesktopBuild = process.env.NCORE_ELECTRON_BUILD === '1' || process.env.NCORE_DESKTOP_BUILD === '1';
+const isTauriBuild = process.env.NCORE_DESKTOP_BUILD === '1';
 
 function stampPwaAssets(): Plugin {
   return {
@@ -30,6 +31,7 @@ export default defineConfig({
   // Electron packaged builds need relative assets (file://).
   // Web/PWA builds must use absolute assets so deep links like /app/dm load correctly.
   base: isDesktopBuild ? './' : '/',
+  publicDir: isTauriBuild ? 'public-tauri' : 'public',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_TIME__: JSON.stringify(buildTime),
@@ -39,6 +41,7 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   build: {
+    outDir: isTauriBuild ? 'dist-tauri' : 'dist',
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -65,14 +68,6 @@ export default defineConfig({
             if (id.includes('jszip')) {
               return 'vendor-jszip';
             }
-          }
-          // Split RTC abstraction into its own chunk (loaded on demand)
-          if (id.includes('src/lib/rtc/')) {
-            return 'rtc-core';
-          }
-          // Split crypto into its own chunk
-          if (id.includes('src/lib/crypto/')) {
-            return 'crypto';
           }
           return undefined;
         },
