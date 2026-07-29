@@ -24,6 +24,7 @@ import { SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
+import { SafetyNumberBadge } from '../components/chat/SafetyNumberBadge';
 import { trackGrowthEvent } from '../lib/growthEvents';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { supabase } from '../lib/supabase';
@@ -3511,6 +3512,12 @@ export function DirectMessagePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {!activeConversation.is_group && (
+                      <SafetyNumberBadge
+                        peerUserId={dmMentionTargets[0]?.id ?? null}
+                        peerName={getConversationName(activeConversation)}
+                      />
+                    )}
                     <button
                       onClick={() => startCall(false)}
                       className="w-9 h-9 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"

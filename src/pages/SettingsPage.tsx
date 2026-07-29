@@ -54,6 +54,7 @@ import {
 import { promptPwaInstall } from '../lib/pwaRuntime';
 import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
 import { resolveGrowthSourceChannel } from '../lib/growthEvents';
+import { E2EDevicesSection } from '../components/community/E2EDevicesSection';
 
 type SectionId =
   | 'my-account'
@@ -3692,6 +3693,8 @@ export function SettingsPage() {
                     </div>
                   </div>
                 </div>
+
+                <E2EDevicesSection userId={profile?.id ?? ''} />
 
                 <div className="nyptid-card p-6">
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Active Sessions</div>
