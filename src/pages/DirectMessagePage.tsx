@@ -43,8 +43,13 @@ import {
 } from '../lib/mentions';
 import { MarkdownContent } from '../components/ui/MarkdownContent';
 import {
+  type AttachmentCipherEnvelope,
+  E2E_VERSION,
+  E2ERequiredError,
   E2E_PLACEHOLDER,
+  decryptAttachmentFromConversation,
   decryptFromConversation,
+  encryptAttachmentForConversation,
   encryptForConversation,
   isE2EEnabled,
   type ConversationCipherEnvelope,
@@ -77,6 +82,16 @@ interface ActiveConversationCall {
   expiresAt: string | null;
   video: boolean;
   participantNames: string[];
+}
+
+interface PreparedDmAttachmentUpload {
+  originalFile: File;
+  uploadBody: Blob | File;
+  storageFileName: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  encryptionMetadata: AttachmentCipherEnvelope | null;
 }
 
 const CALL_JOIN_WINDOW_MS = 3 * 60 * 1000;
@@ -146,6 +161,119 @@ function renderDirectMessageContent(content: string) {
 
 function isUuid(value: unknown): boolean {
   return UUID_REGEX.test(String(value || '').trim());
+}
+
+function getAttachmentEnvelope(attachment: DirectMessageAttachment): AttachmentCipherEnvelope | null {
+  const metadata = attachment.encryption_metadata as AttachmentCipherEnvelope | null | undefined;
+  if (!metadata || (metadata.v !== 1 && metadata.v !== 2)) return null;
+  if (metadata.alg !== 'ECDH-P256+AES-256-GCM' && metadata.alg !== 'ECDH-P256+AES-256-GCM-MULTIDEVICE') return null;
+  return metadata;
+}
+
+interface DirectMessageAttachmentPreviewProps {
+  attachment: DirectMessageAttachment;
+  isOwn: boolean;
+  myUserId: string | undefined;
+}
+
+function DirectMessageAttachmentPreview({ attachment, isOwn, myUserId }: DirectMessageAttachmentPreviewProps) {
+  const envelope = getAttachmentEnvelope(attachment);
+  const [objectUrl, setObjectUrl] = useState('');
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'failed'>(envelope ? 'loading' : 'ready');
+  const displayName = envelope?.originalName || attachment.file_name;
+  const displayType = envelope?.originalType || attachment.file_type || 'application/octet-stream';
+  const displaySize = envelope?.originalSize || Number(attachment.file_size || 0);
+  const href = envelope ? objectUrl || undefined : attachment.file_url;
+  const isImage = String(displayType || '').startsWith('image/');
+
+  useEffect(() => {
+    if (!envelope) {
+      setObjectUrl('');
+      setLoadState('ready');
+      return undefined;
+    }
+    if (!myUserId) {
+      setLoadState('failed');
+      return undefined;
+    }
+
+    let cancelled = false;
+    let nextObjectUrl = '';
+    const decryptingUserId = myUserId;
+    setLoadState('loading');
+
+    async function decryptAttachment() {
+      try {
+        const response = await fetch(attachment.file_url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`download failed: ${response.status}`);
+        const encryptedBytes = await response.arrayBuffer();
+        const blob = await decryptAttachmentFromConversation({
+          myUserId: decryptingUserId,
+          envelope,
+          encryptedBytes,
+        });
+        if (!blob) throw new Error('decrypt failed');
+        nextObjectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setObjectUrl(nextObjectUrl);
+          setLoadState('ready');
+        }
+      } catch {
+        if (!cancelled) setLoadState('failed');
+      }
+    }
+
+    void decryptAttachment();
+
+    return () => {
+      cancelled = true;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [attachment.file_url, attachment.id, envelope, myUserId]);
+
+  const className = `block rounded-lg border text-xs overflow-hidden ${
+    isOwn
+      ? 'border-surface-950/20 hover:border-surface-950/30'
+      : 'border-surface-500/30 hover:border-surface-400/40'
+  }`;
+
+  const body = isImage && href && loadState === 'ready' ? (
+    <img
+      src={href}
+      alt={displayName}
+      className="max-h-64 w-auto object-contain bg-black/20"
+    />
+  ) : (
+    <div className="flex items-center gap-2 px-2.5 py-2">
+      <Paperclip size={13} />
+      <div className="min-w-0">
+        <div className="truncate font-medium">{displayName}</div>
+        <div className="opacity-70">
+          {loadState === 'loading'
+            ? 'Decrypting...'
+            : loadState === 'failed'
+              ? 'Unable to decrypt on this device'
+              : formatFileSize(displaySize)}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!href || loadState === 'loading' || loadState === 'failed') {
+    return <div className={className}>{body}</div>;
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      download={displayName}
+      className={className}
+    >
+      {body}
+    </a>
+  );
 }
 
 export function DirectMessagePage() {
@@ -1291,12 +1419,20 @@ export function DirectMessagePage() {
     let membershipRows: Array<{ conversation_id: string }> = [];
     let membershipError: any = null;
 
-    // Prefer RPC path (SECURITY DEFINER) so DM list still loads if select policies drift.
+    // Prefer the RPC path (SECURITY DEFINER) so the DM list still loads if
+    // select policies drift. An empty RPC result is deliberately *not*
+    // authoritative, though: older deployments of the helper could return an
+    // empty set for a valid member. Verify that case against the membership
+    // table before treating the account as having no conversations.
     const { data: rpcMembershipRows, error: rpcMembershipError } = await (supabase as any).rpc('get_my_dm_conversation_ids');
-    if (!rpcMembershipError && Array.isArray(rpcMembershipRows)) {
-      membershipRows = rpcMembershipRows
+    const rpcRows = !rpcMembershipError && Array.isArray(rpcMembershipRows)
+      ? rpcMembershipRows
         .map((row: any) => ({ conversation_id: String(row?.conversation_id || '') }))
-        .filter((row: any) => Boolean(row.conversation_id));
+        .filter((row: any) => Boolean(row.conversation_id))
+      : [];
+
+    if (rpcRows.length > 0) {
+      membershipRows = rpcRows;
     } else {
       if (rpcMembershipError && !isMissingRpcFunctionError(rpcMembershipError)) {
         console.warn('DM conversation id RPC failed; falling back to table query.', rpcMembershipError);
@@ -1885,31 +2021,76 @@ export function DirectMessagePage() {
     )));
   }
 
-  async function uploadPendingFilesForMessage(messageId: string, files: File[]) {
+  async function preparePendingFilesForMessage(files: File[], recipientUserIds: string[]): Promise<PreparedDmAttachmentUpload[]> {
+    if (!profile || files.length === 0) return [];
+
+    const shouldEncrypt = isE2EEnabled() && recipientUserIds.length > 0;
+    const prepared: PreparedDmAttachmentUpload[] = [];
+
+    for (const file of files) {
+      if (!shouldEncrypt) {
+        prepared.push({
+          originalFile: file,
+          uploadBody: file,
+          storageFileName: file.name,
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          encryptionMetadata: null,
+        });
+        continue;
+      }
+
+      const encrypted = await encryptAttachmentForConversation({
+        myUserId: profile.id,
+        recipientUserIds,
+        file,
+        requireComplete: true,
+      });
+
+      prepared.push({
+        originalFile: file,
+        uploadBody: encrypted.encryptedBlob,
+        storageFileName: `${file.name}.nce`,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        encryptionMetadata: encrypted.envelope,
+      });
+    }
+
+    return prepared;
+  }
+
+  async function uploadPendingFilesForMessage(messageId: string, files: PreparedDmAttachmentUpload[]) {
     if (!profile || !conversationId || files.length === 0) return;
     setUploadingFiles(true);
     try {
       for (const file of files) {
-        const safeName = file.name.replace(/[^\w.\-() ]/g, '_');
+        const safeName = file.storageFileName.replace(/[^\w.\-() ]/g, '_');
         const storagePath = `${profile.id}/dm/${conversationId}/${messageId}/${Date.now()}-${safeName}`;
         const { error: uploadError } = await supabase
           .storage
           .from('message-uploads')
-          .upload(storagePath, file, { upsert: false });
+          .upload(storagePath, file.uploadBody, {
+            upsert: false,
+            contentType: file.encryptionMetadata ? 'application/octet-stream' : file.fileType,
+          });
         if (uploadError) {
-          setErrorMessage(`Upload failed for ${file.name}: ${uploadError.message}`);
+          setErrorMessage(`Upload failed for ${file.fileName}: ${uploadError.message}`);
           continue;
         }
         const { data: publicData } = supabase.storage.from('message-uploads').getPublicUrl(storagePath);
         const { error: attachmentError } = await supabase.from('direct_message_attachments').insert({
           direct_message_id: messageId,
           file_url: publicData.publicUrl,
-          file_name: file.name,
-          file_type: file.type || 'application/octet-stream',
-          file_size: file.size,
+          file_name: file.fileName,
+          file_type: file.fileType,
+          file_size: file.fileSize,
+          encryption_metadata: file.encryptionMetadata,
         } as any);
         if (attachmentError) {
-          setErrorMessage(`Attachment save failed for ${file.name}: ${attachmentError.message}`);
+          setErrorMessage(`Attachment save failed for ${file.fileName}: ${attachmentError.message}`);
         }
       }
     } finally {
@@ -1955,26 +2136,73 @@ export function DirectMessagePage() {
     setSending(true);
     setErrorMessage('');
 
-    // Resolve other conversation members for E2E fan-out. We use the in-
-    // memory list when present, otherwise we'll skip encryption silently
-    // — the message still sends as plaintext.
-    const otherMemberIds = Array.from(new Set(
+    let otherMemberIds = Array.from(new Set(
       ((activeConversation?.members || []) as Array<{ user_id?: string | null }>)
         .map((member) => String(member?.user_id || '').trim())
         .filter((userId) => userId && userId !== profile.id),
     ));
 
+    if (isE2EEnabled() && otherMemberIds.length === 0) {
+      const { data: memberRows, error: memberLookupError } = await supabase
+        .from('direct_conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', profile.id);
+
+      if (memberLookupError) {
+        setErrorMessage('Encrypted message blocked: could not verify recipient encryption keys. Try again in a moment.');
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
+      }
+
+      otherMemberIds = Array.from(new Set(
+        ((memberRows || []) as Array<{ user_id?: string | null }>)
+          .map((member) => String(member?.user_id || '').trim())
+          .filter(Boolean),
+      ));
+    }
+
     let insertContent = content;
     let envelope: ConversationCipherEnvelope | null = null;
     if (isE2EEnabled() && otherMemberIds.length > 0) {
-      const { envelope: produced } = await encryptForConversation({
-        myUserId: profile.id,
-        recipientUserIds: otherMemberIds,
-        plaintext: content,
-      });
-      if (produced) {
-        envelope = produced;
-        insertContent = E2E_PLACEHOLDER;
+      try {
+        const { envelope: produced } = await encryptForConversation({
+          myUserId: profile.id,
+          recipientUserIds: otherMemberIds,
+          plaintext: content,
+          requireComplete: true,
+        });
+        if (produced) {
+          envelope = produced;
+          insertContent = E2E_PLACEHOLDER;
+        }
+      } catch (error) {
+        const message = error instanceof E2ERequiredError
+          ? error.message
+          : 'Encrypted message blocked: recipient encryption keys are not ready.';
+        setErrorMessage(message);
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
+      }
+    }
+
+    let preparedFiles: PreparedDmAttachmentUpload[] = [];
+    if (filesToSend.length > 0) {
+      try {
+        preparedFiles = await preparePendingFilesForMessage(filesToSend, otherMemberIds);
+      } catch (error) {
+        const message = error instanceof E2ERequiredError
+          ? error.message
+          : 'Encrypted attachment blocked: recipient encryption keys are not ready.';
+        setErrorMessage(message);
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
       }
     }
 
@@ -1985,7 +2213,7 @@ export function DirectMessagePage() {
     };
     if (envelope) {
       insertPayload.ciphertext = envelope;
-      insertPayload.e2e_version = 1;
+      insertPayload.e2e_version = E2E_VERSION;
     }
 
     const { data: insertedMessage, error } = await supabase
@@ -2032,8 +2260,8 @@ export function DirectMessagePage() {
       .update({ updated_at: activityAtIso } as any)
       .eq('id', conversationId);
 
-    if (filesToSend.length > 0) {
-      await uploadPendingFilesForMessage(String(insertedMessage.id), filesToSend);
+    if (preparedFiles.length > 0) {
+      await uploadPendingFilesForMessage(String(insertedMessage.id), preparedFiles);
     }
 
     try {
@@ -2506,38 +2734,14 @@ export function DirectMessagePage() {
               )}
               {attachments.length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
-                  {attachments.map((attachment) => {
-                    const isImage = String(attachment.file_type || '').startsWith('image/');
-                    return (
-                      <a
-                        key={attachment.id}
-                        href={attachment.file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={`block rounded-lg border text-xs overflow-hidden ${
-                          isOwn
-                            ? 'border-surface-950/20 hover:border-surface-950/30'
-                            : 'border-surface-500/30 hover:border-surface-400/40'
-                        }`}
-                      >
-                        {isImage ? (
-                          <img
-                            src={attachment.file_url}
-                            alt={attachment.file_name}
-                            className="max-h-64 w-auto object-contain bg-black/20"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 px-2.5 py-2">
-                            <Paperclip size={13} />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{attachment.file_name}</div>
-                              <div className="opacity-70">{formatFileSize(Number(attachment.file_size || 0))}</div>
-                            </div>
-                          </div>
-                        )}
-                      </a>
-                    );
-                  })}
+                  {attachments.map((attachment) => (
+                    <DirectMessageAttachmentPreview
+                      key={attachment.id}
+                      attachment={attachment}
+                      isOwn={isOwn}
+                      myUserId={profile?.id}
+                    />
+                  ))}
                 </div>
               )}
               {msg.is_edited && <span className="text-xs opacity-60 ml-1">(edited)</span>}
@@ -4108,5 +4312,3 @@ function formatShortTime(dateString: string): string {
     hour12: true,
   });
 }
-
-
