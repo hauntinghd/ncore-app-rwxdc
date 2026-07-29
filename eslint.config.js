@@ -9,12 +9,20 @@ export default tseslint.config(
     ignores: [
       'dist',
       'dist-mobile',
+      'dist-tauri',
+      'public-tauri',
       'release',
       'android/app/build',
       'android/.gradle',
       'build',
       'public/updates',
       'deploy/rnnoise/build',
+      // Rust/Tauri build output. `target/` holds generated codegen-asset .js
+      // blobs that are not source and do not parse as ES modules.
+      'src-tauri/target',
+      'src-tauri/gen',
+      'test-results',
+      'playwright-report',
       '.bolt',
       '.codex_tmp',
       '.vercel',
