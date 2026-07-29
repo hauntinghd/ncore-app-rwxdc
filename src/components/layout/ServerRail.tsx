@@ -2,7 +2,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Compass, MessageSquare, Settings, Crown, ShoppingBag, UserPlus } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { CommunityAvatar } from '../ui/CommunityAvatar';
+import { UnreadBadge } from '../ui/UnreadBadge';
 import { useAuth } from '../../contexts/AuthContext';
+import { useUserUnread } from '../../lib/useUnread';
 import type { Community } from '../../lib/types';
 
 interface ServerRailProps {
@@ -18,6 +20,7 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
+  const { unread } = useUserUnread(communities.length > 0);
   const appLogoUrl = `${import.meta.env.BASE_URL}NCore.jpg`;
 
   const isDMs = location.pathname.startsWith('/app/dm');
@@ -76,16 +79,33 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
 
         {(communities.length > 0 || profile?.platform_role === 'owner') && (
           <div className="mt-2 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {communities.map((community) => (
-              <button
-                key={community.id}
-                onClick={() => navigate(`/app/community/${community.id}`)}
-                className={`h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-200 flex items-center justify-center overflow-hidden ${activeCommunityId === community.id ? 'ring-2 ring-nyptid-300 border-nyptid-300/70' : ''}`}
-                title={community.name}
-              >
-                <CommunityIcon community={community} />
-              </button>
-            ))}
+            {communities.map((community) => {
+              const communityUnread = unread[community.id];
+              const mentionCount = communityUnread?.mentionCount ?? 0;
+              const hasUnread = (communityUnread?.unreadCount ?? 0) > 0;
+              const isActive = activeCommunityId === community.id;
+
+              return (
+                <button
+                  key={community.id}
+                  onClick={() => navigate(`/app/community/${community.id}`)}
+                  className={`relative h-10 w-10 flex-shrink-0 rounded-xl border border-surface-700 bg-surface-900 text-surface-200 flex items-center justify-center ${isActive ? 'ring-2 ring-nyptid-300 border-nyptid-300/70' : ''}`}
+                  title={community.name}
+                >
+                  <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl">
+                    <CommunityIcon community={community} />
+                  </span>
+                  {!isActive && hasUnread && mentionCount === 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-surface-100 ring-2 ring-surface-950" />
+                  )}
+                  <UnreadBadge
+                    count={mentionCount}
+                    variant="mention"
+                    className="absolute -top-1 -right-1 ring-2 ring-surface-950"
+                  />
+                </button>
+              );
+            })}
 
             <button
               onClick={onCreateCommunity}
@@ -163,19 +183,35 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
 
       {communities.length > 0 && <div className="w-8 h-px bg-surface-700 rounded-full my-1" />}
 
-      {communities.map(community => (
-        <Tooltip key={community.id} content={community.name} position="right">
-          <button
-            onClick={() => navigate(`/app/community/${community.id}`)}
-            className={`server-icon relative ${activeCommunityId === community.id ? 'active' : ''}`}
-          >
-            <CommunityIcon community={community} />
-            {activeCommunityId === community.id && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1 h-8 bg-nyptid-300 rounded-r-full" />
-            )}
-          </button>
-        </Tooltip>
-      ))}
+      {communities.map(community => {
+        const isActive = activeCommunityId === community.id;
+        const communityUnread = unread[community.id];
+        const mentionCount = communityUnread?.mentionCount ?? 0;
+        const hasUnread = (communityUnread?.unreadCount ?? 0) > 0;
+
+        return (
+          <Tooltip key={community.id} content={community.name} position="right">
+            <button
+              onClick={() => navigate(`/app/community/${community.id}`)}
+              className={`server-icon relative ${isActive ? 'active' : ''}`}
+            >
+              <CommunityIcon community={community} />
+              {isActive ? (
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1 h-8 bg-nyptid-300 rounded-r-full" />
+              ) : (
+                hasUnread && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1 h-2 bg-surface-100 rounded-r-full" />
+                )
+              )}
+              <UnreadBadge
+                count={mentionCount}
+                variant="mention"
+                className="absolute -bottom-0.5 -right-0.5 ring-2 ring-surface-950"
+              />
+            </button>
+          </Tooltip>
+        );
+      })}
 
       <Tooltip content="Create Community" position="right">
         <button

@@ -12,6 +12,7 @@ import { trackGrowthEvent } from '../../lib/growthEvents';
 import { buildCommunityInviteLink } from '../../lib/inviteLinks';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { supabase } from '../../lib/supabase';
+import { useCommunityUnread } from '../../lib/useUnread';
 import type { ChannelCategory, ChannelType, Community, Profile, VoiceSession } from '../../lib/types';
 import { generateSlug } from '../../lib/utils';
 import {
@@ -67,6 +68,7 @@ export function AppShell({
   const navigate = useNavigate();
   const location = useLocation();
   const voiceSession = useServerVoiceShellState();
+  const { unread: channelUnread } = useCommunityUnread(activeCommunityId, activeChannelId);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
@@ -1368,6 +1370,7 @@ export function AppShell({
             community={activeCommunity || undefined}
             categories={categories}
             activeChannelId={activeChannelId}
+            unreadByChannel={channelUnread}
             voiceSessions={voiceSessions}
             currentVoiceChannelId={voiceSession.channelId || undefined}
             onAddCategory={handleAddCategory}
@@ -1401,6 +1404,7 @@ export function AppShell({
                 community={activeCommunity || undefined}
                 categories={categories}
                 activeChannelId={activeChannelId}
+                unreadByChannel={channelUnread}
                 voiceSessions={voiceSessions}
                 currentVoiceChannelId={voiceSession.channelId || undefined}
                 onAddCategory={handleAddCategory}

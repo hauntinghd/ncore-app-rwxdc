@@ -27,10 +27,12 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
+import { UnreadBadge } from '../ui/UnreadBadge';
 import { SidebarUserDock } from './SidebarUserDock';
 import { useAuth } from '../../contexts/AuthContext';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { getCommunityRoleBadge } from '../../lib/utils';
+import type { ChannelUnread } from '../../lib/readState';
 import type { Community, Channel, ChannelCategory, VoiceSession } from '../../lib/types';
 
 interface ChannelSidebarProps {
@@ -39,6 +41,7 @@ interface ChannelSidebarProps {
   activeChannelId?: string;
   voiceSessions?: Record<string, VoiceSession[]>;
   currentVoiceChannelId?: string;
+  unreadByChannel?: Record<string, ChannelUnread>;
   onAddChannel?: (categoryId: string, type: 'text' | 'voice') => void;
   onAddCategory?: () => void;
   onEditCategory?: (categoryId: string) => void;
@@ -77,6 +80,7 @@ export function ChannelSidebar({
   activeChannelId,
   voiceSessions = {},
   currentVoiceChannelId,
+  unreadByChannel = {},
   onAddChannel,
   onAddCategory,
   onEditCategory,
@@ -461,6 +465,13 @@ export function ChannelSidebar({
               const isActive = channel.id === activeChannelId;
               const isCurrentVoice = channel.id === currentVoiceChannelId;
               const isMutedChannel = isChannelMuted(String(channel.id || '').trim());
+              const channelUnread = unreadByChannel[channel.id];
+              // The open channel is being read right now, so never badge it.
+              const unreadCount = isActive ? 0 : (channelUnread?.unreadCount ?? 0);
+              // Muted channels still surface direct mentions — that is the
+              // whole point of muting a busy channel rather than leaving it.
+              const mentionCount = isActive ? 0 : (channelUnread?.mentionCount ?? 0);
+              const showUnread = unreadCount > 0 && !isMutedChannel;
 
               return (
                 <div key={channel.id}>
@@ -468,13 +479,18 @@ export function ChannelSidebar({
                     type="button"
                     onClick={() => handleChannelClick(channel)}
                     onContextMenu={(event) => openChannelContextMenu(event, channel)}
-                    className={`channel-item mx-1 w-full text-left ${isActive ? 'active' : ''} ${isCurrentVoice ? 'text-nyptid-300' : ''} ${isMutedChannel ? 'opacity-70' : ''}`}
+                    className={`channel-item mx-1 w-full text-left ${isActive ? 'active' : ''} ${isCurrentVoice ? 'text-nyptid-300' : ''} ${isMutedChannel ? 'opacity-70' : ''} ${showUnread ? 'font-semibold text-surface-100' : ''}`}
                   >
                     <ChannelIcon type={channel.channel_type} />
                     <span className="truncate flex-1">{channel.name}</span>
                     {isCurrentVoice && <Volume2 size={12} className="flex-shrink-0 text-nyptid-300" />}
                     {channel.channel_type === 'voice' && participants.length > 0 && (
                       <span className="ml-auto text-xs text-surface-500">{participants.length}</span>
+                    )}
+                    {mentionCount > 0 ? (
+                      <UnreadBadge count={mentionCount} variant="mention" />
+                    ) : (
+                      showUnread && <UnreadBadge count={unreadCount} variant="unread" />
                     )}
                   </button>
 
