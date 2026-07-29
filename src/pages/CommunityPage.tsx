@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Users, MessageSquare, Settings, UserPlus, UserMinus, Crown, Shield, ChevronRight, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { CommunityAvatar } from '../components/ui/CommunityAvatar';
 import { Badge } from '../components/ui/Badge';
 import { Skeleton, SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
@@ -976,11 +977,7 @@ export function CommunityPage() {
           <div className="max-w-4xl mx-auto px-6">
             <div className="flex items-end gap-4 -mt-8 mb-4">
               <div className="w-20 h-20 rounded-2xl border-4 border-surface-900 bg-gradient-to-br from-nyptid-800 to-nyptid-950 flex items-center justify-center text-2xl font-black text-nyptid-300 flex-shrink-0">
-                {community.icon_url ? (
-                  <img src={community.icon_url} alt="" className="w-full h-full rounded-xl object-cover" />
-                ) : (
-                  community.name.slice(0, 2).toUpperCase()
-                )}
+                <CommunityAvatar iconUrl={community.icon_url} name={community.name} className="rounded-xl text-5xl" />
               </div>
               <div className="flex-1 min-w-0 pb-2">
                 <div className="flex items-center gap-2 flex-wrap">

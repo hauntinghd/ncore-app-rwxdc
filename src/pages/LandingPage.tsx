@@ -21,9 +21,8 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_UPDATE_FEED_URL,
-  fetchLatestInstallerAssetPath,
+  fetchLatestNativeDesktopInstaller,
   fetchLatestMobileInstaller,
-  resolveFeedAssetUrl,
 } from '../lib/releaseFeed';
 import { promptPwaInstall, usePwaRuntime } from '../lib/pwaRuntime';
 import { resolveSurfaceUrl } from '../lib/webSurface';
@@ -141,13 +140,11 @@ export function LandingPage() {
   const appHref = useMemo(() => resolveSurfaceUrl('app', '/app/dm'), []);
   const marketplaceHref = useMemo(() => resolveSurfaceUrl('marketplace', '/'), []);
 
-  // Matches the current nsis.artifactName pattern (NCore-Setup-${version}.exe).
-  // Kept as a fallback only — the real href is resolved from latest.yml via
-  // fetchLatestInstallerAssetPath below, which always reflects whatever the
-  // feed actually serves. If the feed fetch fails, the user still lands on
-  // /updates/ (the index page) rather than a dead 404.
-  const desktopInstallerName = `NCore-Setup-${buildVersion}.exe`;
-  const desktopInstallerFallbackHref = `/updates/${encodeURIComponent(desktopInstallerName)}`;
+  // The Tauri update feed is the single source of truth for the native client.
+  // Keep a versioned direct fallback for first-time visitors if the feed check
+  // is temporarily unavailable.
+  const desktopInstallerName = `NCore_${buildVersion}_x64-setup.exe`;
+  const desktopInstallerFallbackHref = `/updates/tauri/${encodeURIComponent(desktopInstallerName)}`;
   const resolvedInstallerHref = latestInstallerHref || desktopInstallerFallbackHref;
   const localFeedBase = typeof window !== 'undefined'
     ? `${window.location.origin}/updates`
@@ -208,11 +205,9 @@ export function LandingPage() {
 
     const loadLatestInstallerPath = async () => {
       try {
-        const installerPath = await fetchLatestInstallerAssetPath(localFeedBase);
-        if (!installerPath || cancelled) return;
-        const absoluteUrl = resolveFeedAssetUrl(localFeedBase, installerPath);
-        if (!absoluteUrl) return;
-        setLatestInstallerHref(absoluteUrl);
+        const installer = await fetchLatestNativeDesktopInstaller(localFeedBase);
+        if (!installer?.url || cancelled) return;
+        setLatestInstallerHref(installer.url);
       } catch {
         // keep fallback installer path when feed lookup is unavailable
       }
@@ -273,12 +268,12 @@ export function LandingPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#06080d] text-[#f6efe1]">
+    <div className="relative min-h-screen overflow-x-hidden bg-[#070917] text-[#f5f7ff]">
       <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(255,176,69,0.18),transparent_34%),radial-gradient(circle_at_84%_8%,rgba(106,140,255,0.12),transparent_30%),radial-gradient(circle_at_48%_84%,rgba(185,82,24,0.14),transparent_42%),linear-gradient(180deg,#070a10_0%,#06080d_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_9%_8%,rgba(65,221,202,0.18),transparent_34%),radial-gradient(circle_at_88%_10%,rgba(119,107,255,0.2),transparent_34%),radial-gradient(circle_at_52%_88%,rgba(242,96,164,0.13),transparent_44%),linear-gradient(180deg,#0b1023_0%,#070917_100%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:48px_48px] opacity-40" />
-        <div className="absolute left-[-12rem] top-20 h-[28rem] w-[28rem] rounded-full bg-[#d97c24]/10 blur-3xl" />
-        <div className="absolute right-[-10rem] top-24 h-[26rem] w-[26rem] rounded-full bg-[#29427d]/20 blur-3xl" />
+        <div className="absolute left-[-12rem] top-20 h-[28rem] w-[28rem] rounded-full bg-[#35d6c5]/12 blur-3xl" />
+        <div className="absolute right-[-10rem] top-24 h-[26rem] w-[26rem] rounded-full bg-[#7467ff]/20 blur-3xl" />
       </div>
 
       <nav
@@ -291,7 +286,7 @@ export function LandingPage() {
         <div className="mx-auto flex w-full max-w-[1380px] items-center justify-between gap-4 px-5 py-4 lg:px-8">
           <a href="/" className="flex items-center gap-3">
             <img
-              src={`${import.meta.env.BASE_URL}NCore.jpg`}
+              src={`${import.meta.env.BASE_URL}ncore-logo.svg`}
               alt="NCore"
               className="h-10 w-10 rounded-2xl border border-white/10 object-cover shadow-[0_14px_30px_rgba(0,0,0,0.35)]"
             />
@@ -327,7 +322,7 @@ export function LandingPage() {
       <main className="relative z-10 px-5 pb-24 pt-28 lg:px-8 lg:pt-32">
         <section className="mx-auto grid w-full max-w-[1380px] gap-8 lg:grid-cols-[1.06fr_0.94fr] lg:items-center">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#f0b763]/18 bg-[#1c1208]/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#f0c87d]">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#41ddca]/30 bg-[#102139]/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#82f5df]">
               <Sparkles size={13} />
               Built by NYPTID Industries Advanced Technologies
             </div>
@@ -364,7 +359,7 @@ export function LandingPage() {
                   key={item.label}
                   className="rounded-[24px] border border-white/8 bg-white/[0.04] px-4 py-4 shadow-[0_24px_60px_rgba(0,0,0,0.22)] backdrop-blur"
                 >
-                  <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-[#f0c87d]">{item.label}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.26em] text-[#82f5df]">{item.label}</div>
                   <div className="mt-2 text-sm leading-6 text-white/72">{item.detail}</div>
                 </div>
               ))}
@@ -372,13 +367,13 @@ export function LandingPage() {
           </div>
 
           <div className="relative">
-            <div className="absolute inset-x-10 top-8 h-48 rounded-full bg-[#e48a30]/16 blur-3xl" />
-            <div className="absolute right-0 top-24 h-40 w-40 rounded-full bg-[#4f69c7]/16 blur-3xl" />
+            <div className="absolute inset-x-10 top-8 h-48 rounded-full bg-[#41ddca]/18 blur-3xl" />
+            <div className="absolute right-0 top-24 h-40 w-40 rounded-full bg-[#776bff]/20 blur-3xl" />
 
-            <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(160deg,rgba(11,15,24,0.94),rgba(17,21,32,0.92)_36%,rgba(26,15,8,0.92)_100%)] p-5 shadow-[0_36px_120px_rgba(0,0,0,0.45)] lg:p-6">
+            <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(160deg,rgba(11,20,41,0.94),rgba(22,24,58,0.92)_36%,rgba(40,14,52,0.92)_100%)] p-5 shadow-[0_36px_120px_rgba(0,0,0,0.45)] lg:p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#f0c87d]">NCore Command Stack</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#82f5df]">NCore Command Stack</div>
                   <div className="mt-2 text-2xl font-black text-white">One runtime. Multiple surfaces.</div>
                 </div>
                 <div className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200">
@@ -406,12 +401,12 @@ export function LandingPage() {
                       key={row.title}
                       className={`rounded-[24px] border px-4 py-4 ${
                         index === 0
-                          ? 'border-[#f0b763]/22 bg-[#24170d]/78'
+                          ? 'border-[#41ddca]/28 bg-[#102139]/78'
                           : 'border-white/8 bg-white/[0.04]'
                       }`}
                     >
                       <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                        <CheckCircle2 size={15} className={index === 0 ? 'text-[#f0c87d]' : 'text-emerald-300'} />
+                        <CheckCircle2 size={15} className={index === 0 ? 'text-[#82f5df]' : 'text-emerald-300'} />
                         {row.title}
                       </div>
                       <div className="mt-2 text-sm leading-6 text-white/68">{row.detail}</div>
@@ -425,8 +420,8 @@ export function LandingPage() {
                       <div className="text-[11px] uppercase tracking-[0.24em] text-white/42">Operator panel</div>
                       <div className="mt-1 text-xl font-black text-white">Product advantage</div>
                     </div>
-                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#f0b763]/20 bg-[#26170a]/90">
-                      <Command size={18} className="text-[#f0c87d]" />
+                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#776bff]/30 bg-[#1b1945]/90">
+                      <Command size={18} className="text-[#b5adff]" />
                     </div>
                   </div>
 
@@ -442,7 +437,7 @@ export function LandingPage() {
                           <div className="text-sm font-semibold text-white">{title}</div>
                           <div className="flex gap-1.5">
                             <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
-                            <span className="h-2 w-2 rounded-full bg-[#f0c87d] animate-pulse [animation-delay:180ms]" />
+                            <span className="h-2 w-2 rounded-full bg-[#82f5df] animate-pulse [animation-delay:180ms]" />
                             <span className="h-2 w-2 rounded-full bg-[#5876e4] animate-pulse [animation-delay:360ms]" />
                           </div>
                         </div>
@@ -458,7 +453,7 @@ export function LandingPage() {
 
         <section
           id="why-ncore"
-          className="mx-auto mt-20 grid w-full max-w-[1380px] gap-6 rounded-[36px] border border-white/8 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-5 py-6 shadow-[0_24px_100px_rgba(0,0,0,0.24)] lg:grid-cols-[0.92fr_1.08fr] lg:px-7 lg:py-7"
+          className="landing-deferred-section mx-auto mt-20 grid w-full max-w-[1380px] gap-6 rounded-[36px] border border-white/8 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] px-5 py-6 shadow-[0_24px_100px_rgba(0,0,0,0.24)] lg:grid-cols-[0.92fr_1.08fr] lg:px-7 lg:py-7"
         >
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-white/62">
@@ -480,7 +475,7 @@ export function LandingPage() {
                 key={card.title}
                 className={`rounded-[28px] border px-5 py-5 ${
                   index === 1
-                    ? 'border-[#f0b763]/18 bg-[#24170d]/76'
+                    ? 'border-[#776bff]/28 bg-[#171c42]/76'
                     : 'border-white/8 bg-white/[0.04]'
                 }`}
               >
@@ -494,7 +489,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="command-layer" className="mx-auto mt-20 w-full max-w-[1380px]">
+        <section id="command-layer" className="landing-deferred-section mx-auto mt-20 w-full max-w-[1380px]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-white/62">
@@ -518,7 +513,7 @@ export function LandingPage() {
                 className="group rounded-[28px] border border-white/8 bg-[linear-gradient(160deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-5 transition-transform duration-300 hover:-translate-y-1"
               >
                 <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-[#120d08]">
-                  <layer.icon size={18} className="text-[#f0c87d]" />
+                  <layer.icon size={18} className="text-[#82f5df]" />
                 </div>
                 <div className="mt-4 text-xl font-black text-white">{layer.title}</div>
                 <div className="mt-3 text-sm leading-7 text-white/66">{layer.detail}</div>
@@ -527,10 +522,10 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="mx-auto mt-20 w-full max-w-[1380px]">
+        <section className="landing-deferred-section mx-auto mt-20 w-full max-w-[1380px]">
           <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
-            <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(145deg,rgba(35,20,10,0.82),rgba(18,12,9,0.94))] p-6">
-              <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#f0c87d]">Execution Rail</div>
+            <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(145deg,rgba(18,45,63,0.82),rgba(20,17,54,0.94))] p-6">
+              <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#82f5df]">Execution Rail</div>
               <div className="mt-4 text-3xl font-black text-white">
                 Web, desktop, and marketplace should feel like one machine.
               </div>
@@ -560,7 +555,7 @@ export function LandingPage() {
               ].map((item) => (
                 <div key={item.title} className="rounded-[28px] border border-white/8 bg-white/[0.04] p-5">
                   <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
-                    <item.icon size={18} className="text-[#f0c87d]" />
+                    <item.icon size={18} className="text-[#82f5df]" />
                   </div>
                   <div className="mt-4 text-xl font-black text-white">{item.title}</div>
                   <div className="mt-3 text-sm leading-7 text-white/64">{item.detail}</div>
@@ -570,7 +565,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="surfaces" className="mx-auto mt-20 w-full max-w-[1380px]">
+        <section id="surfaces" className="landing-deferred-section mx-auto mt-20 w-full max-w-[1380px]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-white/62">
@@ -591,7 +586,7 @@ export function LandingPage() {
                 key={surface.title}
                 className={`overflow-hidden rounded-[30px] border shadow-[0_20px_80px_rgba(0,0,0,0.28)] ${
                   index === 1
-                    ? 'border-[#f0b763]/18 bg-[linear-gradient(160deg,rgba(44,26,12,0.86),rgba(14,11,11,0.96))]'
+                    ? 'border-[#776bff]/28 bg-[linear-gradient(160deg,rgba(28,31,78,0.86),rgba(14,18,45,0.96))]'
                     : 'border-white/8 bg-[linear-gradient(160deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))]'
                 }`}
               >
@@ -602,7 +597,7 @@ export function LandingPage() {
                       <div className="mt-3 text-3xl font-black text-white">{surface.title}</div>
                     </div>
                     <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]">
-                      <surface.icon size={19} className="text-[#f0c87d]" />
+                      <surface.icon size={19} className="text-[#82f5df]" />
                     </div>
                   </div>
                 </div>
@@ -625,8 +620,8 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="mx-auto mt-20 w-full max-w-[1380px]">
-          <div className="overflow-hidden rounded-[36px] border border-white/8 bg-[linear-gradient(135deg,rgba(244,184,99,0.12),rgba(255,255,255,0.03)_24%,rgba(73,102,192,0.16)_100%)] px-6 py-8 lg:px-8 lg:py-10">
+        <section className="landing-deferred-section mx-auto mt-20 w-full max-w-[1380px]">
+          <div className="overflow-hidden rounded-[36px] border border-white/8 bg-[linear-gradient(135deg,rgba(65,221,202,0.14),rgba(255,255,255,0.03)_24%,rgba(119,107,255,0.18)_100%)] px-6 py-8 lg:px-8 lg:py-10">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#f0c87d]">Next Phase</div>
@@ -664,7 +659,9 @@ export function LandingPage() {
         <div className="mx-auto flex w-full max-w-[1380px] flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3 text-sm text-white/56">
             <img
-              src={`${import.meta.env.BASE_URL}NCore.jpg`}
+              src={`${import.meta.env.BASE_URL}ncore-logo.svg`}
+              loading="lazy"
+              decoding="async"
               alt="NCore"
               className="h-8 w-8 rounded-xl border border-white/10 object-cover"
             />

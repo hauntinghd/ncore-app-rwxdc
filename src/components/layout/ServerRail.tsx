@@ -1,7 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { Plus, Compass, MessageSquare, Settings, Crown, ShoppingBag, UserPlus } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
+import { CommunityAvatar } from '../ui/CommunityAvatar';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Community } from '../../lib/types';
 
@@ -12,20 +12,7 @@ interface ServerRailProps {
   mobile?: boolean;
 }
 
-function CommunityIcon({ community }: { community: Community }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const initials = community.name.slice(0, 2).toUpperCase();
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [community.icon_url]);
-
-  if (!community.icon_url || imageFailed) {
-    return <span className="text-[11px] font-bold" aria-label={community.name}>{initials}</span>;
-  }
-
-  return <img src={community.icon_url} alt="" className="h-full w-full object-cover" onError={() => setImageFailed(true)} />;
-}
+function CommunityIcon({ community }: { community: Community }) { return <CommunityAvatar iconUrl={community.icon_url} name={community.name} className="text-[26px]" />; }
 
 export function ServerRail({ communities, activeCommunityId, onCreateCommunity, mobile = false }: ServerRailProps) {
   const navigate = useNavigate();

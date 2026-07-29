@@ -18,6 +18,7 @@ import {
 import { AppShell } from '../components/layout/AppShell';
 import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
+import { CommunityAvatar } from '../components/ui/CommunityAvatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Community } from '../lib/types';
@@ -142,13 +143,7 @@ function DiscoverServerCard({ community, joined, joining, onOpen, onJoin }: Disc
         <div className="flex h-full items-end px-5 pb-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="h-14 w-14 overflow-hidden rounded-[18px] border border-white/10 bg-surface-900 shadow-xl">
-              {community.icon_url ? (
-                <img src={community.icon_url} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-lg font-black text-nyptid-200">
-                  {community.name.slice(0, 2).toUpperCase()}
-                </div>
-              )}
+              <CommunityAvatar iconUrl={community.icon_url} name={community.name} className="text-3xl" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-2xl font-black text-white">{community.name}</div>

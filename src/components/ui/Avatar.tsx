@@ -29,6 +29,7 @@ const statusSizeClasses = {
 export function Avatar({ src, name, size = 'md', status, className = '' }: AvatarProps) {
   const initials = getInitials(name);
   const [imageFailed, setImageFailed] = useState(false);
+  const hue = Array.from(name || 'NCore').reduce((value, char) => ((value * 31) + char.charCodeAt(0)) % 360, 29);
 
   useEffect(() => {
     setImageFailed(false);
@@ -36,7 +37,10 @@ export function Avatar({ src, name, size = 'md', status, className = '' }: Avata
 
   return (
     <div className={`relative flex-shrink-0 ${className}`}>
-      <div className={`${sizeClasses[size]} rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-br from-nyptid-700 to-nyptid-900 font-semibold text-nyptid-200`}>
+      <div
+        className={`${sizeClasses[size]} rounded-full overflow-hidden flex items-center justify-center font-semibold text-white shadow-inner`}
+        style={{ background: `radial-gradient(circle at 28% 22%, hsla(${hue}, 90%, 78%, .88), transparent 32%), linear-gradient(145deg, hsl(${hue}, 58%, 43%), hsl(${(hue + 52) % 360}, 66%, 19%))` }}
+      >
         {src && !imageFailed ? (
           <img src={src} alt="" className="w-full h-full object-cover" onError={() => setImageFailed(true)} />
         ) : (

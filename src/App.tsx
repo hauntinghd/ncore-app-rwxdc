@@ -20,7 +20,7 @@ const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage').then((m) 
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
 const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
-const MarketplacePage = lazy(() => import('./pages/MarketplacePage').then((m) => ({ default: m.MarketplacePage })));
+const MarketplaceComingSoonPage = lazy(() => import('./pages/MarketplaceComingSoonPage'));
 const CommunityPage = lazy(() => import('./pages/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const CommunitySettingsPage = lazy(() => import('./pages/CommunitySettingsPage').then((m) => ({ default: m.CommunitySettingsPage })));
 const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
@@ -112,9 +112,8 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
         <Route path="/app" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
         <Route path="/app/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
-        <Route path="/app/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/quickdraw" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/games" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
+        <Route path="/app/marketplace" element={<ProtectedRoute><MarketplaceComingSoonPage /></ProtectedRoute>} />
+        <Route path="/app/marketplace/*" element={<ProtectedRoute><MarketplaceComingSoonPage /></ProtectedRoute>} />
         <Route path="/app/dm" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId/call" element={<ProtectedRoute><DirectCallPage /></ProtectedRoute>} />

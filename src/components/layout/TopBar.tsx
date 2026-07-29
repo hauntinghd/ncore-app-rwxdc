@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
-  Download, Mic, MicOff, RefreshCw, Search, Settings, User, Volume2, VolumeX, X, Zap,
+  Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, Volume2, VolumeX, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
@@ -159,10 +159,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const unreadCount = notificationUnreadCount + updateUnreadCount;
   const hasActiveCall = callSession.phase === 'active' || callSession.phase === 'connecting';
   const isElectronClient = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
-  const topBarStyle: CSSProperties | undefined = isElectronClient
+  const isTauriClient = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const topBarStyle: CSSProperties | undefined = (isElectronClient || isTauriClient)
     ? ({ paddingRight: 156, WebkitAppRegion: 'drag' } as CSSProperties)
     : undefined;
-  const noDragStyle: CSSProperties | undefined = isElectronClient
+  const noDragStyle: CSSProperties | undefined = (isElectronClient || isTauriClient)
     ? ({ WebkitAppRegion: 'no-drag' } as CSSProperties)
     : undefined;
   const streamerBannerTop = isElectronClient ? 36 : 8;
@@ -172,8 +173,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     : false;
   const updateInstallInProgress = installingFromTopbar || updateRuntimeState.installing;
   const updateDownloadInProgress = updateRuntimeState.checking || updateRuntimeState.downloading;
-  const canManuallyCheckForUpdates = Boolean(window.desktopBridge?.downloadLatestUpdate);
-  const showTopbarUpdateButton = canManuallyCheckForUpdates;
+  // Native releases are discovered in the background by the bottom-right
+  // update card. Do not leave a permanent control in the title bar when no
+  // update exists.
+  const showTopbarUpdateButton = false;
 
   function markReleaseUpdatesRead(version = latestReleaseVersion) {
     const normalized = String(version || '').trim();
@@ -646,6 +649,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     <div
       className="relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4"
       style={topBarStyle}
+      data-tauri-drag-region={isTauriClient ? '' : undefined}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {showSidebarToggle && (
@@ -748,6 +752,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                     : 'Checking...')
                   : updateRuntimeState.message.includes('already up to date')
                     ? 'Up to date'
+                    : updateRuntimeState.ready
+                      ? `Install v${updateRuntimeState.latestVersion || 'update'}`
                     : 'Check update'}
             </span>
           </button>
@@ -926,6 +932,13 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
             </div>
           )}
         </div>
+        {isTauriClient && (
+          <div className="ml-1 flex overflow-hidden rounded-lg border border-surface-700" data-tauri-drag-region={undefined}>
+            <button type="button" aria-label="Minimize" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-surface-700 hover:text-surface-100" onClick={() => void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().minimize())}><Minus size={15} /></button>
+            <button type="button" aria-label="Maximize" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-surface-700 hover:text-surface-100" onClick={() => void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => { const appWindow = getCurrentWindow(); await appWindow.toggleMaximize(); })}><Square size={13} /></button>
+            <button type="button" aria-label="Close" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-red-500 hover:text-white" onClick={() => void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().close())}><X size={15} /></button>
+          </div>
+        )}
       </div>
 
       {incomingCall && (

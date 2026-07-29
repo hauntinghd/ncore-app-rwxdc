@@ -280,18 +280,47 @@ export function AppShell({
 
   async function loadUserCommunities() {
     if (!profile) return;
-    const { data } = await supabase
+    // Fetch memberships and communities separately. PostgREST embeds can
+    // silently turn a valid membership into a null relation when an RLS policy
+    // changes, which made existing servers disappear from the rail.
+    const { data: membershipRows, error: membershipError } = await supabase
       .from('community_members')
-      .select('role, community:communities(id,name,slug,description,category,visibility,icon_url,banner_url,owner_id,member_count)')
+      .select('community_id, role')
       .eq('user_id', profile.id);
 
-    if (!data) return;
-    const nextCommunities = data
-      .filter((membership: any) => membership.community)
-      .map((membership: any) => ({
-        ...membership.community,
+    if (membershipError || !membershipRows) {
+      console.warn('Community membership lookup failed; keeping cached communities if available.', membershipError);
+      return;
+    }
+
+    const memberRoleByCommunityId = new Map(
+      membershipRows
+        .map((membership: any) => [String(membership.community_id || ''), membership.role || 'member'] as const)
+        .filter(([communityId]) => Boolean(communityId)),
+    );
+    const communityIds = Array.from(memberRoleByCommunityId.keys());
+
+    if (communityIds.length === 0) {
+      setCommunities([]);
+      if (activeCommunityId) setActiveCommunity(null);
+      return;
+    }
+
+    const { data: communityRows, error: communitiesError } = await supabase
+      .from('communities')
+      .select('id,name,slug,description,category,visibility,icon_url,banner_url,owner_id,member_count')
+      .in('id', communityIds);
+
+    if (communitiesError || !communityRows) {
+      console.warn('Community hydration failed; keeping cached communities if available.', communitiesError);
+      return;
+    }
+
+    const nextCommunities = communityRows
+      .map((community: any) => ({
+        ...community,
         is_member: true,
-        member_role: membership.role || 'member',
+        member_role: memberRoleByCommunityId.get(String(community.id)) || 'member',
       })) as Community[];
 
     // Render immediately using `member_count` from communities rows.
@@ -1729,4 +1758,3 @@ export function AppShell({
     </div>
   );
 }
-
