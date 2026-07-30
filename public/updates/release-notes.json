@@ -1,9 +1,20 @@
 {
     "releases": [
         {
-            "version": "11.7.118",
+            "version": "11.7.119",
             "date": "2026-07-30",
             "badge": "Current Build",
+            "improvements": [
+                "Download Latest Update now actually downloads and installs. The updater was rejecting every update because it checked for a code-signing signature the build does not carry."
+            ],
+            "bugFixes": [
+                "Update failures are surfaced in the update panel instead of the button appearing to do nothing."
+            ]
+        },
+        {
+            "version": "11.7.118",
+            "date": "2026-07-30",
+            "badge": "Previous",
             "improvements": [
                 "When the conversation list is empty but the server did return conversations, the app now shows exactly which step dropped them instead of a bare \"No conversations yet\"."
             ],

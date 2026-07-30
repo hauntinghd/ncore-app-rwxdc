@@ -908,6 +908,32 @@ function setupAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  /*
+    NCore ships without an Authenticode certificate — every build runs
+    `-c.win.signAndEditExecutable=false`, and SmartScreen already shows
+    "Unknown publisher" as a result.
+
+    electron-updater's NsisUpdater verifies the downloaded installer's code
+    signature by default. Against an unsigned installer that check always
+    fails, so every in-app update was downloaded and then rejected, and
+    "Download Latest Update" appeared to do nothing. Overriding the verifier is
+    the only way to disable it: `verifyUpdateCodeSignature` is a runtime
+    property on the updater instance, NOT something electron-builder writes
+    into app-update.yml, so setting it in package.json has no effect (verified
+    by inspecting the packaged app-update.yml).
+
+    What is given up is proof of publisher identity — which an unsigned build
+    never had. What still protects the download is unchanged: the feed is
+    fetched over HTTPS, and electron-updater verifies the installer against the
+    sha512 recorded in latest.yml before running it, so a corrupted or
+    substituted file is still rejected.
+
+    If an Authenticode certificate is ever obtained, delete this override.
+  */
+  if ('verifyUpdateCodeSignature' in autoUpdater) {
+    autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
+  }
+
   autoUpdater.on('checking-for-update', () => {
     isCheckingForUpdate = true;
     isDownloadingUpdate = false;
