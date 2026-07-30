@@ -1,9 +1,20 @@
 {
     "releases": [
         {
-            "version": "11.7.117",
+            "version": "11.7.118",
             "date": "2026-07-30",
             "badge": "Current Build",
+            "improvements": [
+                "When the conversation list is empty but the server did return conversations, the app now shows exactly which step dropped them instead of a bare \"No conversations yet\"."
+            ],
+            "bugFixes": [
+                "The update panel no longer says \"NCore is up to date\" directly underneath \"Update available\". When a newer release exists but no signed in-app update is published, it says so and points at the manual download."
+            ]
+        },
+        {
+            "version": "11.7.117",
+            "date": "2026-07-30",
+            "badge": "Previous",
             "improvements": [
                 "Links posted in a channel unfurl into a preview card with the site name, title, description, and image.",
                 "New mention inbox: the @ button in the top bar collects every mention of you across every server, with jump-to-message.",

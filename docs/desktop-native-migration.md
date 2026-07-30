@@ -26,9 +26,21 @@ background behavior.
 
 - Publish signed Tauri updater metadata and migrate the existing update feed
   from `latest.yml` to Tauri's signed updater manifest.
-- Establish a protected release-signing key and a desktop artifact host. The
-  current web updater host has a 100 MB per-file limit while the first native
-  NSIS package is 111 MB, so it cannot be used unchanged.
+- Establish a protected release-signing key. The minisign key matching the
+  `pubkey` in `src-tauri/tauri.conf.json` (`RWQYBQQF+g5D2GgG...`) is not on the
+  build machine — `~/.tauri` holds `nyptid-bridge` and
+  `nyptid-studio-updater`, neither of which matches — so signed Tauri updates
+  cannot currently be published at all. The signing *password* is available via
+  Credential Manager (`com.nyptid.ncore.release` /
+  `tauri-updater-signing-password`) and the Rust toolchain is present, so the
+  private key is the only missing piece.
+
+  **Correction (2026-07-30):** the artifact-host half of this item was wrong.
+  Vercel's "File size limit exceeded (100 MB)" was not caused by the installer;
+  it was `src-tauri/target`, 5.7 GB containing a 140 MiB `.rlib`, which nothing
+  excluded from the deploy payload. With that in `.vercelignore` the ~99 MB
+  installer uploads without complaint and is served from
+  ncore.nyptidindustries.com today. No separate artifact host is needed.
 - Port the custom desktop capture source picker; until then, use WebView2's
   normal `getDisplayMedia` chooser.
 - Port background realtime notification delivery and streamer-mode controls.
