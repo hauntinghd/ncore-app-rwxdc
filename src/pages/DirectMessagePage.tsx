@@ -106,6 +106,41 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen, bio, banner_url, platform_role, rank, xp, is_banned, created_at, updated_at';
 const DM_LIST_PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen';
 const MAX_BOOTSTRAP_DM_CONVERSATIONS = 80;
+
+/**
+ * Reads the closed-conversation record, accepting both the current
+ * `{ id: closedAtIso }` shape and the legacy `string[]` one.
+ *
+ * Legacy entries have no timestamp, so they are stamped at read time: they stay
+ * closed now, and reopen on the next message rather than staying buried
+ * forever. Treating them as closed-at-epoch would instead reopen every DM the
+ * user has ever dismissed, all at once, on upgrade.
+ */
+function parseClosedRecord(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const now = new Date().toISOString();
+      const migrated: Record<string, string> = {};
+      for (const id of parsed) {
+        if (typeof id === 'string' && id) migrated[id] = now;
+      }
+      return migrated;
+    }
+    if (parsed && typeof parsed === 'object') {
+      const record: Record<string, string> = {};
+      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value === 'string' && value) record[id] = value;
+      }
+      return record;
+    }
+  } catch {
+    // Malformed record: treat as nothing closed. Showing an extra conversation
+    // is a far smaller problem than hiding a real one.
+  }
+  return {};
+}
 const MAX_ACTIVE_CALL_SYNC_CONVERSATIONS = 40;
 
 interface LightweightDirectMessageAuthor {
@@ -337,7 +372,35 @@ export function DirectMessagePage() {
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
-  const [closedConversationIds, setClosedConversationIds] = useState<string[]>([]);
+  /*
+    Closing a DM used to hide it forever. The only way one ever came back was
+    navigating straight to its URL — a new message from the other person did
+    nothing, so from the outside it looked exactly like DMs vanishing.
+
+    Closing now records *when*, and a conversation reopens on its own as soon
+    as it has activity newer than that. Closing a DM is a low-commitment "I am
+    done with this for now", not a decision to never hear from someone again.
+  */
+  const [closedAtByConversation, setClosedAtByConversation] = useState<Record<string, string>>({});
+  const closedConversationIds = useMemo(
+    () => Object.keys(closedAtByConversation),
+    [closedAtByConversation],
+  );
+  // Kept as a setter-shaped shim so the existing call sites read unchanged.
+  const setClosedConversationIds = useCallback(
+    (updater: string[] | ((prev: string[]) => string[])) => {
+      setClosedAtByConversation((prev) => {
+        const prevIds = Object.keys(prev);
+        const nextIds = typeof updater === 'function' ? updater(prevIds) : updater;
+        const nextSet = new Set(nextIds.map(String));
+        const next: Record<string, string> = {};
+        const now = new Date().toISOString();
+        for (const id of nextSet) next[id] = prev[id] ?? now;
+        return next;
+      });
+    },
+    [],
+  );
   const [mutedConversationIds, setMutedConversationIds] = useState<string[]>([]);
   const [friendNicknames, setFriendNicknames] = useState<Record<string, string>>({});
   const [friendNotes, setFriendNotes] = useState<Record<string, string>>({});
@@ -755,7 +818,8 @@ export function DirectMessagePage() {
       const rawClosed = closedStorageKey ? localStorage.getItem(closedStorageKey) : null;
       setFriendNicknames(rawNicknames ? JSON.parse(rawNicknames) : {});
       setFriendNotes(rawNotes ? JSON.parse(rawNotes) : {});
-      setClosedConversationIds(rawClosed ? JSON.parse(rawClosed) : []);
+      setClosedConversationIds([]);
+      setClosedAtByConversation(parseClosedRecord(rawClosed));
       setMutedConversationIds(rawMuted ? JSON.parse(rawMuted) : []);
       // Also clean up legacy sessionStorage key
       if (closedSessionStorageKey) {
@@ -787,11 +851,11 @@ export function DirectMessagePage() {
   useEffect(() => {
     if (!closedStorageKey) return;
     try {
-      localStorage.setItem(closedStorageKey, JSON.stringify(closedConversationIds));
+      localStorage.setItem(closedStorageKey, JSON.stringify(closedAtByConversation));
     } catch {
       // best-effort persistence
     }
-  }, [closedConversationIds, closedStorageKey]);
+  }, [closedAtByConversation, closedStorageKey]);
 
   useEffect(() => {
     if (!conversationsCacheKey) return;
@@ -935,7 +999,22 @@ export function DirectMessagePage() {
         },
         (payload) => {
           const changedConversationId = String((payload.new as any)?.conversation_id || '').trim();
-          if (!changedConversationId || !trackedConversationIdsRef.current.has(changedConversationId)) return;
+          if (!changedConversationId) return;
+
+          /*
+            A message arriving in a closed conversation reopens it immediately,
+            before the tracked-id check below — a closed conversation is not in
+            the tracked set, so checking first would drop exactly the event
+            that is supposed to bring it back.
+          */
+          setClosedAtByConversation((prev) => {
+            if (!prev[changedConversationId]) return prev;
+            const next = { ...prev };
+            delete next[changedConversationId];
+            return next;
+          });
+
+          if (!trackedConversationIdsRef.current.has(changedConversationId)) return;
           const createdAtIso = String((payload.new as any)?.created_at || '').trim() || new Date().toISOString();
           promoteConversationActivity(changedConversationId, createdAtIso);
           scheduleActiveConversationRefresh(changedConversationId, 120);
@@ -1721,8 +1800,56 @@ export function DirectMessagePage() {
       };
     });
 
+    /*
+      Reopen any closed conversation that has heard from someone since it was
+      closed. Without this a closed DM is closed forever, which is how "my DMs
+      disappeared" happens: the other person keeps messaging and you never see
+      any of it.
+
+      Scoped to the closed set only, so this is a small bounded query rather
+      than a scan of every conversation.
+    */
+    const closedIds = Object.keys(closedAtByConversation);
+    let reopenedIds: string[] = [];
+    if (closedIds.length > 0) {
+      const { data: activityRows } = await supabase
+        .from('direct_messages')
+        .select('conversation_id, created_at')
+        .in('conversation_id', closedIds)
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      const latestByConversation = new Map<string, string>();
+      for (const row of (activityRows || []) as any[]) {
+        const key = String(row?.conversation_id || '');
+        if (!key || latestByConversation.has(key)) continue;
+        latestByConversation.set(key, String(row?.created_at || ''));
+      }
+
+      reopenedIds = closedIds.filter((id) => {
+        const latest = latestByConversation.get(id);
+        if (!latest) return false;
+        const closedAt = new Date(closedAtByConversation[id]).getTime();
+        const lastMessageAt = new Date(latest).getTime();
+        if (!Number.isFinite(closedAt) || !Number.isFinite(lastMessageAt)) return false;
+        return lastMessageAt > closedAt;
+      });
+
+      if (reopenedIds.length > 0) {
+        setClosedAtByConversation((prev) => {
+          const next = { ...prev };
+          for (const id of reopenedIds) delete next[id];
+          return next;
+        });
+      }
+    }
+
+    const stillClosed = new Set(
+      closedIds.filter((id) => !reopenedIds.includes(id)),
+    );
+
     const filtered = hydrated
-      .filter((conv: any) => !closedConversationIds.includes(String(conv.id)))
+      .filter((conv: any) => !stillClosed.has(String(conv.id)))
       .sort((a: any, b: any) => {
         const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
         const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
