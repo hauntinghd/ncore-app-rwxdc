@@ -1,9 +1,21 @@
 {
     "releases": [
         {
-            "version": "11.7.112",
+            "version": "11.7.113",
             "date": "2026-07-30",
             "badge": "Current Build",
+            "improvements": [
+                "You stay signed in. Sessions now survive restarts instead of asking you to log in again roughly every hour."
+            ],
+            "bugFixes": [
+                "Fixed the desktop app losing your sign-in. The session was saved to one location and deleted from the other, so if the first was unavailable at startup it existed in neither and you were sent back to the login screen.",
+                "Signing out now reliably clears the session from both locations, so it cannot silently sign you back in on the next launch."
+            ]
+        },
+        {
+            "version": "11.7.112",
+            "date": "2026-07-30",
+            "badge": "Previous",
             "improvements": [
                 "The window minimize, maximize, and close buttons now line up with the app's header row instead of sitting in a shorter strip above it."
             ],

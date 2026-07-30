@@ -406,26 +406,32 @@ function main() {
   syncReleaseNotes(parsed.version);
 
   /*
-    Installers are hosted on GitHub Releases, not on the web deploy.
+    The installer ships with the site by default, so people download NCore from
+    ncore.nyptidindustries.com and `latest.yml` keeps a relative URL.
 
-    Vercel rejects individual files near 100 MB, and the NSIS installer sits at
-    ~99 MB with every build nudging it closer. Serving it from the web app also
-    billed every desktop download against the site's bandwidth.
-
-    So `latest.yml` still ships to the site (electron-updater's `publish.url`
-    points at this domain and every installed client depends on that staying
-    put), but the installer URL inside it is rewritten to an absolute GitHub
-    asset link, and the binary itself is not copied into the deploy payload.
-
-    Set NCORE_INSTALLER_BASE_URL to override, or to '' to go back to
-    co-hosting the installer with the site.
+    When NCORE_INSTALLER_BASE_URL points somewhere else, the binary is NOT
+    copied into the deploy payload and the URL is rewritten to that absolute
+    location instead. The feed itself always ships from this domain either way,
+    because electron-updater's `publish.url` points here and every installed
+    client depends on that not moving.
   */
+  const installerBaseUrl = process.env.NCORE_INSTALLER_BASE_URL !== undefined
+    ? String(process.env.NCORE_INSTALLER_BASE_URL).trim()
+    : DEFAULT_INSTALLER_BASE_URL;
+  const coHostInstaller = !installerBaseUrl;
+
   for (const targetDir of targets) {
     copyFile(latestYmlPath, targetDir);
     copyFile(publicReleaseNotesPath, targetDir);
-    rewriteInstallerUrl(path.join(targetDir, 'latest.yml'), parsed.version, installerFileName);
     copyFile(blockmapPath, targetDir);
+    if (coHostInstaller) {
+      // Skipping this is what silently produced a feed pointing at an
+      // installer that was never deployed.
+      copyFile(installerPath, targetDir);
+    }
+    rewriteInstallerUrl(path.join(targetDir, 'latest.yml'), parsed.version, installerFileName);
   }
+
   const latestApkFileName = syncMobileFeed(parsed.version);
   for (const targetDir of targets) {
     pruneTargetBinaries(targetDir, [installerFileName, blockmapFileName, latestApkFileName]);
