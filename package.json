@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.116",
+  "version": "11.7.111",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -93,7 +93,7 @@
       "en-US"
     ],
     "executableName": "NCore",
-    "copyright": "Copyright © 2026 NYPTID Industries Advanced Technologies",
+    "copyright": "Copyright Â© 2026 NYPTID Industries Advanced Technologies",
     "directories": {
       "output": "release"
     },

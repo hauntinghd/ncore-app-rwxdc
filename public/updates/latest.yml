@@ -1,8 +1,8 @@
-version: 11.7.110
+version: 11.7.111
 files:
-  - url: NCore-Setup-11.7.110.exe
-    sha512: F3w4Jlh4gfkHSXGC9r2uvNGBbm8ZqXQDIyj3JpTkf5dEr6kkfV/Z3AwKRLR3eZVJi1/gg1cvOHENNiawoQ9Ndw==
-    size: 99058067
-path: NCore-Setup-11.7.110.exe
-sha512: F3w4Jlh4gfkHSXGC9r2uvNGBbm8ZqXQDIyj3JpTkf5dEr6kkfV/Z3AwKRLR3eZVJi1/gg1cvOHENNiawoQ9Ndw==
-releaseDate: '2026-07-10T22:03:41.621Z'
+  - url: https://github.com/hauntinghd/ncore-app-rwxdc/releases/download/v11.7.111/NCore-Setup-11.7.111.exe
+    sha512: pu1kpfBszygo1KfBUBrseBbfdwYTfIMvsqK017zOVS3zILRF8KRL06lpXELNkURkQlLQORTOv3dsKJLpYmCUew==
+    size: 99185784
+path: https://github.com/hauntinghd/ncore-app-rwxdc/releases/download/v11.7.111/NCore-Setup-11.7.111.exe
+sha512: pu1kpfBszygo1KfBUBrseBbfdwYTfIMvsqK017zOVS3zILRF8KRL06lpXELNkURkQlLQORTOv3dsKJLpYmCUew==
+releaseDate: '2026-07-30T13:22:56.180Z'

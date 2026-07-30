@@ -4,3 +4,11 @@ dist
 supabase
 tools
 *.log
+
+# Desktop installers are hosted on GitHub Releases, not here.
+# Vercel rejects files at this size (~99 MB), and serving them from static
+# hosting also billed every desktop download against the web app's bandwidth.
+# latest.yml stays on this domain and points at the GitHub asset URL.
+public/updates/*.exe
+public/updates/*.exe.blockmap
+public/updates/tauri/*.exe

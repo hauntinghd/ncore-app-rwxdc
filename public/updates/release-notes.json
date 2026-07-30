@@ -1,9 +1,37 @@
 {
     "releases": [
         {
+            "version": "11.7.111",
+            "date": "2026-07-30",
+            "badge": "Current Build",
+            "improvements": [
+                "Links posted in a channel now unfurl into a preview card with the site name, title, description, and image.",
+                "Added a mention inbox: an @ button in the top bar collects every mention of you across every server, newest first, with jump-to-message.",
+                "Added a quick switcher on Ctrl+K (Cmd+K) to jump to any channel, server, or conversation, opening on your recent destinations.",
+                "Added moderation tools: timeouts, kicks, and bans, with an optional cleanup of a banned member's recent messages. Every action is recorded in the server audit log, which is now readable by anyone holding the View Audit Log permission rather than owners and admins only.",
+                "Notification settings now follow your account instead of a single device. Mute a channel or a whole server anywhere and it is muted everywhere you sign in, with temporary mutes from 15 minutes to a day. A muted channel keeps showing direct mentions.",
+                "Messages from people you have not spoken to before now wait in a Message Requests inbox instead of arriving unannounced. Nobody is told whether you opened, ignored, or accepted a request.",
+                "Added an in-call connection panel showing average ping, last ping, and packet loss, reachable from the voice bar and the voice channel page.",
+                "Added voice diagnostics in Settings, including per-region latency and how your recent calls actually performed.",
+                "Encryption keys for private messages are now held in protected browser storage and can no longer be exported. Existing keys are moved automatically, and Settings shows which devices are affected.",
+                "Added a per-server custom emoji picker and emoji autocomplete in the message box."
+            ],
+            "bugFixes": [
+                "Fixed direct message conversations disappearing from the sidebar. Closing a conversation hid it permanently, so new messages from that person never brought it back; a closed conversation now reopens as soon as it has new activity.",
+                "Fixed a second cause of missing conversations, where a network or session hiccup returned an empty result and the app treated it as proof you had no conversations.",
+                "Fixed the camera and screen share silently doing nothing when they failed. Denied permission, a missing camera, and a device held by another application now each say so and explain what to do.",
+                "Dismissing the screen share picker no longer shows an error, and a failed camera start no longer leaves the camera active with nothing using it.",
+                "Moved the window minimize, maximize, and close buttons to the top right corner of the window.",
+                "Fixed opening a direct message with someone silently adding them to your friends list without asking.",
+                "Fixed blocked people still being able to start a direct message with you.",
+                "Fixed the emoji button in the message box doing nothing when clicked.",
+                "Fixed the search box in the top bar and the Inline Media Previews and Quick Switcher settings, all of which were previously connected to nothing."
+            ]
+        },
+        {
             "version": "11.7.110",
             "date": "2026-07-10",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "Updated the desktop runtime to Electron 40 and modernized the production build toolchain.",
                 "Strengthened local development tooling with current Vite, React plugin, router, and dependency patches."
