@@ -8,7 +8,14 @@ import {
   revokeDevice,
   type E2EDevice,
 } from '../../lib/crypto/deviceManagement';
-import { getCachedIdentity, isE2EEnabled } from '../../lib/crypto/e2eManager';
+import {
+  ensureIdentityKey,
+  getCachedIdentity,
+  isE2EEnabled,
+  isIdentityKeyLegacy,
+  resetIdentityCache,
+} from '../../lib/crypto/e2eManager';
+import { isSecureKeystoreAvailable, rotateIdentity } from '../../lib/crypto/keystore';
 import { formatRelativeTime } from '../../lib/utils';
 
 interface E2EDevicesSectionProps {
@@ -28,6 +35,7 @@ export function E2EDevicesSection({ userId }: E2EDevicesSectionProps) {
   const [error, setError] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [confirmRotate, setConfirmRotate] = useState(false);
 
   const identity = getCachedIdentity();
   const e2eOn = isE2EEnabled();
@@ -253,12 +261,74 @@ export function E2EDevicesSection({ userId }: E2EDevicesSectionProps) {
             </div>
           )}
 
+          {isIdentityKeyLegacy() && (
+            <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+              <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-amber-200">
+                <AlertTriangle size={14} /> This device's key predates secure storage
+              </div>
+              <p className="text-xs leading-relaxed text-amber-100/80">
+                It was created when private keys were kept in browser local storage, where any
+                script on the page could read them. It has been moved into protected storage and
+                can no longer be exported — but if it was copied before the move, that copy still
+                works. Rotating generates a key that can never leave this device.
+              </p>
+              <p className="mt-1.5 text-xs text-amber-100/70">
+                Rotating makes existing encrypted messages unreadable on this device. Your
+                conversation partners are unaffected and new messages work normally.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmRotate(true);
+                }}
+                className="nyptid-btn-secondary mt-2 px-2.5 py-1 text-xs"
+              >
+                Rotate key…
+              </button>
+            </div>
+          )}
+
+          {confirmRotate && (
+            <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5">
+              <p className="text-xs text-red-100">
+                Replace this device's encryption key? Messages already encrypted to the old key
+                will not be readable here again. This cannot be undone.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRotate(false)}
+                  className="nyptid-btn-secondary px-2.5 py-1 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void (async () => {
+                      setConfirmRotate(false);
+                      await rotateIdentity(userId);
+                      resetIdentityCache();
+                      // A fresh key must be republished before it is usable.
+                      await ensureIdentityKey(userId);
+                      await load();
+                    })()
+                  }
+                  className="nyptid-btn-secondary px-2.5 py-1 text-xs text-red-200 hover:bg-red-500/15"
+                >
+                  Rotate key
+                </button>
+              </div>
+            </div>
+          )}
+
           {identity?.fingerprint && (
             <p className="mt-4 border-t border-surface-700 pt-3 text-xs text-surface-600">
               This device's key fingerprint is{' '}
-              <span className="font-mono text-surface-400">{identity.fingerprint}</span>. Private
-              keys are stored in this browser's local storage; a hardened platform keystore is
-              still outstanding work.
+              <span className="font-mono text-surface-400">{identity.fingerprint}</span>.{' '}
+              {isSecureKeystoreAvailable()
+                ? 'Private keys are held in protected browser storage and cannot be exported — script on this page can use them, but never copy them off this device.'
+                : 'This browser does not support protected key storage, so keys are less well defended here than elsewhere.'}
             </p>
           )}
         </>

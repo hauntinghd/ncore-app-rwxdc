@@ -6,9 +6,12 @@
  * per-conversation symmetric keys via ECDH.
  *
  * Design (Path A — single device per install):
- *   1. On first call we generate an ECDH P-256 keypair, store the JWK in
- *      localStorage under `ncore.e2e.identity.<userId>`, and publish the
- *      raw public key + a SHA-256 fingerprint to `e2e_identity_keys`.
+ *   1. On first call we generate a **non-extractable** ECDH P-256 keypair,
+ *      store it as live CryptoKeys in IndexedDB (see `keystore.ts`), and
+ *      publish the raw public key + a SHA-256 fingerprint to
+ *      `e2e_identity_keys`. Keys used to be exported JWK in localStorage,
+ *      which made any XSS a permanent, portable compromise; they are not
+ *      any more, and existing ones are migrated on first load.
  *   2. To send to a conversation, we look up every other member's public
  *      key, derive a shared key per peer via ECDH, encrypt the message
  *      once per peer, and pack the ciphertext blobs into the JSONB
@@ -25,15 +28,12 @@ import {
   decryptMessage as decryptWithKey,
   deriveSharedSecret,
   encryptMessage as encryptWithKey,
-  exportKeyPair,
-  generateIdentityKeyPair,
-  importKeyPair,
   type E2EKeyPair,
   type EncryptedPayload,
 } from './e2e';
+import { ensureStoredIdentity } from './keystore';
 
 export const E2E_VERSION = 2;
-const STORAGE_PREFIX = 'ncore.e2e.identity.';
 const DEVICE_STORAGE_PREFIX = 'ncore.e2e.device.';
 const FEATURE_FLAG_KEY = 'VITE_ENABLE_E2E_DMS';
 export const E2E_PLACEHOLDER = '[NCore encrypted message — update your client to read]';
@@ -72,6 +72,16 @@ interface IdentityCacheEntry {
 }
 
 let cachedIdentity: IdentityCacheEntry | null = null;
+/**
+ * True when the loaded key was migrated from the old localStorage format. Its
+ * bytes were extractable at some point, so it cannot claim the guarantee a
+ * freshly generated non-extractable key can. Surfaced in Settings.
+ */
+let identityIsLegacy = false;
+
+export function isIdentityKeyLegacy(): boolean {
+  return identityIsLegacy;
+}
 interface PeerDeviceKey {
   userId: string;
   deviceId: string;
@@ -93,33 +103,28 @@ export async function ensureIdentityKey(userId: string): Promise<IdentityCacheEn
   if (cachedIdentity?.userId === userId) return cachedIdentity;
   if (typeof window === 'undefined' || !globalThis.crypto?.subtle) return null;
 
-  const storageKey = `${STORAGE_PREFIX}${userId}`;
-  let stored: { publicKey: string; privateKey: string } | null = null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (raw) stored = JSON.parse(raw);
-  } catch {
-    stored = null;
-  }
+  /*
+    Private keys live in IndexedDB as non-extractable CryptoKeys, not as
+    exported JWK in localStorage. See `keystore.ts` for why: an extractable key
+    in localStorage means one XSS is a permanent, portable compromise of every
+    message the user will ever send or receive. A non-extractable key can be
+    used by script on the page but never copied off it.
 
-  let keyPair: E2EKeyPair;
-  if (stored) {
-    try {
-      keyPair = await importKeyPair(stored);
-    } catch {
-      keyPair = await generateIdentityKeyPair();
-      stored = await exportKeyPair(keyPair);
-      try { window.localStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* quota: ignore */ }
-    }
-  } else {
-    keyPair = await generateIdentityKeyPair();
-    const exported = await exportKeyPair(keyPair);
-    try { window.localStorage.setItem(storageKey, JSON.stringify(exported)); } catch { /* quota: ignore */ }
-    stored = exported;
-  }
+    `ensureStoredIdentity` also migrates and deletes any pre-existing
+    localStorage key on first run.
+  */
+  const identity = await ensureStoredIdentity(userId);
+  if (!identity) return null;
+
+  const keyPair: E2EKeyPair = {
+    publicKey: identity.publicKey,
+    privateKey: identity.privateKey,
+    publicKeyRaw: identity.publicKeyRaw,
+  };
+  identityIsLegacy = identity.isLegacyKey;
 
   const deviceId = getOrCreateDeviceId(userId);
-  const publicKeyBase64 = stored?.publicKey || base64Encode(new Uint8Array(keyPair.publicKeyRaw));
+  const publicKeyBase64 = base64Encode(new Uint8Array(keyPair.publicKeyRaw));
   const fingerprint = await fingerprintFromRaw(keyPair.publicKeyRaw);
 
   // Publish/refresh the public key. Failures here are non-fatal — we
