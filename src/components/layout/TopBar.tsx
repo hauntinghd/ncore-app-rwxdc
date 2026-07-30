@@ -8,6 +8,11 @@ import { Avatar } from '../ui/Avatar';
 import { MessageSearchPanel } from '../chat/MessageSearchPanel';
 import { MentionInboxPanel } from '../chat/MentionInboxPanel';
 import { fetchMentionUnreadCount } from '../../lib/mentionInbox';
+import {
+  fetchMutedScopes,
+  resolveMode,
+  type NotificationPreference,
+} from '../../lib/notificationPrefs';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -114,6 +119,38 @@ function writeReleaseCache(releases: ReleaseLogEntry[], latestVersion: string) {
   }
 }
 
+/**
+ * Whether a notification should arrive silently, given the user's muted scopes.
+ *
+ * Calls are never silenced. A missed call cannot be caught up on later the way
+ * a message can, and someone who muted a server did not mean "do not ring me".
+ *
+ * Under 'mentions' mode a direct mention still rings — that is the entire
+ * distinction between "only @mentions" and "nothing".
+ */
+function isNotificationSilenced(
+  notification: Notification,
+  mutedScopes: readonly NotificationPreference[],
+): boolean {
+  const type = String(notification.type || '').toLowerCase();
+  if (type === 'incoming_call') return false;
+  if (mutedScopes.length === 0) return false;
+
+  const data = (notification.data || {}) as Record<string, unknown>;
+  const channelId = typeof data.channel_id === 'string' ? data.channel_id : null;
+  const communityId = typeof data.community_id === 'string' ? data.community_id : null;
+  const conversationId = typeof data.conversation_id === 'string' ? data.conversation_id : null;
+  if (!channelId && !communityId && !conversationId) return false;
+
+  const mode = resolveMode(mutedScopes, channelId ?? conversationId, communityId);
+  if (mode === 'none') return true;
+  if (mode === 'mentions') {
+    const isMention = type === 'mention' || data.mention === true;
+    return !isMention;
+  }
+  return false;
+}
+
 function getNotificationSoundKind(notification: Notification): NotificationSoundKind {
   const type = String(notification.type || '').trim().toLowerCase();
   const data = (notification.data || {}) as any;
@@ -137,6 +174,36 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showMentionInbox, setShowMentionInbox] = useState(false);
   const [mentionUnread, setMentionUnread] = useState(0);
+  /*
+    Muted scopes, held in a ref because the notification handlers below are
+    created inside a subscription effect that must not re-run every time a mute
+    changes — re-subscribing on every preference edit would drop notifications
+    in the gap.
+  */
+  const mutedScopesRef = useRef<NotificationPreference[]>([]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    const refresh = () => {
+      void fetchMutedScopes()
+        .then((scopes) => {
+          if (!cancelled) mutedScopesRef.current = scopes;
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 120_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [profile?.id]);
+
   /*
     Mention badge. Polled rather than subscribed: the count depends on both new
     mentions and read-cursor movement, and a realtime subscription would only
@@ -433,6 +500,9 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         for (const notification of list) {
           if (!seenNotificationIdsRef.current.has(notification.id)) {
             seenNotificationIdsRef.current.add(notification.id);
+            // Mute has to reach the delivery path, not just the badges — a
+            // muted channel that still rings is not muted.
+            if (isNotificationSilenced(notification, mutedScopesRef.current)) continue;
             new Notification(
               sanitizeNotificationTitle(notification.title || 'NCore', notification.type || ''),
               { body: sanitizeNotificationBody(notification.body || '', notification.type || '') },
@@ -472,6 +542,9 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           if (incoming.type === 'incoming_call') {
             setIncomingCall(incoming);
           }
+          // Silenced notifications still land in the list — mute suppresses the
+          // interruption, not the record of what happened.
+          if (isNotificationSilenced(incoming, mutedScopesRef.current)) return;
           if (canUseRendererNotificationAudio()) {
             const soundKind = getNotificationSoundKind(incoming);
             if (soundKind === 'call') {
