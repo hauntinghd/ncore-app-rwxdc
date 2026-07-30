@@ -4,6 +4,7 @@ import { ServerRail } from './ServerRail';
 import { ChannelSidebar } from './ChannelSidebar';
 import { TopBar } from './TopBar';
 import { PersistentVoiceBar } from './PersistentVoiceBar';
+import { QuickSwitcher } from './QuickSwitcher';
 import { Modal } from '../ui/Modal';
 import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1455,6 +1456,8 @@ export function AppShell({
           />
         )}
       </div>
+
+      <QuickSwitcher />
 
       {isMobileRail && (
         <div className="fixed inset-x-0 bottom-0 z-40 pb-[env(safe-area-inset-bottom)]">
