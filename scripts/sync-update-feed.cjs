@@ -119,8 +119,22 @@ function assertPatchStepVersion(version, releases) {
   }
 }
 
-const DEFAULT_INSTALLER_BASE_URL =
-  'https://github.com/hauntinghd/ncore-app-rwxdc/releases/download';
+/*
+  Empty by default: the installer is served from ncore.nyptidindustries.com
+  alongside the feed, so `latest.yml` keeps a relative URL and people download
+  the app from the actual website.
+
+  An earlier release pointed this at GitHub Releases because a ~99 MB installer
+  was believed to trip Vercel's 100 MB file limit. That was wrong — the limit
+  was being hit by src-tauri/target, which is now excluded in .vercelignore, and
+  the installer uploads without complaint.
+
+  Set NCORE_INSTALLER_BASE_URL to a base like
+  'https://github.com/<owner>/<repo>/releases/download' to host binaries
+  elsewhere; the feed still ships from this domain either way, so installed
+  clients never need to change.
+*/
+const DEFAULT_INSTALLER_BASE_URL = '';
 
 /**
  * Rewrites the installer URL in a synced latest.yml to an absolute location.

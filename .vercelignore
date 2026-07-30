@@ -5,13 +5,12 @@ supabase
 tools
 *.log
 
-# Desktop installers are hosted on GitHub Releases, not here.
-# Vercel rejects files at this size (~99 MB), and serving them from static
-# hosting also billed every desktop download against the web app's bandwidth.
-# latest.yml stays on this domain and points at the GitHub asset URL.
-public/updates/*.exe
-public/updates/*.exe.blockmap
-public/updates/tauri/*.exe
+# The Windows installer IS served from this site, so it must NOT be excluded.
+# Earlier releases moved it to GitHub on the mistaken belief that its ~99 MB
+# size caused "File size limit exceeded". The real cause was src-tauri/target
+# below; with that excluded the installer uploads fine.
+# Superseded Tauri installers stay out — only the one latest.json references
+# needs to ship.
 
 # Build output that must never reach the deploy payload.
 # src-tauri/target is 5.7 GB of Rust artifacts and contains individual .rlib
