@@ -1,9 +1,37 @@
 {
     "releases": [
         {
-            "version": "11.7.113",
+            "version": "11.7.117",
             "date": "2026-07-30",
             "badge": "Current Build",
+            "improvements": [
+                "Links posted in a channel unfurl into a preview card with the site name, title, description, and image.",
+                "New mention inbox: the @ button in the top bar collects every mention of you across every server, with jump-to-message.",
+                "Quick switcher on Ctrl+K jumps to any channel, server, or conversation, opening on your recent destinations.",
+                "Moderation tools: timeouts, kicks, and bans, with optional cleanup of a banned member's recent messages. Every action is recorded in the server audit log.",
+                "Notification settings follow your account instead of one device. Mute a channel or a whole server anywhere and it is muted everywhere, with temporary mutes from 15 minutes to a day.",
+                "Messages from people you have not spoken to before wait in a Message Requests inbox instead of arriving unannounced.",
+                "In-call connection panel showing average ping, last ping, and packet loss, from the voice bar and the voice channel page.",
+                "Voice diagnostics in Settings with per-region latency and how recent calls actually performed.",
+                "Encryption keys for private messages are held in protected browser storage and can no longer be exported.",
+                "Per-server custom emoji, an emoji picker, and emoji autocomplete in the message box.",
+                "You stay signed in. Sessions survive restarts instead of asking you to log in again roughly every hour."
+            ],
+            "bugFixes": [
+                "Fixed direct message conversations disappearing. Closing a conversation hid it permanently, so new messages never brought it back; that stored list is discarded and conversations now reopen on new activity.",
+                "The conversation list can no longer be emptied by hidden-conversation state.",
+                "Fixed the desktop app losing your sign-in between launches.",
+                "Fixed the camera and screen share silently doing nothing when they failed. Denied permission, a missing camera, and a device held by another application now each say so.",
+                "Moved the window minimize, maximize, and close buttons to the top right corner.",
+                "Fixed opening a direct message silently adding that person to your friends list without asking.",
+                "Fixed blocked people still being able to start a direct message with you.",
+                "Fixed the emoji button in the message box, the top bar search, and the Inline Media Previews and Quick Switcher settings, all of which were connected to nothing."
+            ]
+        },
+        {
+            "version": "11.7.113",
+            "date": "2026-07-30",
+            "badge": "Previous",
             "improvements": [
                 "You stay signed in. Sessions now survive restarts instead of asking you to log in again roughly every hour."
             ],

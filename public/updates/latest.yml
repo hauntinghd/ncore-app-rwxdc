@@ -1,8 +1,8 @@
-version: 11.7.113
+version: 11.7.117
 files:
-  - url: NCore-Setup-11.7.113.exe
-    sha512: yyi362yZRjXGToQDdHzVZi3Jd4zSGxw5CVO26AkP8iUrp+SJKWv2JeA8aYXvMkBgvh8MR0vGhFczk8LKONUiuA==
-    size: 99186157
-path: NCore-Setup-11.7.113.exe
-sha512: yyi362yZRjXGToQDdHzVZi3Jd4zSGxw5CVO26AkP8iUrp+SJKWv2JeA8aYXvMkBgvh8MR0vGhFczk8LKONUiuA==
-releaseDate: '2026-07-30T15:26:30.459Z'
+  - url: NCore-Setup-11.7.117.exe
+    sha512: Od0BH8un8ld1N1FY6mddgUb4KEv1hKCMlo/pNoSDatp9yEFFAAEeBGUDeZjo8WKmgRoetVwBoV1WGa3vBo86Ww==
+    size: 99186466
+path: NCore-Setup-11.7.117.exe
+sha512: Od0BH8un8ld1N1FY6mddgUb4KEv1hKCMlo/pNoSDatp9yEFFAAEeBGUDeZjo8WKmgRoetVwBoV1WGa3vBo86Ww==
+releaseDate: '2026-07-30T15:49:28.087Z'

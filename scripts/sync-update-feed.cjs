@@ -113,8 +113,28 @@ function assertPatchStepVersion(version, releases) {
     && currentTuple[2] === expected[2];
 
   if (!isExpectedPatchStep) {
+    /*
+      Escape hatch for deliberate jumps.
+
+      The +1 rule assumes the published feed is the highest version in
+      existence. It is not always: locally-built installs can run ahead of what
+      was ever published, and when they do, publishing +1 from the feed ships a
+      version LOWER than what is installed. The updater then correctly reports
+      "up to date" and the user never receives another update — which is
+      exactly what happened between v11.7.113 and an installed v11.7.116.
+
+      Recovering requires jumping past the installed version, so this allows it
+      explicitly rather than by hand-editing versions.
+    */
+    if (String(process.env.NCORE_ALLOW_VERSION_JUMP || '').trim()) {
+      console.warn(
+        `Version jump allowed: v${previous.value} -> v${version} (NCORE_ALLOW_VERSION_JUMP set).`,
+      );
+      return;
+    }
     throw new Error(
-      `Version step violation: expected next release v${formatSemverTuple(expected)} after v${previous.value}; got v${version}. Run npm run version:bump before syncing.`,
+      `Version step violation: expected next release v${formatSemverTuple(expected)} after v${previous.value}; got v${version}. `
+      + `Run npm run version:bump before syncing, or set NCORE_ALLOW_VERSION_JUMP=1 if you are deliberately jumping past a locally-installed build.`,
     );
   }
 }
