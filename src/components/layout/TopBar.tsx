@@ -759,7 +759,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   return (
     <>
     <div
-      className="relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4"
+      /* On desktop, reserve the width of the three window buttons so bar
+         content never slides underneath them. */
+      className={`relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 pl-4 ${
+        isTauriClient ? 'pr-40' : 'pr-4'
+      }`}
       style={topBarStyle}
       data-tauri-drag-region={isTauriClient ? '' : undefined}
     >
@@ -1063,14 +1067,62 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
             </div>
           )}
         </div>
-        {isTauriClient && (
-          <div className="ml-1 flex overflow-hidden rounded-lg border border-surface-700" data-tauri-drag-region={undefined}>
-            <button type="button" aria-label="Minimize" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-surface-700 hover:text-surface-100" onClick={() => void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().minimize())}><Minus size={15} /></button>
-            <button type="button" aria-label="Maximize" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-surface-700 hover:text-surface-100" onClick={() => void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => { const appWindow = getCurrentWindow(); await appWindow.toggleMaximize(); })}><Square size={13} /></button>
-            <button type="button" aria-label="Close" className="flex h-8 w-8 items-center justify-center text-surface-400 hover:bg-red-500 hover:text-white" onClick={() => void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().close())}><X size={15} /></button>
-          </div>
-        )}
       </div>
+
+      {/*
+        Window controls are pinned to the window's top-right corner rather than
+        laid out inline at the end of the bar. Inline, they sit wherever the
+        flex row happens to end — which is short of the corner whenever
+        anything to their left is narrower than expected — and Fitts's law says
+        a close button belongs in the corner, where the pointer cannot overshoot
+        it. `h-14` matches the bar so they fill its full height.
+
+        `data-tauri-drag-region` is deliberately absent: the buttons must
+        receive clicks, not move the window.
+      */}
+      {isTauriClient && (
+        <div className="absolute top-0 right-0 z-20 flex h-14 items-stretch" style={noDragStyle}>
+          <button
+            type="button"
+            aria-label="Minimize"
+            title="Minimize"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-100"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                getCurrentWindow().minimize(),
+              )
+            }
+          >
+            <Minus size={15} />
+          </button>
+          <button
+            type="button"
+            aria-label="Maximize"
+            title="Maximize"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-100"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+                await getCurrentWindow().toggleMaximize();
+              })
+            }
+          >
+            <Square size={13} />
+          </button>
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-red-600 hover:text-white"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                getCurrentWindow().close(),
+              )
+            }
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {incomingCall && (
         <div

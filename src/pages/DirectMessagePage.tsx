@@ -1503,6 +1503,55 @@ export function DirectMessagePage() {
     }
 
     if (requestedConversationIds.length === 0) {
+      /*
+        An empty membership result is NOT proof the user has no conversations.
+
+        This is the "DMs disappearing" bug: a stale JWT, an RLS evaluation
+        during a token refresh, or a transient PostgREST hiccup all return zero
+        rows with no error, and the old code took that at face value and
+        cleared the list. The conversations were never gone — the client had
+        simply been told nothing and believed it.
+
+        So: refresh the session and ask once more. Only a second empty answer,
+        on a known-good session, is treated as real.
+      */
+      const hadConversations = conversations.length > 0;
+      if (hadConversations) {
+        const refreshed = await ensureFreshAuthSession(60, {
+          forceRefresh: true,
+          verifyOnServer: false,
+        });
+        if (refreshed.ok) {
+          const { data: retryRows, error: retryError } = await supabase
+            .from('direct_conversation_members')
+            .select('conversation_id')
+            .eq('user_id', profile.id)
+            .limit(MAX_BOOTSTRAP_DM_CONVERSATIONS * 4);
+
+          const retryIds = Array.from(
+            new Set(
+              ((retryRows || []) as any[])
+                .map((row: any) => String(row?.conversation_id || ''))
+                .filter((id) => isUuid(id)),
+            ),
+          );
+
+          if (retryError || retryIds.length > 0) {
+            // Either the retry failed (so we still know nothing) or it found
+            // the conversations that the first query missed. Keep what we have
+            // and let the next refresh sort it out.
+            console.warn('DM membership came back empty but conversations exist; keeping cached list.', retryError);
+            setConversationsLoaded(true);
+            return;
+          }
+        } else {
+          // Could not establish a good session, so the empty answer is
+          // unverifiable. Never clear on an unverifiable result.
+          setConversationsLoaded(true);
+          return;
+        }
+      }
+
       setConversations([]);
       setConversationsLoaded(true);
       return;

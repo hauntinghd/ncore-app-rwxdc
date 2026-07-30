@@ -1449,6 +1449,9 @@ export function AppShell({
             isMuted={voiceSession.isMuted}
             isDeafened={voiceSession.isDeafened}
             isCameraOn={voiceSession.isCameraOn}
+            averagePingMs={voiceSession.averagePingMs}
+            lastPingMs={voiceSession.lastPingMs}
+            outboundPacketLossPct={voiceSession.outboundPacketLossPct}
             onToggleMute={() => void runServerVoiceAction('toggleMute')}
             onToggleDeafen={() => void runServerVoiceAction('toggleDeafen')}
             onToggleCamera={() => void runServerVoiceAction('toggleCamera')}

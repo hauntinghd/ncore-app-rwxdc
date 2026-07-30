@@ -12,6 +12,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { ConnectionPanel } from '../components/layout/ConnectionPanel';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -149,6 +150,8 @@ export function VoiceChannelPage() {
     return map;
   }, [session.dbSessions]);
 
+  const [showConnectionPanel, setShowConnectionPanel] = useState(false);
+
   const localSpeakerUid = String(user?.id || profile?.id || '');
   const isLocalSpeaking = localSpeakerUid ? session.activeSpeakerUids.includes(localSpeakerUid) : false;
   const localName = profile?.display_name || profile?.username || 'You';
@@ -261,13 +264,39 @@ export function VoiceChannelPage() {
             </div>
 
             <div className="relative flex items-center justify-center gap-4 py-4 border-t border-surface-800 bg-surface-900 flex-shrink-0">
-              <div className="text-xs text-surface-500 absolute left-4">
+              <div className="absolute left-4 text-xs text-surface-500">
                 {session.isConnected ? (
-                  <span className="flex items-center gap-1.5 text-green-400">
-                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                    {connectionTelemetryLabel ? `Connected • ${connectionTelemetryLabel}` : 'Connected'}
-                  </span>
-                ) : 'Connecting...'}
+                  <div className="relative">
+                    {/* The summary was already here but was not clickable. The
+                        detail behind it is what people actually want when a
+                        call sounds wrong. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowConnectionPanel((value) => !value)}
+                      className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-green-400 transition-colors hover:bg-surface-800"
+                      title="Connection details"
+                    >
+                      <div className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                      {connectionTelemetryLabel
+                        ? `Connected • ${connectionTelemetryLabel}`
+                        : 'Connected'}
+                    </button>
+                    {showConnectionPanel && (
+                      <div className="absolute bottom-full left-0 z-50 mb-2">
+                        <ConnectionPanel
+                          averagePingMs={session.averagePingMs}
+                          lastPingMs={session.lastPingMs}
+                          outboundPacketLossPct={session.outboundPacketLossPct}
+                          uplinkQuality={session.uplinkQuality}
+                          downlinkQuality={session.downlinkQuality}
+                          onClose={() => setShowConnectionPanel(false)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  'Connecting...'
+                )}
               </div>
 
               <button
