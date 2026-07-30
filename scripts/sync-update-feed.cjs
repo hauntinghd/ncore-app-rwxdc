@@ -119,6 +119,51 @@ function assertPatchStepVersion(version, releases) {
   }
 }
 
+const DEFAULT_INSTALLER_BASE_URL =
+  'https://github.com/hauntinghd/ncore-app-rwxdc/releases/download';
+
+/**
+ * Rewrites the installer URL in a synced latest.yml to an absolute location.
+ *
+ * electron-updater resolves a relative `url` against the feed's own base, and
+ * accepts an absolute one as-is — so this is the whole change needed to move
+ * where binaries live without touching any installed client.
+ *
+ * A no-op when the base URL is explicitly blank, which restores the old
+ * behaviour of serving the installer next to the feed.
+ */
+function rewriteInstallerUrl(latestYmlTargetPath, version, installerFileName) {
+  const base = process.env.NCORE_INSTALLER_BASE_URL !== undefined
+    ? String(process.env.NCORE_INSTALLER_BASE_URL).trim()
+    : DEFAULT_INSTALLER_BASE_URL;
+  if (!base) return;
+  if (!fs.existsSync(latestYmlTargetPath)) return;
+
+  const absoluteUrl = `${base.replace(/\/+$/, '')}/v${version}/${installerFileName}`;
+  const raw = fs.readFileSync(latestYmlTargetPath, 'utf8');
+
+  // Line-wise rather than regex: the filename contains dots and the YAML has
+  // only two lines to touch, so building an escaped pattern is more ways to be
+  // wrong than it is worth.
+  const rewritten = raw
+    .split('\n')
+    .map((line) => {
+      const urlMatch = line.match(/^(\s*-\s*url:\s*)(.+?)\s*$/);
+      if (urlMatch && urlMatch[2] === installerFileName) {
+        return `${urlMatch[1]}${absoluteUrl}`;
+      }
+      const pathMatch = line.match(/^(path:\s*)(.+?)\s*$/);
+      if (pathMatch && pathMatch[2] === installerFileName) {
+        return `${pathMatch[1]}${absoluteUrl}`;
+      }
+      return line;
+    })
+    .join('\n');
+
+  fs.writeFileSync(latestYmlTargetPath, rewritten, 'utf8');
+  console.log(`Installer URL -> ${absoluteUrl}`);
+}
+
 function listApkCandidates(searchDirs) {
   const candidates = [];
   for (const dir of searchDirs) {
@@ -346,11 +391,26 @@ function main() {
   const blockmapFileName = path.basename(blockmapPath);
   syncReleaseNotes(parsed.version);
 
+  /*
+    Installers are hosted on GitHub Releases, not on the web deploy.
+
+    Vercel rejects individual files near 100 MB, and the NSIS installer sits at
+    ~99 MB with every build nudging it closer. Serving it from the web app also
+    billed every desktop download against the site's bandwidth.
+
+    So `latest.yml` still ships to the site (electron-updater's `publish.url`
+    points at this domain and every installed client depends on that staying
+    put), but the installer URL inside it is rewritten to an absolute GitHub
+    asset link, and the binary itself is not copied into the deploy payload.
+
+    Set NCORE_INSTALLER_BASE_URL to override, or to '' to go back to
+    co-hosting the installer with the site.
+  */
   for (const targetDir of targets) {
     copyFile(latestYmlPath, targetDir);
-    copyFile(installerPath, targetDir);
-    copyFile(blockmapPath, targetDir);
     copyFile(publicReleaseNotesPath, targetDir);
+    rewriteInstallerUrl(path.join(targetDir, 'latest.yml'), parsed.version, installerFileName);
+    copyFile(blockmapPath, targetDir);
   }
   const latestApkFileName = syncMobileFeed(parsed.version);
   for (const targetDir of targets) {
