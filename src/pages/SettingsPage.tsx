@@ -55,6 +55,7 @@ import { promptPwaInstall } from '../lib/pwaRuntime';
 import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
 import { resolveGrowthSourceChannel } from '../lib/growthEvents';
 import { E2EDevicesSection } from '../components/community/E2EDevicesSection';
+import { MutedScopesSection } from '../components/community/MutedScopesSection';
 
 type SectionId =
   | 'my-account'
@@ -3020,6 +3021,8 @@ export function SettingsPage() {
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Notifications</h2>
                   <p className="text-surface-500 text-sm">Choose what you want to be notified about</p>
                 </div>
+
+                <MutedScopesSection />
 
                 <div className="nyptid-card p-6">
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-2">Messages & Social</div>

@@ -39,6 +39,11 @@ import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime } from '../lib/utils';
 import { EmojiPicker, ReactionEmoji } from '../components/chat/EmojiPicker';
 import { LinkEmbeds } from '../components/chat/LinkEmbeds';
+import {
+  MUTE_DURATIONS,
+  resolveChannelMode,
+  setNotificationPreference,
+} from '../lib/notificationPrefs';
 import { useCustomEmojis } from '../contexts/CustomEmojiContext';
 import {
   filterEmojiSuggestions,
@@ -614,22 +619,62 @@ export function ChatPage() {
     };
   }, [communityId]);
 
+  /*
+    Notification mode was device-local in localStorage, so muting a channel on
+    desktop did nothing on the phone. It now lives in `notification_preferences`
+    and follows the account. localStorage is kept as a synchronous mirror only:
+    the sidebar reads it to render mute state on first paint without waiting on
+    a round trip.
+  */
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
-    const next = window.localStorage.getItem(storageKey) as 'all' | 'mentions' | 'none' | null;
-    if (next === 'all' || next === 'mentions' || next === 'none') {
-      setChannelNotificationMode(next);
-    } else {
-      setChannelNotificationMode('all');
-    }
-  }, [channelId]);
+    const cached = window.localStorage.getItem(storageKey) as 'all' | 'mentions' | 'none' | null;
+    setChannelNotificationMode(
+      cached === 'all' || cached === 'mentions' || cached === 'none' ? cached : 'all',
+    );
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
-    window.localStorage.setItem(storageKey, channelNotificationMode);
-  }, [channelId, channelNotificationMode]);
+    if (!channelId) return;
+    let cancelled = false;
+    void resolveChannelMode(channelId, communityId ?? null)
+      .then((mode) => {
+        if (cancelled) return;
+        setChannelNotificationMode(mode);
+        window.localStorage.setItem(storageKey, mode);
+      })
+      .catch(() => {
+        // Offline or the migration is not applied yet — the cached value stands.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId, communityId]);
+
+  async function applyChannelNotificationMode(
+    mode: 'all' | 'mentions' | 'none',
+    muteMinutes?: number | null,
+  ) {
+    setChannelNotificationMode(mode);
+    if (typeof window !== 'undefined') {
+      const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
+      // A timed mute reads as silent until it lapses, which is what the sidebar
+      // needs to know; the exact expiry lives server-side.
+      window.localStorage.setItem(storageKey, muteMinutes ? 'none' : mode);
+    }
+    if (!channelId) return;
+    try {
+      await setNotificationPreference({
+        scopeKind: 'channel',
+        scopeId: channelId,
+        mode,
+        muteMinutes: muteMinutes ?? undefined,
+      });
+    } catch {
+      // The local mirror already applied; a failed sync is not worth blocking
+      // the menu over. It reconciles on the next channel open.
+    }
+  }
 
   useEffect(() => {
     if (!messageContextMenu) return undefined;
@@ -1669,17 +1714,20 @@ export function ChatPage() {
               className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
             >
               <div id={notificationTitleId} className="text-lg font-semibold text-surface-100">Notification Settings</div>
-              <p className="text-sm text-surface-400 mt-2">Choose how notifications work for this channel.</p>
+              <p className="text-sm text-surface-400 mt-2">
+                Choose how notifications work for this channel. This follows your account, not just
+                this device.
+              </p>
               <div className="mt-4 space-y-2">
                 {[
                   { id: 'all' as const, label: 'All Messages', desc: 'Receive notifications for all channel activity.' },
                   { id: 'mentions' as const, label: 'Only @mentions', desc: 'Only notify when you are directly mentioned.' },
-                  { id: 'none' as const, label: 'Nothing', desc: 'Mute this channel.' },
+                  { id: 'none' as const, label: 'Nothing', desc: 'Mute this channel. Direct mentions still show a badge.' },
                 ].map((option) => (
                   <button
                     key={option.id}
                     type="button"
-                    onClick={() => setChannelNotificationMode(option.id)}
+                    onClick={() => void applyChannelNotificationMode(option.id)}
                     className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                       channelNotificationMode === option.id
                         ? 'border-nyptid-300/40 bg-nyptid-300/10'
@@ -1690,6 +1738,28 @@ export function ChatPage() {
                     <div className="text-xs text-surface-500 mt-0.5">{option.desc}</div>
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-4 border-t border-surface-700 pt-3">
+                <div className="text-xs font-semibold tracking-wide text-surface-500 uppercase">
+                  Mute temporarily
+                </div>
+                <p className="mt-1 text-xs text-surface-500">
+                  Silences the channel and then puts your setting back, so a busy afternoon does
+                  not turn into a channel you forgot you muted.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {MUTE_DURATIONS.filter((duration) => duration.minutes !== null).map((duration) => (
+                    <button
+                      key={duration.label}
+                      type="button"
+                      onClick={() => void applyChannelNotificationMode('all', duration.minutes)}
+                      className="nyptid-btn-secondary px-2.5 py-1 text-xs"
+                    >
+                      {duration.label.replace(/^For /, '')}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowNotificationModal(false)}>

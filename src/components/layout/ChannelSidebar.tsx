@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
+  BellOff,
   CalendarPlus,
   Check,
   ChevronDown,
@@ -32,6 +33,15 @@ import { SidebarUserDock } from './SidebarUserDock';
 import { useAuth } from '../../contexts/AuthContext';
 import { runServerVoiceAction, useServerVoiceShellState } from '../../lib/serverVoiceShell';
 import { getCommunityRoleBadge } from '../../lib/utils';
+import {
+  fetchCommunityModes,
+  fetchMutedScopes,
+  muteScope,
+  unmuteScope,
+  suppressesMentions,
+  suppressesUnread,
+  type NotificationMode,
+} from '../../lib/notificationPrefs';
 import type { ChannelUnread } from '../../lib/readState';
 import type { Community, Channel, ChannelCategory, VoiceSession } from '../../lib/types';
 
@@ -125,9 +135,81 @@ export function ChannelSidebar({
     window.localStorage.setItem(hideMutedStorageKey, hideMutedChannels ? '1' : '0');
   }, [hideMutedChannels, hideMutedStorageKey]);
 
+  /*
+    Notification modes come from the account (`notification_preferences`), with
+    localStorage as a synchronous mirror so mute state is right on first paint
+    rather than flashing un-muted for a round trip.
+  */
+  const [serverModes, setServerModes] = useState<Record<string, NotificationMode>>({});
+
+  useEffect(() => {
+    const targetCommunityId = community?.id;
+    if (!targetCommunityId) {
+      setServerModes({});
+      return;
+    }
+    let cancelled = false;
+    void fetchCommunityModes(String(targetCommunityId)).then((modes) => {
+      if (cancelled) return;
+      setServerModes(modes);
+      if (typeof window === 'undefined') return;
+      for (const [channelId, mode] of Object.entries(modes)) {
+        window.localStorage.setItem(`ncore.chat.channelNotifMode.${channelId}`, mode);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [community?.id]);
+
+  const [communityMuted, setCommunityMuted] = useState(false);
+
+  useEffect(() => {
+    const targetCommunityId = community?.id;
+    if (!targetCommunityId) {
+      setCommunityMuted(false);
+      return;
+    }
+    let cancelled = false;
+    void fetchMutedScopes().then((scopes) => {
+      if (cancelled) return;
+      setCommunityMuted(
+        scopes.some(
+          (scope) => scope.scopeKind === 'community' && scope.scopeId === String(targetCommunityId),
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [community?.id]);
+
+  async function toggleCommunityMute() {
+    const targetCommunityId = community?.id;
+    if (!targetCommunityId) return;
+    const next = !communityMuted;
+    // Optimistic: the menu closes on click, so waiting on the round trip would
+    // mean the state only visibly changes the next time it is opened.
+    setCommunityMuted(next);
+    try {
+      if (next) await muteScope('community', String(targetCommunityId), null);
+      else await unmuteScope('community', String(targetCommunityId));
+      setServerModes(await fetchCommunityModes(String(targetCommunityId)));
+    } catch {
+      setCommunityMuted(!next);
+    }
+  }
+
+  function channelMode(channelId: string): NotificationMode {
+    const fromServer = serverModes[channelId];
+    if (fromServer) return fromServer;
+    if (typeof window === 'undefined') return 'all';
+    const cached = window.localStorage.getItem(`ncore.chat.channelNotifMode.${channelId}`);
+    return cached === 'none' || cached === 'mentions' ? cached : 'all';
+  }
+
   function isChannelMuted(channelId: string): boolean {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(`ncore.chat.channelNotifMode.${channelId}`) === 'none';
+    return suppressesUnread(channelMode(channelId));
   }
 
   const visibleCategories = useMemo(() => (
@@ -243,6 +325,19 @@ export function ChannelSidebar({
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.preventDefault()}
             >
+              <button
+                type="button"
+                onClick={() => void toggleCommunityMute()}
+                className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
+              >
+                <span>{communityMuted ? 'Unmute Server' : 'Mute Server'}</span>
+                {communityMuted ? (
+                  <BellOff size={15} className="text-amber-300" />
+                ) : (
+                  <Bell size={15} className="text-surface-500" />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={() => handleServerMenuNavigation('/app/settings?section=server-boost')}
@@ -464,13 +559,16 @@ export function ChannelSidebar({
               const participants = voiceSessions[channel.id] || [];
               const isActive = channel.id === activeChannelId;
               const isCurrentVoice = channel.id === currentVoiceChannelId;
-              const isMutedChannel = isChannelMuted(String(channel.id || '').trim());
+              const mode = channelMode(String(channel.id || '').trim());
+              const isMutedChannel = suppressesUnread(mode);
               const channelUnread = unreadByChannel[channel.id];
               // The open channel is being read right now, so never badge it.
               const unreadCount = isActive ? 0 : (channelUnread?.unreadCount ?? 0);
               // Muted channels still surface direct mentions — that is the
               // whole point of muting a busy channel rather than leaving it.
-              const mentionCount = isActive ? 0 : (channelUnread?.mentionCount ?? 0);
+              // Only an explicit "Nothing" swallows those too.
+              const mentionCount =
+                isActive || suppressesMentions(mode) ? 0 : (channelUnread?.mentionCount ?? 0);
               const showUnread = unreadCount > 0 && !isMutedChannel;
 
               return (
