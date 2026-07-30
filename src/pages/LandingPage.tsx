@@ -274,7 +274,7 @@ export function LandingPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#070917] text-[#f5f7ff]">
+    <div className="landing-shell relative min-h-screen overflow-x-hidden bg-[#070917] text-[#f5f7ff]">
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_9%_8%,rgba(65,221,202,0.18),transparent_34%),radial-gradient(circle_at_88%_10%,rgba(119,107,255,0.2),transparent_34%),radial-gradient(circle_at_52%_88%,rgba(242,96,164,0.13),transparent_44%),linear-gradient(180deg,#0b1023_0%,#070917_100%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:48px_48px] opacity-40" />
@@ -596,7 +596,7 @@ export function LandingPage() {
                     : 'border-white/8 bg-[linear-gradient(160deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))]'
                 }`}
               >
-                <div className="border-b border-white/8 px-5 py-5">
+                <div className="lift glass-edge border-b border-white/8 px-5 py-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-white/52">{surface.eyebrow}</div>
@@ -630,13 +630,13 @@ export function LandingPage() {
           <div className="overflow-hidden rounded-[36px] border border-white/8 bg-[linear-gradient(135deg,rgba(65,221,202,0.14),rgba(255,255,255,0.03)_24%,rgba(119,107,255,0.18)_100%)] px-6 py-8 lg:px-8 lg:py-10">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#f0c87d]">Next Phase</div>
-                <div className="mt-4 max-w-3xl text-4xl font-black leading-tight text-white">
-                  NCore should feel like a finished product company, not a promising prototype.
+                <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#f0c87d]">Own your platform</div>
+                <div className="mt-4 max-w-3xl text-4xl font-black leading-[1.08] tracking-[-0.02em] text-white">
+                  Your community shouldn't live somewhere you can be evicted from.
                 </div>
                 <div className="mt-4 max-w-2xl text-sm leading-7 text-white/68 sm:text-base">
-                  This site now sells the right story. The next step is to keep eliminating unfinished flows inside the
-                  app until the product quality matches the positioning.
+                  Messaging, voice, moderation, identity, and distribution in one stack you control. No platform
+                  deciding your rules, your reach, or whether your community still exists tomorrow.
                 </div>
               </div>
 

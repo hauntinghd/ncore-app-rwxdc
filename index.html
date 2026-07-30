@@ -13,6 +13,31 @@
     <meta name="apple-mobile-web-app-title" content="NCore" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="theme-color" content="#0b1018" />
+    <!-- The app opens a Supabase connection during boot. Warming DNS, TCP and
+         TLS here overlaps roughly a round trip with parsing and rendering
+         instead of paying for it after the bundle executes. -->
+    <link rel="preconnect" href="https://kxheuoaurlaociszyrof.supabase.co" crossorigin />
+    <link rel="dns-prefetch" href="https://kxheuoaurlaociszyrof.supabase.co" />
+
+    <!-- Paint the brand background before any JS runs, so the first frame is
+         the product rather than a white flash on a dark app. -->
+    <style>
+      html { background: #0b1018; color-scheme: dark; }
+      body { margin: 0; background: #0b1018; }
+      #root:empty::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(60rem 40rem at 70% -10%, rgba(56,132,255,.10), transparent 60%),
+          radial-gradient(48rem 32rem at 10% 10%, rgba(226,160,58,.07), transparent 60%);
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        #root { animation: ncore-fade .18s ease-out both; }
+        @keyframes ncore-fade { from { opacity: 0 } to { opacity: 1 } }
+      }
+    </style>
+
     <title>NCore | Owned Communication Infrastructure for Serious Communities</title>
     <meta name="description" content="NCore by NYPTID Industries Advanced Technologies. Messaging, calls, community operations, and owned distribution in one product stack." />
   </head>

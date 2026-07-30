@@ -500,3 +500,54 @@ html.ncore-mobile .ncore-admin-desktop-nav {
   border-color: rgba(96, 143, 211, 0.4);
   color: #d7e4fb;
 }
+
+/* ---------------------------------------------------------------------------
+   Landing polish
+   ---------------------------------------------------------------------------
+   Display type at these sizes needs tighter tracking and optical alignment to
+   read as designed rather than as default browser output — the single biggest
+   difference between a page that looks considered and one that does not.
+*/
+.landing-shell h1,
+.landing-shell h2,
+.landing-shell .display {
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  font-feature-settings: 'ss01', 'cv01';
+}
+
+.landing-shell p,
+.landing-shell .prose-body {
+  text-wrap: pretty;
+  hanging-punctuation: first last;
+}
+
+/* Panels lift on approach rather than snapping — motion is the cheapest
+   sophistication signal there is, provided it stays under ~200ms. */
+@media (prefers-reduced-motion: no-preference) {
+  .landing-shell .lift {
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+    will-change: transform;
+  }
+  .landing-shell .lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 48px -24px rgba(0, 0, 0, 0.75);
+  }
+}
+
+/* Crisper edges on the glass panels: a hairline highlight along the top edge
+   reads as a lit surface instead of a flat translucent rectangle. */
+.landing-shell .glass-edge {
+  position: relative;
+}
+.landing-shell .glass-edge::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  pointer-events: none;
+}

@@ -1912,6 +1912,26 @@ export function DirectMessagePage() {
     stages.afterDedupe = deduped.length;
     setDmLoadStages(stages);
 
+    /*
+      Never replace a populated list with an empty one when the server just
+      told us there are conversations.
+
+      This is the "DMs vanish instantly" path: the cache paints the list, then
+      this load finishes, and if anything between membership and dedupe drops
+      every row the assignment wipes the screen. Membership is authoritative
+      for "conversations exist" — if it returned rows and we ended up with
+      none, the pipeline lost them and the previous list is closer to the truth
+      than an empty one.
+    */
+    if (deduped.length === 0 && requestedConversationIds.length > 0) {
+      console.warn(
+        `[dm] load produced 0 conversations from ${requestedConversationIds.length} memberships; keeping previous list.`,
+        stages,
+      );
+      setConversationsLoaded(true);
+      return;
+    }
+
     setConversations(deduped as DirectConversation[]);
     setConversationsLoaded(true);
   }
