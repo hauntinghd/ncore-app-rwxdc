@@ -129,6 +129,59 @@ function persistVoiceTogglePreferences(next: { startMuted?: boolean; startDeafen
   });
 }
 
+/**
+ * Turns a getUserMedia / getDisplayMedia failure into something a person can
+ * act on.
+ *
+ * The browser's own messages ("Requested device not found") do not tell anyone
+ * what to do next, and the distinction that matters — permission versus
+ * hardware versus another app holding the device — is carried in the error
+ * name, not the message.
+ */
+/**
+ * Whether a capture failure was the user closing the picker.
+ *
+ * The screen-share path tries several capture methods and concatenates their
+ * errors, so the cancel signal has to be matched against the whole string
+ * rather than a single error object.
+ */
+function isUserCancelledCapture(error: unknown): boolean {
+  const err = error as { name?: string; message?: string };
+  const name = String(err?.name || '');
+  const message = String(err?.message || '');
+  if (name === 'NotAllowedError' || name === 'AbortError') return true;
+  return /permission denied by user|user (?:cancel|abort)|cancelled by user|NotAllowedError/i.test(
+    message,
+  );
+}
+
+function describeMediaError(error: unknown, kind: 'camera' | 'screen'): string {
+  const err = error as { name?: string; message?: string; code?: string | number };
+  const name = String(err?.name || '');
+  const message = String(err?.message || '');
+  const device = kind === 'camera' ? 'camera' : 'screen share';
+
+  if (name === 'NotAllowedError' || /permission|denied/i.test(message)) {
+    return kind === 'camera'
+      ? 'Camera access was denied. Allow camera access for NCore in your browser or system settings, then try again.'
+      : 'Screen sharing was cancelled or denied. Try again and pick a screen or window to share.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return kind === 'camera'
+      ? 'No camera was found. Connect one, or pick a different device in Settings → Voice & Video.'
+      : 'Nothing was available to share.';
+  }
+  if (name === 'NotReadableError' || name === 'AbortError') {
+    return `Your ${device} is already in use by another application. Close it and try again.`;
+  }
+  if (name === 'SecurityError') {
+    return `Your browser blocked ${device} access on this page.`;
+  }
+  return message
+    ? `Could not start your ${device}: ${message}`
+    : `Could not start your ${device}.`;
+}
+
 function formatRtcError(error: unknown): string {
   const e = error as any;
   return [e?.name || 'UnknownError', e?.code ? `code=${e.code}` : '', e?.message || String(error || '')]
@@ -1172,30 +1225,86 @@ class ServerVoiceSessionStore {
     }
   }
 
+  /**
+   * Turns the camera on or off.
+   *
+   * Every caller invokes this as `void toggleCamera()`, so anything thrown here
+   * vanishes into an unhandled rejection and the button silently does nothing —
+   * which is exactly what a denied camera permission, a camera held by another
+   * app, or a machine with no camera used to look like. Failures are caught and
+   * surfaced through `connectionError` instead.
+   */
   async toggleCamera() {
     if (!this.client || !this.state.channelId || !this.localProfileId) return;
-    const nextCameraOn = !this.state.isCameraOn;
-    if (this.state.isCameraOn && this.localVideoTrack) {
-      await this.client.unpublish([this.localVideoTrack]);
-      this.localVideoTrack.stop();
-      this.localVideoTrack.close();
-      this.localVideoTrack = null;
+
+    const turningOff = this.state.isCameraOn;
+    const nextCameraOn = !turningOff;
+
+    try {
+      this.setState({ connectionError: '' });
+
+      if (turningOff) {
+        if (this.localVideoTrack) {
+          const track = this.localVideoTrack;
+          // Cleared first so a failure to unpublish cannot leave a dangling
+          // reference that the next toggle tries to reuse.
+          this.localVideoTrack = null;
+          try {
+            await this.client.unpublish([track]);
+          } finally {
+            try {
+              track.stop();
+              track.close();
+            } catch {
+              // The track is being discarded either way.
+            }
+          }
+        }
+      } else {
+        const provider = await getProvider();
+        const videoTrack = await provider.createVideoTrack();
+        try {
+          await this.client.publish([videoTrack]);
+        } catch (publishError) {
+          // Publishing failed, so the track is orphaned — release the camera
+          // rather than leaving its light on with nothing consuming it.
+          try {
+            videoTrack.stop();
+            videoTrack.close();
+          } catch {
+            // noop
+          }
+          throw publishError;
+        }
+        this.localVideoTrack = videoTrack;
+      }
+
       this.setState({ isCameraOn: nextCameraOn });
       this.attachActiveLocalVideoTrack();
-    } else {
-      const provider = await getProvider();
-      const videoTrack = await provider.createVideoTrack();
-      this.localVideoTrack = videoTrack;
-      await this.client.publish([videoTrack]);
-      this.setState({ isCameraOn: nextCameraOn });
-      this.attachActiveLocalVideoTrack();
+    } catch (error) {
+      this.setState({
+        isCameraOn: Boolean(this.localVideoTrack),
+        connectionError: describeMediaError(error, 'camera'),
+      });
+      queueRuntimeEvent('server_voice_camera_failed', {
+        channel_id: this.state.channelId,
+        turning_on: !turningOff,
+        message: formatRtcError(error),
+      }, { userId: this.localProfileId, sampleRate: 1 });
+      return;
     }
 
-    await supabase
-      .from('voice_sessions')
-      .update({ is_camera_on: nextCameraOn })
-      .eq('channel_id', this.state.channelId)
-      .eq('user_id', this.localProfileId);
+    // Mirroring to the DB is presentation only — if it fails, the local call
+    // is still correct and other people just see a stale camera icon.
+    try {
+      await supabase
+        .from('voice_sessions')
+        .update({ is_camera_on: nextCameraOn })
+        .eq('channel_id', this.state.channelId)
+        .eq('user_id', this.localProfileId);
+    } catch {
+      // noop
+    }
   }
 
   async toggleScreenShare() {
@@ -1330,7 +1439,19 @@ class ServerVoiceSessionStore {
         error: formatRtcError(error),
       }, { userId: this.localProfileId, sampleRate: 1 });
       await this.stopScreenShare(false);
-      this.setState({ connectionError: `Could not start screen sharing: ${formatRtcError(error)}` });
+
+      /*
+        Dismissing the picker is a normal thing to do, not a failure. Showing a
+        red error banner for it trains people to ignore the banner, so the
+        cancel case is silent and only real failures are reported — and those
+        get a sentence someone can act on rather than a concatenation of
+        internal attempt labels.
+      */
+      if (isUserCancelledCapture(error)) {
+        this.setState({ connectionError: '' });
+        return;
+      }
+      this.setState({ connectionError: describeMediaError(error, 'screen') });
     }
   }
 
