@@ -56,6 +56,7 @@ import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
 import { resolveGrowthSourceChannel } from '../lib/growthEvents';
 import { E2EDevicesSection } from '../components/community/E2EDevicesSection';
 import { MutedScopesSection } from '../components/community/MutedScopesSection';
+import { VoiceDiagnosticsSection } from '../components/community/VoiceDiagnosticsSection';
 
 type SectionId =
   | 'my-account'
@@ -3081,6 +3082,8 @@ export function SettingsPage() {
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Voice & Video</h2>
                   <p className="text-surface-500 text-sm">Configure your audio and video settings for calls</p>
                 </div>
+
+                <VoiceDiagnosticsSection />
 
                 <div className="nyptid-card p-5 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">

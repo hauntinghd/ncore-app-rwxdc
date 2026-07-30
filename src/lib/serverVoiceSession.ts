@@ -11,6 +11,7 @@ import type {
 import { getRTCProvider } from './rtc';
 import { loadCallSettings, saveCallSettings } from './callSettings';
 import { queueRuntimeEvent } from './runtimeTelemetry';
+import { VoiceJoinTracker, bestRegion, probeRegions } from './voiceTelemetry';
 import { publishServerVoiceShellState } from './serverVoiceShell';
 import { supabase } from './supabase';
 import type { Channel, VoiceSession } from './types';
@@ -177,6 +178,8 @@ class ServerVoiceSessionStore {
     privacyCode: initialState.privacyCode,
   };
   private lifecycleToken = 0;
+  /** Measures one join attempt. Null between sessions. */
+  private joinTracker: VoiceJoinTracker | null = null;
 
   private client: IRTCClient | null = null;
   private localUid: string | null = null;
@@ -685,6 +688,22 @@ class ServerVoiceSessionStore {
     const { communityId, channelId, channelName, profileId, userId } = options;
     if (!channelId || !profileId) return false;
     const joinToken = ++this.lifecycleToken;
+
+    /*
+      Started before anything else, including the token fetch: the token round
+      trip is part of what the user experiences as "joining", and excluding it
+      would flatter the numbers.
+    */
+    this.joinTracker = new VoiceJoinTracker({
+      kind: 'server_voice',
+      channelId,
+      communityId,
+      userId: profileId,
+    });
+    void bestRegion().then(async (region) => {
+      this.joinTracker?.setRegion(region, await probeRegions());
+    });
+
     const activeCallSettings = loadCallSettings();
     const preferredMuted = Boolean(activeCallSettings.startMuted);
     const preferredDeafened = Boolean(activeCallSettings.startDeafened);
@@ -802,6 +821,9 @@ class ServerVoiceSessionStore {
           }
         }
         if (mediaType === 'audio' && participant.audioTrack) {
+          // The moment the user could first hear someone — the number the
+          // moonshot target is actually about.
+          this.joinTracker?.markFirstRemoteAudio();
           this.remoteAudioTracks.set(uid, participant.audioTrack);
           try {
             participant.audioTrack.play();
@@ -846,6 +868,7 @@ class ServerVoiceSessionStore {
       });
 
       const token = await provider.resolveToken(channelId, this.localUid);
+      this.joinTracker?.markTokenFetched();
       if (joinToken !== this.lifecycleToken) {
         try {
           await client.leave();
@@ -855,6 +878,8 @@ class ServerVoiceSessionStore {
         return false;
       }
       await client.join({ channelName: channelId, token, uid: this.localUid });
+      this.joinTracker?.markRtcConnected();
+      this.joinTracker?.startSampling(client);
       rtcJoined = true;
       this.bindTokenRenewalHandlers(client, channelId, this.localUid, 'voice');
       client.on('network-quality', (quality) => {
@@ -913,6 +938,7 @@ class ServerVoiceSessionStore {
         await audioTrack.setEnabled(false);
       }
       await client.publish([audioTrack]);
+      this.joinTracker?.markLocalPublish();
       if (joinToken !== this.lifecycleToken) {
         try {
           await client.unpublish([audioTrack]);
@@ -985,6 +1011,11 @@ class ServerVoiceSessionStore {
     const activeRemoteVideoTracks = Array.from(this.remoteVideoTracks.values());
 
     this.stopStatsPolling();
+    // Writes the metrics row. `finish` decides the outcome itself — a session
+    // that connected but never heard anyone is recorded as abandoned, whatever
+    // the caller believes.
+    void this.joinTracker?.finish('connected');
+    this.joinTracker = null;
     await this.stopScreenShare(false);
 
     this.client = null;
