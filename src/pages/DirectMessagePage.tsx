@@ -344,6 +344,16 @@ export function DirectMessagePage() {
   const [sending, setSending] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [showNewDM, setShowNewDM] = useState(false);
+  /*
+    Where the conversation list lost its rows.
+
+    The DM list has now come back empty on a fresh install with a healthy
+    server (24 memberships returned by both RPCs under the account's own RLS),
+    after several wrong guesses at the cause. Rather than guess again, each
+    stage of the pipeline records its count and the empty state shows them, so
+    the step where N becomes 0 is visible instead of inferred.
+  */
+  const [dmLoadStages, setDmLoadStages] = useState<Record<string, number | string> | null>(null);
   const [showMessageRequests, setShowMessageRequests] = useState(false);
   const [messageRequestCount, setMessageRequestCount] = useState(0);
 
@@ -1594,7 +1604,13 @@ export function DirectMessagePage() {
       them. The open conversation is always kept so a direct link still works
       and so accepting from the panel navigates into something that exists.
     */
+    const stages: Record<string, number | string> = {
+      membership: requestedConversationIds.length,
+      source: rpcRows.length > 0 ? 'rpc' : 'table',
+    };
+
     const acceptedIds = await fetchAcceptedConversationIds();
+    stages.acceptedRpc = acceptedIds === null ? 'null (skipped)' : acceptedIds.length;
     if (acceptedIds) {
       const accepted = new Set(acceptedIds);
       requestedConversationIds = requestedConversationIds.filter(
@@ -1656,6 +1672,8 @@ export function DirectMessagePage() {
       setConversationsLoaded(true);
       return;
     }
+
+    stages.afterAcceptedFilter = requestedConversationIds.length;
 
     const { data: conversationsData, error: conversationsError } = await supabase
       .from('direct_conversations')
@@ -1888,6 +1906,11 @@ export function DirectMessagePage() {
       directSeen.add(key);
       return true;
     });
+
+    stages.hydrated = hydrated.length;
+    stages.afterClosedFilter = filtered.length;
+    stages.afterDedupe = deduped.length;
+    setDmLoadStages(stages);
 
     setConversations(deduped as DirectConversation[]);
     setConversationsLoaded(true);
@@ -3654,6 +3677,29 @@ export function DirectMessagePage() {
                 >
                   Start a DM
                 </button>
+
+                {/*
+                  Shown only when the list is empty AND the server actually
+                  returned memberships — i.e. exactly the broken case. A genuine
+                  empty inbox reports membership 0 and this stays hidden.
+                */}
+                {dmLoadStages && Number(dmLoadStages.membership) > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-left">
+                    <div className="text-[11px] font-semibold text-amber-200">
+                      {dmLoadStages.membership} conversations were returned but none are showing.
+                    </div>
+                    <div className="mt-1.5 font-mono text-[10px] leading-relaxed text-amber-100/80">
+                      {Object.entries(dmLoadStages).map(([stage, value]) => (
+                        <div key={stage}>
+                          {stage}: {String(value)}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-amber-100/60">
+                      Send this to support — it identifies which step dropped them.
+                    </div>
+                  </div>
+                )}
               </div>
             ) : visibleConversations.map(conv => {
               const { src, name, status } = getConversationAvatar(conv);

@@ -1,0 +1,11 @@
+{
+  "version": "11.7.118",
+  "date": "2026-07-30",
+  "badge": "Current Build",
+  "improvements": [
+    "When the conversation list is empty but the server did return conversations, the app now shows exactly which step dropped them instead of a bare \"No conversations yet\"."
+  ],
+  "bugFixes": [
+    "The update panel no longer says \"NCore is up to date\" directly underneath \"Update available\". When a newer release exists but no signed in-app update is published, it says so and points at the manual download."
+  ]
+}
