@@ -39,6 +39,8 @@ import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime } from '../lib/utils';
 import { EmojiPicker, ReactionEmoji } from '../components/chat/EmojiPicker';
 import { LinkEmbeds } from '../components/chat/LinkEmbeds';
+import { GifPicker } from '../components/chat/GifPicker';
+import { isGifSearchAvailable } from '../lib/gifs';
 import {
   MUTE_DURATIONS,
   resolveChannelMode,
@@ -404,6 +406,25 @@ export function ChatPage() {
     if (typeof window === 'undefined') return 'all';
     return (window.localStorage.getItem('ncore.chat.channelNotifMode') as 'all' | 'mentions' | 'none') || 'all';
   });
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [showComposerEmoji, setShowComposerEmoji] = useState(false);
+  /*
+    GIF search depends on a server-side Tenor key. Probed once per session so
+    the button is simply absent on a deployment without one, rather than
+    present and broken.
+  */
+  const [gifsAvailable, setGifsAvailable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void isGifSearchAvailable().then((available) => {
+      if (!cancelled) setGifsAvailable(available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [showThreadsModal, setShowThreadsModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
@@ -921,11 +942,16 @@ export function ChatPage() {
     }
   }
 
-  async function handleSend() {
+  /**
+   * `overrideContent` lets the GIF picker send without routing through the
+   * composer's `input` state — a setState followed by a send would race, and
+   * the picker must not be able to drop or duplicate the user's draft.
+   */
+  async function handleSend(overrideContent?: string) {
     if (!profile || !channelId || sending) return;
     setComposerError('');
 
-    const content = input.trim().slice(0, maxMessageLength);
+    const content = (overrideContent ?? input).trim().slice(0, maxMessageLength);
     const filesToSend = [...pendingFiles];
     const hasText = content.length > 0;
     const hasFiles = filesToSend.length > 0;
@@ -957,7 +983,9 @@ export function ChatPage() {
       }, { userId: profile.id, sampleRate: 1 });
     }
 
-    setInput('');
+    // A GIF send carries its own content, so the draft in the composer is not
+    // its to clear.
+    if (overrideContent === undefined) setInput('');
     setPendingFiles([]);
     setSending(true);
 
@@ -1588,11 +1616,60 @@ export function ChatPage() {
               }}
             />
             <div className="flex items-center gap-1 flex-shrink-0">
-              <button className="p-1.5 text-surface-500 hover:text-surface-300 transition-colors">
-                <Smile size={18} />
-              </button>
+              {gifsAvailable && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGifPicker((value) => !value);
+                      setShowComposerEmoji(false);
+                    }}
+                    aria-label="Add a GIF"
+                    title="GIF"
+                    className={`px-1.5 py-1 text-xs font-bold transition-colors ${
+                      showGifPicker ? 'text-nyptid-300' : 'text-surface-500 hover:text-surface-300'
+                    }`}
+                  >
+                    GIF
+                  </button>
+                  {showGifPicker && (
+                    <div className="absolute bottom-full right-0 z-50 mb-2">
+                      <GifPicker
+                        onSelect={(content) => void handleSend(content)}
+                        onClose={() => setShowGifPicker(false)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowComposerEmoji((value) => !value);
+                    setShowGifPicker(false);
+                  }}
+                  aria-label="Add an emoji"
+                  className={`p-1.5 transition-colors ${
+                    showComposerEmoji ? 'text-nyptid-300' : 'text-surface-500 hover:text-surface-300'
+                  }`}
+                >
+                  <Smile size={18} />
+                </button>
+                {showComposerEmoji && (
+                  <div className="absolute bottom-full right-0 z-50 mb-2">
+                    <EmojiPicker
+                      communityId={communityId ?? null}
+                      onSelect={(value) => {
+                        setInput((current) => `${current}${value}`);
+                        setShowComposerEmoji(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
               <button
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 disabled={(!input.trim() && pendingFiles.length === 0) || sending || uploadingFiles}
                 className={`p-1.5 rounded-lg transition-colors ${
                   input.trim() || pendingFiles.length > 0
