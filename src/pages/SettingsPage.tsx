@@ -4489,7 +4489,20 @@ export function SettingsPage() {
                     </div>
                   )}
                   {updateDownloadMessage && (
-                    <div className="mt-3 text-xs text-surface-400">{updateDownloadMessage}</div>
+                    <div className="mt-3 text-xs text-surface-400">
+                      {/*
+                        The signed-update check and the release feed are two
+                        different sources, and on the Tauri build they read two
+                        different endpoints. When they disagree, the app used to
+                        print "NCore is up to date." directly beneath "Update
+                        available: vX", which tells the user nothing except that
+                        the app is confused. Say what is actually true instead.
+                      */}
+                      {updateAhead && /up to date/i.test(updateDownloadMessage)
+                        ? `No signed in-app update is published for v${latestFeedVersion} yet. `
+                          + 'Download the installer from the link above to update manually.'
+                        : updateDownloadMessage}
+                    </div>
                   )}
                 </div>
 
