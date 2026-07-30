@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect, useRef, useMemo, type ChangeEvent, ty
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
+  Inbox,
   Plus,
   Send,
   Video,
@@ -17,6 +18,11 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { MessageRequestsPanel } from '../components/chat/MessageRequestsPanel';
+import {
+  fetchAcceptedConversationIds,
+  fetchMessageRequestCount,
+} from '../lib/messageRequests';
 import { SidebarUserDock, type SidebarVoiceDockState } from '../components/layout/SidebarUserDock';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
@@ -300,6 +306,27 @@ export function DirectMessagePage() {
   const [sending, setSending] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [showNewDM, setShowNewDM] = useState(false);
+  const [showMessageRequests, setShowMessageRequests] = useState(false);
+  const [messageRequestCount, setMessageRequestCount] = useState(0);
+
+  // Refreshed on mount and on focus. A pending request is not urgent enough to
+  // justify another realtime subscription on this already-heavy page.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void fetchMessageRequestCount()
+        .then((count) => {
+          if (!cancelled) setMessageRequestCount(count);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
   const [newDmMode, setNewDmMode] = useState<NewDmMode>('direct');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMemberIds, setNewGroupMemberIds] = useState<string[]>([]);
@@ -1455,9 +1482,25 @@ export function DirectMessagePage() {
       return;
     }
 
-    const requestedConversationIds = Array.from(
+    let requestedConversationIds = Array.from(
       new Set((membershipRows || []).map((row: any) => String(row.conversation_id)).filter((id) => isUuid(id)))
     );
+
+    /*
+      Pending message requests do not belong in the conversation list — they
+      live in the requests panel until accepted. `null` means the lookup failed
+      (most likely an un-migrated database), in which case nothing is filtered:
+      showing an extra conversation is a far smaller problem than hiding all of
+      them. The open conversation is always kept so a direct link still works
+      and so accepting from the panel navigates into something that exists.
+    */
+    const acceptedIds = await fetchAcceptedConversationIds();
+    if (acceptedIds) {
+      const accepted = new Set(acceptedIds);
+      requestedConversationIds = requestedConversationIds.filter(
+        (id) => accepted.has(id) || id === conversationId,
+      );
+    }
 
     if (requestedConversationIds.length === 0) {
       setConversations([]);
@@ -3359,6 +3402,13 @@ export function DirectMessagePage() {
 
   return (
     <AppShell showChannelSidebar={false} suppressPersistentVoiceBar title="Direct Messages">
+      <MessageRequestsPanel
+        isOpen={showMessageRequests}
+        onClose={() => setShowMessageRequests(false)}
+        onChanged={() => {
+          void fetchMessageRequestCount().then(setMessageRequestCount).catch(() => {});
+        }}
+      />
       <div className="flex h-full min-h-0">
         <div className={`${isCompactLayout && conversationId ? 'hidden' : 'flex'} ${isCompactLayout ? 'w-full' : 'w-72'} border-r border-surface-800 flex-col bg-surface-900`}>
           <div className="p-3 border-b border-surface-800">
@@ -3371,6 +3421,22 @@ export function DirectMessagePage() {
                 <Plus size={14} />
               </button>
             </div>
+
+            {messageRequestCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowMessageRequests(true)}
+                className="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-800/60 px-2.5 py-2 text-left transition-colors hover:border-surface-600 hover:bg-surface-800"
+              >
+                <Inbox size={14} className="flex-shrink-0 text-nyptid-300" />
+                <span className="flex-1 text-xs font-medium text-surface-200">
+                  Message Requests
+                </span>
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                  {messageRequestCount > 9 ? '9+' : messageRequestCount}
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto">
