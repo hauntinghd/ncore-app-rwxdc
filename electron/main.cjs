@@ -289,10 +289,14 @@ function createWindow() {
     icon: appIconPath,
     ...(isWindows ? {
       titleBarStyle: 'hidden',
+      // Height matches the app's own h-14 (56px) top bar so the native Windows
+      // caption buttons sit centered in that row rather than floating in a
+      // shorter strip above it. Windows draws these itself and always pins
+      // them to the true top-right corner of the window.
       titleBarOverlay: {
         color: '#11131a',
         symbolColor: '#f4f6fb',
-        height: 32,
+        height: 56,
       },
     } : {}),
     webPreferences: {

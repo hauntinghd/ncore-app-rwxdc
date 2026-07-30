@@ -1,0 +1,12 @@
+{
+  "version": "11.7.112",
+  "date": "2026-07-30",
+  "badge": "Current Build",
+  "improvements": [
+    "The window minimize, maximize, and close buttons now line up with the app's header row instead of sitting in a shorter strip above it."
+  ],
+  "bugFixes": [
+    "Fixed direct message conversations still not appearing. Conversations closed under older versions were hidden permanently, and that stored list is now discarded on upgrade so every conversation comes back.",
+    "The conversation list can no longer be emptied by hidden-conversation state. If every conversation would be hidden at once, they are shown instead, because an inbox you cannot get out of is never the correct result."
+  ]
+}

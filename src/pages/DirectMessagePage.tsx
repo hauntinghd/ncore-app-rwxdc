@@ -111,22 +111,25 @@ const MAX_BOOTSTRAP_DM_CONVERSATIONS = 80;
  * Reads the closed-conversation record, accepting both the current
  * `{ id: closedAtIso }` shape and the legacy `string[]` one.
  *
- * Legacy entries have no timestamp, so they are stamped at read time: they stay
- * closed now, and reopen on the next message rather than staying buried
- * forever. Treating them as closed-at-epoch would instead reopen every DM the
- * user has ever dismissed, all at once, on upgrade.
+ * **The legacy array is discarded, not migrated.** Under the old code a closed
+ * conversation was hidden permanently — nothing ever removed it from the list —
+ * so that list is not a record of what someone chose to hide. It is the
+ * accumulated residue of a bug, and for at least one account it had grown to
+ * cover every conversation they had, which is exactly what "my DMs disappeared"
+ * turned out to be.
+ *
+ * An earlier attempt stamped these entries at read time so they would stay
+ * closed and reopen on the next message. That was wrong: it preserved the
+ * broken state and left the list empty until someone happened to send a
+ * message. Showing a conversation the user once dismissed is a trivial
+ * annoyance; hiding conversations they never chose to hide is the actual bug.
  */
 function parseClosedRecord(raw: string | null): Record<string, string> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const now = new Date().toISOString();
-      const migrated: Record<string, string> = {};
-      for (const id of parsed) {
-        if (typeof id === 'string' && id) migrated[id] = now;
-      }
-      return migrated;
+      return {};
     }
     if (parsed && typeof parsed === 'object') {
       const record: Record<string, string> = {};
@@ -509,7 +512,25 @@ export function DirectMessagePage() {
   const visibleConversations = useMemo(() => {
     if (closedConversationIds.length === 0) return conversations;
     const hidden = new Set(closedConversationIds.map((id) => String(id)));
-    return conversations.filter((conversation) => !hidden.has(String(conversation.id)));
+    const visible = conversations.filter((conversation) => !hidden.has(String(conversation.id)));
+
+    /*
+      Never let the closed list hide everything.
+
+      "You have no conversations" and "all of your conversations are hidden"
+      look identical to the user and only one of them is true, so if this
+      filter would empty a non-empty list, it is the filter that is wrong.
+      Whatever put every id in the closed list, the answer is never to show a
+      person an empty inbox they cannot get out of.
+    */
+    if (visible.length === 0 && conversations.length > 0) {
+      console.warn(
+        `[dm] closed-conversation filter would hide all ${conversations.length} conversations; ignoring it.`,
+      );
+      return conversations;
+    }
+
+    return visible;
   }, [closedConversationIds, conversations]);
 
   useEffect(() => {
