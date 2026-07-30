@@ -38,6 +38,7 @@ import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
 import { formatFileSize, formatMessageTime, formatShortTime } from '../lib/utils';
 import { EmojiPicker, ReactionEmoji } from '../components/chat/EmojiPicker';
+import { LinkEmbeds } from '../components/chat/LinkEmbeds';
 import { useCustomEmojis } from '../contexts/CustomEmojiContext';
 import {
   filterEmojiSuggestions,
@@ -142,7 +143,10 @@ function MessageGroup({
           >
             <div className="text-sm text-surface-300 leading-relaxed break-words">
               {msg.content && (
-                <div className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content)}</div>
+                <>
+                  <div className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content)}</div>
+                  <LinkEmbeds content={msg.content} />
+                </>
               )}
               {(msg.attachments || []).length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>

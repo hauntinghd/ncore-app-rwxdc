@@ -36,6 +36,9 @@ export interface Profile {
   status: UserStatus;
   last_seen: string;
   is_banned: boolean;
+  /** Whether Open Graph cards render under links. Optional so profiles loaded
+   *  before `20260730100000_link_embeds.sql` is applied still typecheck. */
+  link_previews_enabled?: boolean;
   created_at: string;
   updated_at: string;
 }
