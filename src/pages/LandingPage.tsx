@@ -140,11 +140,17 @@ export function LandingPage() {
   const appHref = useMemo(() => resolveSurfaceUrl('app', '/app/dm'), []);
   const marketplaceHref = useMemo(() => resolveSurfaceUrl('marketplace', '/'), []);
 
-  // The Tauri update feed is the single source of truth for the native client.
-  // Keep a versioned direct fallback for first-time visitors if the feed check
-  // is temporarily unavailable.
-  const desktopInstallerName = `NCore_${buildVersion}_x64-setup.exe`;
-  const desktopInstallerFallbackHref = `/updates/tauri/${encodeURIComponent(desktopInstallerName)}`;
+  /*
+    The Electron feed is the source of truth for the desktop download, because
+    Electron is the production client until the Tauri cutover completes.
+
+    Both the filename and the fallback path used to be Tauri's, which meant the
+    site handed out an 8.2 MB Tauri build from 2026-07-11 no matter what had
+    been released. The fallback now matches the NSIS artifact name from
+    package.json (`NCore-Setup-${version}.${ext}`) and lives beside latest.yml.
+  */
+  const desktopInstallerName = `NCore-Setup-${buildVersion}.exe`;
+  const desktopInstallerFallbackHref = `/updates/${encodeURIComponent(desktopInstallerName)}`;
   const resolvedInstallerHref = latestInstallerHref || desktopInstallerFallbackHref;
   const localFeedBase = typeof window !== 'undefined'
     ? `${window.location.origin}/updates`

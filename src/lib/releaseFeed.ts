@@ -308,15 +308,40 @@ export async function fetchLatestInstallerAssetPath(feedBase: string): Promise<s
  * not the legacy Electron latest.yml feed. The latter can point at an older
  * installer even after a newer signed desktop release has shipped.
  */
+/**
+ * The installer the website should hand out.
+ *
+ * Reads the **Electron** feed (`latest.yml`), because Electron is the
+ * production desktop client — `docs/desktop-native-migration.md` keeps it that
+ * way until the Tauri build passes its cutover checklist.
+ *
+ * This used to read `tauri/latest.json`, so the site's "Download Desktop"
+ * button served an 8.2 MB Tauri build from 2026-07-11 while every published
+ * release went to the Electron feed. Anyone who downloaded from the site
+ * landed on a client that could never receive an update, because the two feeds
+ * version independently and nothing was publishing to the Tauri one.
+ *
+ * When Tauri does become production, point this back at `tauri/latest.json` —
+ * the whole switch is this function.
+ */
 export async function fetchLatestNativeDesktopInstaller(feedBase: string): Promise<NativeDesktopLatestEntry | null> {
   const normalizedBase = normalizeUpdateFeedBase(feedBase, DEFAULT_UPDATE_FEED_URL);
   try {
-    const response = await fetch(`${normalizedBase}/tauri/latest.json?ts=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch(`${normalizedBase}/latest.yml?ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) return null;
-    const payload = await response.json();
-    const version = clean(payload?.version);
-    const url = clean(payload?.platforms?.['windows-x86_64']?.url);
-    if (!version || !/^https:\/\//i.test(url)) return null;
+    const raw = await response.text();
+
+    const version = clean(raw.match(/^version:\s*(.+)$/m)?.[1]);
+    // `path` and the first `files[].url` carry the same installer name; either
+    // may be a bare filename (co-hosted) or an absolute URL (hosted elsewhere).
+    const installer = clean(
+      raw.match(/^path:\s*(.+)$/m)?.[1] || raw.match(/^\s*-\s*url:\s*(.+)$/m)?.[1],
+    );
+    if (!version || !installer) return null;
+
+    const url = /^https?:\/\//i.test(installer)
+      ? installer
+      : `${normalizedBase}/${installer}`;
     return { version, url };
   } catch {
     return null;
