@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
+  AtSign, Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
   Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, Volume2, VolumeX, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { MessageSearchPanel } from '../chat/MessageSearchPanel';
+import { MentionInboxPanel } from '../chat/MentionInboxPanel';
+import { fetchMentionUnreadCount } from '../../lib/mentionInbox';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -133,6 +135,36 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const useMainProcessDesktopNotifications = typeof window !== 'undefined' && Boolean(window.desktopBridge?.realtimeStart);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [showMentionInbox, setShowMentionInbox] = useState(false);
+  const [mentionUnread, setMentionUnread] = useState(0);
+  /*
+    Mention badge. Polled rather than subscribed: the count depends on both new
+    mentions and read-cursor movement, and a realtime subscription would only
+    see one of those. A minute of staleness on a badge is not worth a second
+    channel to keep in sync — and navigating refreshes it immediately.
+  */
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    const refresh = () => {
+      void fetchMentionUnreadCount()
+        .then((count) => {
+          if (!cancelled) setMentionUnread(count);
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [profile?.id, location.pathname]);
+
   // Scope search to the community the user is looking at, when there is one.
   const activeCommunityIdFromPath = useMemo(() => {
     const match = /^\/app\/community\/([0-9a-f-]{36})/i.exec(location.pathname);
@@ -787,6 +819,20 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           )}
         </div>
 
+        <button
+          onClick={() => setShowMentionInbox(true)}
+          title="Mentions"
+          aria-label="Mentions"
+          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-200"
+        >
+          <AtSign size={18} />
+          {mentionUnread > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+              {mentionUnread > 9 ? '9+' : mentionUnread}
+            </span>
+          )}
+        </button>
+
         <div ref={notifRef} className="relative">
           <button
             onClick={() => setShowNotifications((value) => !value)}
@@ -994,6 +1040,16 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           </span>
         </div>
       )}
+
+      <MentionInboxPanel
+        isOpen={showMentionInbox}
+        onClose={() => {
+          setShowMentionInbox(false);
+          // Reading a channel is what actually clears a mention, so refresh
+          // rather than zeroing the badge on close.
+          void fetchMentionUnreadCount().then(setMentionUnread).catch(() => {});
+        }}
+      />
 
       <MessageSearchPanel
         isOpen={showSearchPanel}
