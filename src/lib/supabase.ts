@@ -34,55 +34,81 @@ const desktopAuthStorage = {
       // fallback to legacy localStorage read below
     }
 
-    // One-time migration fallback: if previous builds stored auth in localStorage,
-    // copy into desktop userData-backed storage so future updates keep the session.
+    /*
+      The bridge had nothing. Fall back to localStorage and re-seed the file
+      from it — but never delete the localStorage copy, since it is the only
+      thing that keeps the session alive on a launch where the bridge is not
+      ready in time.
+    */
     try {
-      const legacyValue = window.localStorage.getItem(key);
-      if (typeof legacyValue === 'string' && legacyValue.length > 0) {
-        const migrated = await bridge.authStorageSetItem(key, legacyValue);
-        if (migrated?.ok) {
-          window.localStorage.removeItem(key);
-          return legacyValue;
+      const mirrored = window.localStorage.getItem(key);
+      if (typeof mirrored === 'string' && mirrored.length > 0) {
+        try {
+          await bridge.authStorageSetItem(key, mirrored);
+        } catch {
+          // Re-seeding is opportunistic; returning the session matters more.
         }
+        return mirrored;
       }
     } catch {
-      // ignore migration fallback failures
+      // ignore fallback read failures
     }
     return null;
   },
   async setItem(key: string, value: string): Promise<void> {
     if (typeof window === 'undefined') return;
     const bridge = window.desktopBridge;
+
+    /*
+      Written to BOTH the desktop file and localStorage, on purpose.
+
+      This previously deleted the localStorage copy, with a comment claiming
+      desktop sessions belong in "the OS credential vault". They do not:
+      `authStorage:setItem` writes plain JSON to
+      %APPDATA%/NCore/auth-storage.json with no encryption. So removing the
+      localStorage copy bought no security at all, and cost a single point of
+      failure — if the bridge was unavailable when `supabase.ts` first
+      evaluated, or the file read failed, the session existed in neither place
+      and the user landed on the login screen.
+
+      That is what "why do I have to keep logging in" was: sessions in
+      auth.sessions show created_at == updated_at, i.e. created and never once
+      refreshed, because there was nothing persisted to refresh from.
+
+      Both stores are equally reachable by anything running as this user, so
+      mirroring costs nothing and removes the failure mode.
+    */
+    let wroteToBridge = false;
     try {
       if (bridge?.authStorageSetItem) {
         const result = await bridge.authStorageSetItem(key, value);
-        if (result?.ok) {
-          // Desktop sessions belong in the OS credential vault. Keeping a
-          // duplicate in WebView localStorage would defeat that protection.
-          window.localStorage.removeItem(key);
-          return;
-        }
+        wroteToBridge = Boolean(result?.ok);
       }
     } catch {
-      // best effort persistence
+      // Fall through to localStorage; a failed bridge write must not lose the
+      // session.
     }
+
     try {
       window.localStorage.setItem(key, value);
     } catch {
-      // ignore localStorage fallback failures
+      // If localStorage is full or blocked and the bridge write also failed,
+      // there is nowhere left to persist — the user will have to sign in again
+      // next launch, which is the behaviour this whole block exists to avoid.
+      if (!wroteToBridge && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[auth] session could not be persisted to either store');
+      }
     }
   },
   async removeItem(key: string): Promise<void> {
     if (typeof window === 'undefined') return;
     const bridge = window.desktopBridge;
+    // Sign-out must clear both stores unconditionally. An early return on a
+    // successful bridge delete would leave a stale mirrored session behind,
+    // and the next launch would silently sign the user back in.
     try {
-      if (bridge?.authStorageRemoveItem) {
-        const result = await bridge.authStorageRemoveItem(key);
-        if (result?.ok) {
-          window.localStorage.removeItem(key);
-          return;
-        }
-      }
+      if (bridge?.authStorageRemoveItem) await bridge.authStorageRemoveItem(key);
     } catch {
       // best effort removal
     }
