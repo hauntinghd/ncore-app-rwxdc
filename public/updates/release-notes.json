@@ -1,9 +1,20 @@
 {
     "releases": [
         {
+            "version": "11.7.121",
+            "date": "2026-08-11",
+            "badge": "Current Build",
+            "improvements": [
+                "Bring your Discord life with you: upload your Discord data package under Settings → Data Import and your friendships restore automatically as your friends arrive — blocklists carry over too, so anyone you blocked there can't find you fresh here.",
+                "No access to your Discord package? Link your Discord User ID instead and you become findable: friends who import their packages reconnect with you instantly or land as normal friend requests.",
+                "Everything is private by design: your package is read on your own device, and only anonymous fingerprints of Discord IDs are stored — no names, no messages, and no way to look up who your friends are."
+            ],
+            "bugFixes": []
+        },
+        {
             "version": "11.7.120",
             "date": "2026-07-30",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "The website loads faster: it paints the NCore background before any code runs, and warms the connection to the backend while the page is still parsing.",
                 "Refined the site's typography, spacing, and panel treatment."
