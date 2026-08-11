@@ -23,6 +23,7 @@ import {
 } from 'simple-icons';
 import JSZip from 'jszip';
 import { AppShell } from '../components/layout/AppShell';
+import { DiscordGraphImportCard } from '../components/settings/DiscordGraphImportCard';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
@@ -4559,8 +4560,12 @@ export function SettingsPage() {
               <div className="space-y-6">
                 <div>
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Data Import</h2>
-                  <p className="text-surface-500 text-sm">Import your Discord export zip into an NCore DM archive.</p>
+                  <p className="text-surface-500 text-sm">
+                    Bring your life over from Discord — friends, blocklist, and a searchable archive of your messages.
+                  </p>
                 </div>
+
+                <DiscordGraphImportCard />
 
                 <div className="nyptid-card p-5 space-y-4">
                   <div className="rounded-lg border border-surface-700 bg-surface-900 p-4">
