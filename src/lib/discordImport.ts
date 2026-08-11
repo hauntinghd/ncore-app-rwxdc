@@ -27,6 +27,8 @@ export interface DiscordPackageSummary {
 export interface DiscordImportResult {
   friendshipsRestored: number;
   blocksApplied: number;
+  /** Friend requests sent on this user's behalf from one-sided attestations. */
+  requestsCreated: number;
   friendsImported: number;
   blocksImported: number;
   guildsImported: number;
@@ -211,6 +213,48 @@ export async function importDiscordGraph(
   return {
     friendshipsRestored: Number(row?.friendships_restored) || 0,
     blocksApplied: Number(row?.blocks_applied) || 0,
+    requestsCreated: Number(row?.requests_created) || 0,
+    friendsImported: Number(row?.friends_imported) || 0,
+    blocksImported: Number(row?.blocks_imported) || 0,
+    guildsImported: Number(row?.guilds_imported) || 0,
+  };
+}
+
+/**
+ * Links a Discord identity by User ID alone — the no-package path for
+ * people locked out of their account email (Discord only delivers data
+ * packages by email and requires the old email to change it). Restores
+ * nothing by itself; it makes the user findable, so friends' imported
+ * packages can reach them as mutual matches or incoming friend requests.
+ */
+export async function linkDiscordIdentityById(
+  discordUserId: string,
+  options: { autoFriend: boolean },
+): Promise<DiscordImportResult> {
+  const id = discordUserId.trim();
+  if (!SNOWFLAKE_PATTERN.test(id)) {
+    throw new Error(
+      'That does not look like a Discord User ID. In Discord: Settings → Advanced → enable Developer Mode, then right-click your name and Copy User ID.',
+    );
+  }
+  const hashes = await hashDiscordIds([id]);
+  const selfHash = hashes.get(id);
+  if (!selfHash) throw new Error('Could not fingerprint your Discord ID.');
+
+  const { error: beginError } = await supabase.rpc('discord_import_begin', {
+    p_self_hash: selfHash,
+    p_auto_friend: options.autoFriend,
+  });
+  if (beginError) throw new Error(beginError.message);
+
+  const { data, error: finalizeError } = await supabase.rpc('discord_import_finalize');
+  if (finalizeError) throw new Error(finalizeError.message);
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    friendshipsRestored: Number(row?.friendships_restored) || 0,
+    blocksApplied: Number(row?.blocks_applied) || 0,
+    requestsCreated: Number(row?.requests_created) || 0,
     friendsImported: Number(row?.friends_imported) || 0,
     blocksImported: Number(row?.blocks_imported) || 0,
     guildsImported: Number(row?.guilds_imported) || 0,
@@ -221,7 +265,7 @@ export async function getDiscordImportStatus(): Promise<DiscordImportStatus> {
   const { data, error } = await supabase
     .from('discord_identity_links')
     .select(
-      'auto_friend, friends_imported, blocks_imported, guilds_imported, friendships_restored, blocks_applied, linked_at, last_import_at',
+      'auto_friend, friends_imported, blocks_imported, guilds_imported, friendships_restored, blocks_applied, requests_created, linked_at, last_import_at',
     )
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -233,6 +277,7 @@ export async function getDiscordImportStatus(): Promise<DiscordImportStatus> {
       lastImportAt: null,
       friendshipsRestored: 0,
       blocksApplied: 0,
+      requestsCreated: 0,
       friendsImported: 0,
       blocksImported: 0,
       guildsImported: 0,
@@ -245,6 +290,7 @@ export async function getDiscordImportStatus(): Promise<DiscordImportStatus> {
     lastImportAt: data.last_import_at ? String(data.last_import_at) : null,
     friendshipsRestored: Number(data.friendships_restored) || 0,
     blocksApplied: Number(data.blocks_applied) || 0,
+    requestsCreated: Number(data.requests_created) || 0,
     friendsImported: Number(data.friends_imported) || 0,
     blocksImported: Number(data.blocks_imported) || 0,
     guildsImported: Number(data.guilds_imported) || 0,

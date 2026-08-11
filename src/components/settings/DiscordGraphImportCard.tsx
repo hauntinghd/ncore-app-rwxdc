@@ -6,6 +6,7 @@ import {
   DiscordPackageSummary,
   getDiscordImportStatus,
   importDiscordGraph,
+  linkDiscordIdentityById,
   parseDiscordPackage,
   unlinkDiscordImport,
 } from '../../lib/discordImport';
@@ -26,6 +27,9 @@ export function DiscordGraphImportCard() {
   const [status, setStatus] = useState<DiscordImportStatus | null>(null);
   const [error, setError] = useState('');
   const [unlinking, setUnlinking] = useState(false);
+  const [showIdLink, setShowIdLink] = useState(false);
+  const [discordIdInput, setDiscordIdInput] = useState('');
+  const [linkingById, setLinkingById] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +71,23 @@ export function DiscordGraphImportCard() {
     } catch (err: unknown) {
       setError(String((err as Error)?.message || err));
       setPhase('preview');
+    }
+  }
+
+  async function handleLinkById() {
+    setError('');
+    setLinkingById(true);
+    try {
+      const outcome = await linkDiscordIdentityById(discordIdInput, { autoFriend: true });
+      setResult(outcome);
+      setPhase('done');
+      setShowIdLink(false);
+      setDiscordIdInput('');
+      setStatus(await getDiscordImportStatus().catch(() => null));
+    } catch (err: unknown) {
+      setError(String((err as Error)?.message || err));
+    } finally {
+      setLinkingById(false);
     }
   }
 
@@ -114,6 +135,7 @@ export function DiscordGraphImportCard() {
           </span>
           <span>{status.friendsImported.toLocaleString()} friends imported</span>
           <span>{status.friendshipsRestored.toLocaleString()} friendships restored so far</span>
+          {status.requestsCreated > 0 && <span>{status.requestsCreated.toLocaleString()} requests sent</span>}
           {status.blocksApplied > 0 && <span>{status.blocksApplied.toLocaleString()} blocks applied</span>}
         </div>
       )}
@@ -143,6 +165,48 @@ export function DiscordGraphImportCard() {
           <span className="text-xs text-surface-500">
             Request it under Discord Settings → Privacy &amp; Safety → Request all of my Data.
           </span>
+        </div>
+      )}
+
+      {(phase === 'idle' || phase === 'parsing') && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowIdLink((value) => !value)}
+            className="text-xs text-nyptid-200 hover:text-nyptid-100 transition-colors"
+          >
+            No package? Link with your Discord User ID instead
+          </button>
+          {showIdLink && (
+            <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3 space-y-2">
+              <p className="text-xs text-surface-500 leading-relaxed">
+                Discord only delivers data packages by email, so if you cannot receive that email
+                you can still link your identity: friends who import their packages will reconnect
+                with you automatically or reach you as normal friend requests. In Discord:
+                Settings → Advanced → enable Developer Mode, then right-click your own name and
+                Copy User ID.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={discordIdInput}
+                  onChange={(event) => setDiscordIdInput(event.target.value)}
+                  placeholder="Your Discord User ID (numbers only)"
+                  className="nyptid-input text-sm flex-1 min-w-[220px]"
+                  inputMode="numeric"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleLinkById()}
+                  disabled={linkingById || !discordIdInput.trim()}
+                  className="nyptid-btn-primary text-sm"
+                >
+                  {linkingById ? <RefreshCw size={14} className="animate-spin" /> : <Link2 size={14} />}
+                  {linkingById ? 'Linking...' : 'Link Identity'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -178,8 +242,9 @@ export function DiscordGraphImportCard() {
               className="mt-0.5"
             />
             <span>
-              Reconnect me automatically. Friendships restore only when both people have imported
-              their packages and both left this on — nobody is ever told you are here otherwise.
+              Reconnect me automatically. When both people imported and listed each other, the
+              friendship restores instantly; when only one side could import, it arrives as a
+              normal friend request to accept. Nobody is ever told you are here otherwise.
             </span>
           </label>
 
@@ -219,10 +284,13 @@ export function DiscordGraphImportCard() {
             {result.friendshipsRestored > 0
               ? `${result.friendshipsRestored.toLocaleString()} friendship${result.friendshipsRestored === 1 ? '' : 's'} restored right now.`
               : 'No mutual matches yet.'}{' '}
+            {result.requestsCreated > 0 &&
+              `${result.requestsCreated.toLocaleString()} friend request${result.requestsCreated === 1 ? '' : 's'} sent to people you knew on Discord. `}
             {result.blocksApplied > 0 &&
               `${result.blocksApplied.toLocaleString()} block${result.blocksApplied === 1 ? '' : 's'} carried over. `}
-            The remaining {Math.max(result.friendsImported - result.friendshipsRestored, 0).toLocaleString()} reconnect
-            automatically whenever those friends import their own packages.
+            {result.friendsImported > 0
+              ? `The rest reconnect automatically whenever those friends import their own packages — check your Friends tab for incoming requests too.`
+              : `You are now findable: friends who import their packages will reconnect with you automatically or show up as incoming requests in your Friends tab.`}
           </p>
         </div>
       )}
