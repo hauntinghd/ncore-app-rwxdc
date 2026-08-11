@@ -1,9 +1,22 @@
 {
     "releases": [
         {
-            "version": "11.7.119",
+            "version": "11.7.120",
             "date": "2026-07-30",
             "badge": "Current Build",
+            "improvements": [
+                "The website loads faster: it paints the NCore background before any code runs, and warms the connection to the backend while the page is still parsing.",
+                "Refined the site's typography, spacing, and panel treatment."
+            ],
+            "bugFixes": [
+                "Fixed direct messages appearing and then instantly vanishing. A finished load could replace a populated conversation list with an empty one; it now keeps what it has whenever the server confirmed conversations exist.",
+                "The website's Download Desktop button serves the current production installer instead of an older build from a different release track."
+            ]
+        },
+        {
+            "version": "11.7.119",
+            "date": "2026-07-30",
+            "badge": "Previous",
             "improvements": [
                 "Download Latest Update now actually downloads and installs. The updater was rejecting every update because it checked for a code-signing signature the build does not carry."
             ],
