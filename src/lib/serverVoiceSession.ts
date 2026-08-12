@@ -1,18 +1,17 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  IAgoraRTCClient,
-  ILocalAudioTrack,
-  ILocalVideoTrack,
-  IRemoteAudioTrack,
-  IRemoteVideoTrack,
-  ScreenVideoTrackInitConfig,
-  UID,
-} from 'agora-rtc-sdk-ng';
-import { describeAgoraJoinFailure, resolveAgoraJoinToken } from './agoraAuth';
-import { createAIDenoiserBinding, type AIDenoiserBinding } from './agoraAIDenoiser';
-import { createConfiguredLocalAudioTrack } from './callMedia';
+  IRTCClient,
+  IRTCLocalAudioTrack,
+  IRTCLocalVideoTrack,
+  IRTCRemoteAudioTrack,
+  IRTCRemoteVideoTrack,
+  IRTCProvider,
+  NoiseSuppressionBinding,
+} from './rtc';
+import { getRTCProvider } from './rtc';
 import { loadCallSettings, saveCallSettings } from './callSettings';
 import { queueRuntimeEvent } from './runtimeTelemetry';
+import { VoiceJoinTracker, bestRegion, probeRegions } from './voiceTelemetry';
 import { publishServerVoiceShellState } from './serverVoiceShell';
 import { supabase } from './supabase';
 import type { Channel, VoiceSession } from './types';
@@ -20,16 +19,15 @@ import { playVoiceToggleSound } from './notificationSound';
 
 type Listener = () => void;
 
-const AGORA_APP_ID = import.meta.env.VITE_AGORA_APP_ID || '';
-type AgoraRTCModule = typeof import('agora-rtc-sdk-ng')['default'];
+const RTC_APP_ID = String(import.meta.env.VITE_AGORA_APP_ID || '').trim();
 
-let cachedAgoraModule: Promise<AgoraRTCModule> | null = null;
+let cachedProvider: Promise<IRTCProvider> | null = null;
 
-async function getAgoraModule(): Promise<AgoraRTCModule> {
-  if (!cachedAgoraModule) {
-    cachedAgoraModule = import('agora-rtc-sdk-ng').then((module) => module.default as AgoraRTCModule);
+function getProvider(): Promise<IRTCProvider> {
+  if (!cachedProvider) {
+    cachedProvider = getRTCProvider();
   }
-  return cachedAgoraModule;
+  return cachedProvider;
 }
 
 export interface ScreenSourceOption {
@@ -64,6 +62,8 @@ export interface ServerVoiceSessionState {
   averagePingMs: number | null;
   lastPingMs: number | null;
   outboundPacketLossPct: number | null;
+  uplinkQuality: number;
+  downlinkQuality: number;
   privacyCode: string[];
 }
 
@@ -116,6 +116,8 @@ const initialState: ServerVoiceSessionState = {
   averagePingMs: null,
   lastPingMs: null,
   outboundPacketLossPct: null,
+  uplinkQuality: 0,
+  downlinkQuality: 0,
   privacyCode: [],
 };
 
@@ -127,48 +129,64 @@ function persistVoiceTogglePreferences(next: { startMuted?: boolean; startDeafen
   });
 }
 
+/**
+ * Turns a getUserMedia / getDisplayMedia failure into something a person can
+ * act on.
+ *
+ * The browser's own messages ("Requested device not found") do not tell anyone
+ * what to do next, and the distinction that matters — permission versus
+ * hardware versus another app holding the device — is carried in the error
+ * name, not the message.
+ */
+/**
+ * Whether a capture failure was the user closing the picker.
+ *
+ * The screen-share path tries several capture methods and concatenates their
+ * errors, so the cancel signal has to be matched against the whole string
+ * rather than a single error object.
+ */
+function isUserCancelledCapture(error: unknown): boolean {
+  const err = error as { name?: string; message?: string };
+  const name = String(err?.name || '');
+  const message = String(err?.message || '');
+  if (name === 'NotAllowedError' || name === 'AbortError') return true;
+  return /permission denied by user|user (?:cancel|abort)|cancelled by user|NotAllowedError/i.test(
+    message,
+  );
+}
+
+function describeMediaError(error: unknown, kind: 'camera' | 'screen'): string {
+  const err = error as { name?: string; message?: string; code?: string | number };
+  const name = String(err?.name || '');
+  const message = String(err?.message || '');
+  const device = kind === 'camera' ? 'camera' : 'screen share';
+
+  if (name === 'NotAllowedError' || /permission|denied/i.test(message)) {
+    return kind === 'camera'
+      ? 'Camera access was denied. Allow camera access for NCore in your browser or system settings, then try again.'
+      : 'Screen sharing was cancelled or denied. Try again and pick a screen or window to share.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return kind === 'camera'
+      ? 'No camera was found. Connect one, or pick a different device in Settings → Voice & Video.'
+      : 'Nothing was available to share.';
+  }
+  if (name === 'NotReadableError' || name === 'AbortError') {
+    return `Your ${device} is already in use by another application. Close it and try again.`;
+  }
+  if (name === 'SecurityError') {
+    return `Your browser blocked ${device} access on this page.`;
+  }
+  return message
+    ? `Could not start your ${device}: ${message}`
+    : `Could not start your ${device}.`;
+}
+
 function formatRtcError(error: unknown): string {
   const e = error as any;
   return [e?.name || 'UnknownError', e?.code ? `code=${e.code}` : '', e?.message || String(error || '')]
     .filter(Boolean)
     .join(' | ');
-}
-
-function screenShareQualityRank(quality: ScreenShareQuality): number {
-  if (quality === '4k60') return 3;
-  if (quality === '1080p120') return 2;
-  return 1;
-}
-
-function buildScreenConfig(quality: ScreenShareQuality): ScreenVideoTrackInitConfig {
-  if (quality === '4k60') {
-    return {
-      encoderConfig: {
-        width: 3840,
-        height: 2160,
-        frameRate: 60,
-      },
-      optimizationMode: 'detail',
-    };
-  }
-  if (quality === '1080p120') {
-    return {
-      encoderConfig: {
-        width: 1920,
-        height: 1080,
-        frameRate: 120,
-      },
-      optimizationMode: 'detail',
-    };
-  }
-  return {
-    encoderConfig: {
-      width: 1280,
-      height: 720,
-      frameRate: 30,
-    },
-    optimizationMode: 'detail',
-  };
 }
 
 function buildDisplayMediaVideoConstraints(quality: ScreenShareQuality): MediaTrackConstraints {
@@ -213,19 +231,21 @@ class ServerVoiceSessionStore {
     privacyCode: initialState.privacyCode,
   };
   private lifecycleToken = 0;
+  /** Measures one join attempt. Null between sessions. */
+  private joinTracker: VoiceJoinTracker | null = null;
 
-  private client: IAgoraRTCClient | null = null;
+  private client: IRTCClient | null = null;
   private localUid: string | null = null;
   private localProfileId: string | null = null;
-  private localVideoTrack: ILocalVideoTrack | null = null;
-  private localAudioTrack: ILocalAudioTrack | null = null;
-  private audioDenoiserBinding: AIDenoiserBinding | null = null;
-  private screenClient: IAgoraRTCClient | null = null;
+  private localVideoTrack: IRTCLocalVideoTrack | null = null;
+  private localAudioTrack: IRTCLocalAudioTrack | null = null;
+  private audioDenoiserBinding: NoiseSuppressionBinding | null = null;
+  private screenClient: IRTCClient | null = null;
   private screenUid: string | null = null;
-  private screenTrack: ILocalVideoTrack | null = null;
-  private screenAudioTrack: ILocalAudioTrack | null = null;
-  private remoteVideoTracks = new Map<string, IRemoteVideoTrack>();
-  private remoteAudioTracks = new Map<string, IRemoteAudioTrack>();
+  private screenTrack: IRTCLocalVideoTrack | null = null;
+  private screenAudioTrack: IRTCLocalAudioTrack | null = null;
+  private remoteVideoTracks = new Map<string, IRTCRemoteVideoTrack>();
+  private remoteAudioTracks = new Map<string, IRTCRemoteAudioTrack>();
   private remoteVideoContainers = new Map<string, HTMLDivElement | null>();
   private localVideoContainer: HTMLDivElement | null = null;
   private dbSessionsChannel: any = null;
@@ -234,10 +254,49 @@ class ServerVoiceSessionStore {
   private latencySamples: number[] = [];
   private screenShareOperation: Promise<void> | null = null;
 
-  private async configureRtcOptimizations(client: IAgoraRTCClient) {
+  private bindTokenRenewalHandlers(
+    client: IRTCClient,
+    channelName: string,
+    uid: string,
+    context: 'voice' | 'screen',
+  ) {
+    const renew = async (reason: 'will-expire' | 'did-expire') => {
+      try {
+        const provider = await getRTCProvider();
+        const freshToken = await provider.resolveToken(channelName, uid);
+        if (!freshToken) return;
+        await client.renewToken(freshToken);
+        queueRuntimeEvent('server_voice_token_renewed', {
+          channel_id: channelName,
+          reason,
+          context,
+        }, { sampleRate: 0.5 });
+      } catch (error) {
+        console.warn(`Agora server-voice ${context} token ${reason} renew failed:`, error);
+        queueRuntimeEvent('server_voice_token_renew_failed', {
+          channel_id: channelName,
+          reason,
+          context,
+          message: formatRtcError(error),
+        }, { sampleRate: 1 });
+        if (reason === 'did-expire' && context === 'voice') {
+          this.setState({
+            connectionError: 'Voice channel token refresh failed. Rejoin to continue.',
+          });
+        }
+      }
+    };
+
+    const willExpireHandler = () => { void renew('will-expire'); };
+    const didExpireHandler = () => { void renew('did-expire'); };
+    client.on('token-privilege-will-expire', willExpireHandler);
+    client.on('token-privilege-did-expire', didExpireHandler);
+  }
+
+  private async configureRtcOptimizations(client: IRTCClient) {
     const clientAny = client as any;
     try {
-      await client.enableDualStream();
+      await client.enableDualStream?.();
     } catch {
       // noop
     }
@@ -471,7 +530,7 @@ class ServerVoiceSessionStore {
     }
   }
 
-  private async disposeAudioDenoiser(binding: AIDenoiserBinding | null = this.audioDenoiserBinding) {
+  private async disposeAudioDenoiser(binding: NoiseSuppressionBinding | null = this.audioDenoiserBinding) {
     if (!binding) return;
     if (binding === this.audioDenoiserBinding) {
       this.audioDenoiserBinding = null;
@@ -483,7 +542,7 @@ class ServerVoiceSessionStore {
     }
   }
 
-  private bindScreenTrackEnded(track: ILocalVideoTrack | null) {
+  private bindScreenTrackEnded(track: IRTCLocalVideoTrack | null) {
     const trackAny = track as any;
     if (!trackAny || typeof trackAny.on !== 'function') return;
     trackAny.on('track-ended', () => {
@@ -506,28 +565,17 @@ class ServerVoiceSessionStore {
     return ['720p30'];
   }
 
-  private async createAgoraScreenTracks(
+  private async createProviderScreenTracks(
     quality: ScreenShareQuality,
-    audioMode: 'enable' | 'disable',
-  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
-    const AgoraRTC = await getAgoraModule();
-    const created = await AgoraRTC.createScreenVideoTrack(buildScreenConfig(quality), audioMode);
-    if (Array.isArray(created)) {
-      return {
-        videoTrack: created[0],
-        audioTrack: created[1] || null,
-      };
-    }
-    return {
-      videoTrack: created,
-      audioTrack: null,
-    };
+  ): Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }> {
+    const provider = await getProvider();
+    return provider.createScreenShareTracks({ quality });
   }
 
   private async createNativeScreenTracks(
     quality: ScreenShareQuality,
     withAudio: boolean,
-  ): Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }> {
+  ): Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }> {
     if (!navigator.mediaDevices?.getDisplayMedia) {
       throw new Error('getDisplayMedia is not available in this runtime');
     }
@@ -561,10 +609,10 @@ class ServerVoiceSessionStore {
       throw new Error('Display capture returned no video track');
     }
 
-    const AgoraRTC = await getAgoraModule();
-    const videoTrack = AgoraRTC.createCustomVideoTrack({ mediaStreamTrack: mediaVideoTrack });
+    const provider = await getProvider();
+    const videoTrack = await provider.createCustomVideoTrack(mediaVideoTrack);
     const mediaAudioTrack = stream.getAudioTracks()[0];
-    const audioTrack = mediaAudioTrack ? AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: mediaAudioTrack }) : null;
+    const audioTrack = mediaAudioTrack ? await provider.createCustomAudioTrack(mediaAudioTrack) : null;
 
     return { videoTrack, audioTrack };
   }
@@ -599,7 +647,7 @@ class ServerVoiceSessionStore {
     this.screenClient = null;
     this.screenUid = null;
 
-    const toUnpublish: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+    const toUnpublish: Array<IRTCLocalVideoTrack | IRTCLocalAudioTrack> = [];
     if (this.screenTrack) toUnpublish.push(this.screenTrack);
     if (this.screenAudioTrack) toUnpublish.push(this.screenAudioTrack);
 
@@ -613,7 +661,7 @@ class ServerVoiceSessionStore {
 
     if (activeScreenClient) {
       try {
-        activeScreenClient.removeAllListeners();
+        activeScreenClient.removeAllListeners?.();
       } catch {
         // noop
       }
@@ -693,6 +741,22 @@ class ServerVoiceSessionStore {
     const { communityId, channelId, channelName, profileId, userId } = options;
     if (!channelId || !profileId) return false;
     const joinToken = ++this.lifecycleToken;
+
+    /*
+      Started before anything else, including the token fetch: the token round
+      trip is part of what the user experiences as "joining", and excluding it
+      would flatter the numbers.
+    */
+    this.joinTracker = new VoiceJoinTracker({
+      kind: 'server_voice',
+      channelId,
+      communityId,
+      userId: profileId,
+    });
+    void bestRegion().then(async (region) => {
+      this.joinTracker?.setRegion(region, await probeRegions());
+    });
+
     const activeCallSettings = loadCallSettings();
     const preferredMuted = Boolean(activeCallSettings.startMuted);
     const preferredDeafened = Boolean(activeCallSettings.startDeafened);
@@ -755,7 +819,7 @@ class ServerVoiceSessionStore {
         return false;
       }
 
-      if (!AGORA_APP_ID) {
+      if (!RTC_APP_ID) {
         if (joinToken !== this.lifecycleToken) return false;
         this.stopStatsPolling();
         this.setState({
@@ -766,8 +830,8 @@ class ServerVoiceSessionStore {
         return true;
       }
 
-      const AgoraRTC = await getAgoraModule();
-      const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+      const provider = await getProvider();
+      const client = await provider.createClient({ mode: 'rtc', codec: 'vp8' });
       this.client = client;
       await this.configureRtcOptimizations(client);
       try {
@@ -784,7 +848,7 @@ class ServerVoiceSessionStore {
         }, { userId: profileId, sampleRate: 0.5 });
       });
 
-      client.on('volume-indicator', (volumes: Array<{ uid: UID; level: number }>) => {
+      client.on('volume-indicator', (volumes) => {
         const active = (volumes || [])
           .filter((entry) => Number(entry?.level || 0) >= 5)
           .map((entry) => String(entry.uid))
@@ -796,24 +860,26 @@ class ServerVoiceSessionStore {
         this.setState({ activeSpeakerUids: deduped });
       });
 
-      client.on('user-published', async (user, mediaType) => {
-        await client.subscribe(user, mediaType);
-        const uid = String(user.uid);
-        if (mediaType === 'video' && user.videoTrack) {
-          this.remoteVideoTracks.set(uid, user.videoTrack);
+      client.on('user-published', async (uid, mediaType) => {
+        const participant = await client.subscribe(uid, mediaType);
+        if (mediaType === 'video' && participant.videoTrack) {
+          this.remoteVideoTracks.set(uid, participant.videoTrack);
           const target = this.remoteVideoContainers.get(uid);
           if (target) {
             try {
-              user.videoTrack.play(target);
+              participant.videoTrack.play(target);
             } catch {
               // noop
             }
           }
         }
-        if (mediaType === 'audio' && user.audioTrack) {
-          this.remoteAudioTracks.set(uid, user.audioTrack);
+        if (mediaType === 'audio' && participant.audioTrack) {
+          // The moment the user could first hear someone — the number the
+          // moonshot target is actually about.
+          this.joinTracker?.markFirstRemoteAudio();
+          this.remoteAudioTracks.set(uid, participant.audioTrack);
           try {
-            user.audioTrack.play();
+            participant.audioTrack.play();
           } catch {
             // noop
           }
@@ -822,8 +888,7 @@ class ServerVoiceSessionStore {
         this.syncRemoteState();
       });
 
-      client.on('user-unpublished', (user, mediaType) => {
-        const uid = String(user.uid);
+      client.on('user-unpublished', (uid, mediaType) => {
         if (mediaType === 'video') {
           const existingVideo = this.remoteVideoTracks.get(uid);
           try {
@@ -839,8 +904,7 @@ class ServerVoiceSessionStore {
         this.syncRemoteState();
       });
 
-      client.on('user-left', (user) => {
-        const uid = String(user.uid);
+      client.on('user-left', (uid) => {
         const existingVideo = this.remoteVideoTracks.get(uid);
         try {
           existingVideo?.stop();
@@ -856,7 +920,8 @@ class ServerVoiceSessionStore {
         this.syncRemoteState();
       });
 
-      const token = await resolveAgoraJoinToken(channelId, this.localUid);
+      const token = await provider.resolveToken(channelId, this.localUid);
+      this.joinTracker?.markTokenFetched();
       if (joinToken !== this.lifecycleToken) {
         try {
           await client.leave();
@@ -865,11 +930,20 @@ class ServerVoiceSessionStore {
         }
         return false;
       }
-      await client.join(AGORA_APP_ID, channelId, token, this.localUid);
+      await client.join({ channelName: channelId, token, uid: this.localUid });
+      this.joinTracker?.markRtcConnected();
+      this.joinTracker?.startSampling(client);
       rtcJoined = true;
+      this.bindTokenRenewalHandlers(client, channelId, this.localUid, 'voice');
+      client.on('network-quality', (quality) => {
+        this.setState({
+          uplinkQuality: Number(quality.uplinkNetworkQuality) || 0,
+          downlinkQuality: Number(quality.downlinkNetworkQuality) || 0,
+        });
+      });
       queueRuntimeEvent('server_voice_joined', {
         channel_id: channelId,
-        has_agora: true,
+        has_rtc: true,
       }, { userId: profileId, sampleRate: 1 });
       if (joinToken !== this.lifecycleToken) {
         try {
@@ -885,7 +959,12 @@ class ServerVoiceSessionStore {
         return false;
       }
 
-      const audioTrack = await createConfiguredLocalAudioTrack(activeCallSettings);
+      const audioTrack = await provider.createAudioTrack({
+        deviceId: activeCallSettings.inputDeviceId,
+        echoCancellation: activeCallSettings.echoCancellation,
+        noiseSuppression: activeCallSettings.noiseSuppression,
+        autoGainControl: activeCallSettings.automaticGainControl,
+      });
       if (joinToken !== this.lifecycleToken) {
         try {
           audioTrack.stop();
@@ -905,16 +984,17 @@ class ServerVoiceSessionStore {
           .eq('user_id', profileId);
         return false;
       }
-      const audioDenoiserBinding = await createAIDenoiserBinding(audioTrack, activeCallSettings.noiseSuppression);
+      const audioDenoiserBinding = await provider.createNoiseSuppression(audioTrack, activeCallSettings.noiseSuppression);
       this.localAudioTrack = audioTrack;
       this.audioDenoiserBinding = audioDenoiserBinding;
       if (this.state.isMuted) {
         await audioTrack.setEnabled(false);
       }
-      await client.publish(audioTrack);
+      await client.publish([audioTrack]);
+      this.joinTracker?.markLocalPublish();
       if (joinToken !== this.lifecycleToken) {
         try {
-          await client.unpublish(audioTrack);
+          await client.unpublish([audioTrack]);
         } catch {
           // noop
         }
@@ -950,15 +1030,16 @@ class ServerVoiceSessionStore {
       console.error('Failed to join server voice channel:', error);
       this.stopStatsPolling();
       await this.disposeAudioDenoiser();
+      const provider = await getProvider();
       queueRuntimeEvent('server_voice_join_failed', {
         channel_id: channelId,
-        error: describeAgoraJoinFailure(error),
+        error: provider.describeJoinFailure(error),
       }, { userId: profileId, sampleRate: 1 });
       this.setState({
         phase: 'idle',
         isConnected: false,
         isConnecting: false,
-        connectionError: describeAgoraJoinFailure(error),
+        connectionError: provider.describeJoinFailure(error),
       });
       if (!rtcJoined) {
         await supabase
@@ -983,6 +1064,11 @@ class ServerVoiceSessionStore {
     const activeRemoteVideoTracks = Array.from(this.remoteVideoTracks.values());
 
     this.stopStatsPolling();
+    // Writes the metrics row. `finish` decides the outcome itself — a session
+    // that connected but never heard anyone is recorded as abandoned, whatever
+    // the caller believes.
+    void this.joinTracker?.finish('connected');
+    this.joinTracker = null;
     await this.stopScreenShare(false);
 
     this.client = null;
@@ -1030,7 +1116,7 @@ class ServerVoiceSessionStore {
 
     if (activeClient) {
       try {
-        activeClient.removeAllListeners();
+        activeClient.removeAllListeners?.();
       } catch {
         // noop
       }
@@ -1063,17 +1149,63 @@ class ServerVoiceSessionStore {
   }
 
   async toggleMute() {
-    const nextMuted = !this.state.isMuted;
-    if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
-      await this.localAudioTrack.setEnabled(!nextMuted);
+    await this.setMuted(!this.state.isMuted, { persist: true, playSound: true, syncRemote: true });
+  }
+
+  setVadThreshold(value: number) {
+    try {
+      this.audioDenoiserBinding?.setVadThreshold?.(value);
+    } catch (error) {
+      console.warn('Failed to update VAD threshold:', error);
     }
-    persistVoiceTogglePreferences({ startMuted: nextMuted });
-    this.setState({ isMuted: nextMuted });
-    playVoiceToggleSound('mute', nextMuted);
+  }
+
+  async setInputDevice(deviceId: string) {
+    const track = this.localAudioTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch microphone:', error);
+    }
+  }
+
+  async setCameraDevice(deviceId: string) {
+    const track = this.localVideoTrack as any;
+    if (!track || typeof track.setDevice !== 'function') return;
+    try {
+      await track.setDevice(deviceId);
+    } catch (error) {
+      console.warn('Failed to switch camera:', error);
+    }
+  }
+
+  async setOutputDevice(deviceId: string) {
+    for (const [, remote] of this.remoteAudioTracks.entries()) {
+      const any = remote as any;
+      if (typeof any.setPlaybackDevice === 'function') {
+        try {
+          await any.setPlaybackDevice(deviceId);
+        } catch (error) {
+          console.warn('Failed to switch playback device:', error);
+        }
+      }
+    }
+  }
+
+  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean; syncRemote?: boolean }) {
+    if (this.state.isMuted === muted) return;
+    if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
+      await this.localAudioTrack.setEnabled(!muted);
+    }
+    if (options?.persist) persistVoiceTogglePreferences({ startMuted: muted });
+    this.setState({ isMuted: muted });
+    if (options?.playSound) playVoiceToggleSound('mute', muted);
+    if (!options?.syncRemote) return;
     if (!this.state.channelId || !this.localProfileId) return;
     await supabase
       .from('voice_sessions')
-      .update({ is_muted: nextMuted })
+      .update({ is_muted: muted })
       .eq('channel_id', this.state.channelId)
       .eq('user_id', this.localProfileId);
   }
@@ -1093,30 +1225,86 @@ class ServerVoiceSessionStore {
     }
   }
 
+  /**
+   * Turns the camera on or off.
+   *
+   * Every caller invokes this as `void toggleCamera()`, so anything thrown here
+   * vanishes into an unhandled rejection and the button silently does nothing —
+   * which is exactly what a denied camera permission, a camera held by another
+   * app, or a machine with no camera used to look like. Failures are caught and
+   * surfaced through `connectionError` instead.
+   */
   async toggleCamera() {
     if (!this.client || !this.state.channelId || !this.localProfileId) return;
-    const nextCameraOn = !this.state.isCameraOn;
-    if (this.state.isCameraOn && this.localVideoTrack) {
-      await this.client.unpublish(this.localVideoTrack);
-      this.localVideoTrack.stop();
-      this.localVideoTrack.close();
-      this.localVideoTrack = null;
+
+    const turningOff = this.state.isCameraOn;
+    const nextCameraOn = !turningOff;
+
+    try {
+      this.setState({ connectionError: '' });
+
+      if (turningOff) {
+        if (this.localVideoTrack) {
+          const track = this.localVideoTrack;
+          // Cleared first so a failure to unpublish cannot leave a dangling
+          // reference that the next toggle tries to reuse.
+          this.localVideoTrack = null;
+          try {
+            await this.client.unpublish([track]);
+          } finally {
+            try {
+              track.stop();
+              track.close();
+            } catch {
+              // The track is being discarded either way.
+            }
+          }
+        }
+      } else {
+        const provider = await getProvider();
+        const videoTrack = await provider.createVideoTrack();
+        try {
+          await this.client.publish([videoTrack]);
+        } catch (publishError) {
+          // Publishing failed, so the track is orphaned — release the camera
+          // rather than leaving its light on with nothing consuming it.
+          try {
+            videoTrack.stop();
+            videoTrack.close();
+          } catch {
+            // noop
+          }
+          throw publishError;
+        }
+        this.localVideoTrack = videoTrack;
+      }
+
       this.setState({ isCameraOn: nextCameraOn });
       this.attachActiveLocalVideoTrack();
-    } else {
-      const AgoraRTC = await getAgoraModule();
-      const videoTrack = await AgoraRTC.createCameraVideoTrack();
-      this.localVideoTrack = videoTrack;
-      await this.client.publish(videoTrack);
-      this.setState({ isCameraOn: nextCameraOn });
-      this.attachActiveLocalVideoTrack();
+    } catch (error) {
+      this.setState({
+        isCameraOn: Boolean(this.localVideoTrack),
+        connectionError: describeMediaError(error, 'camera'),
+      });
+      queueRuntimeEvent('server_voice_camera_failed', {
+        channel_id: this.state.channelId,
+        turning_on: !turningOff,
+        message: formatRtcError(error),
+      }, { userId: this.localProfileId, sampleRate: 1 });
+      return;
     }
 
-    await supabase
-      .from('voice_sessions')
-      .update({ is_camera_on: nextCameraOn })
-      .eq('channel_id', this.state.channelId)
-      .eq('user_id', this.localProfileId);
+    // Mirroring to the DB is presentation only — if it fails, the local call
+    // is still correct and other people just see a stale camera icon.
+    try {
+      await supabase
+        .from('voice_sessions')
+        .update({ is_camera_on: nextCameraOn })
+        .eq('channel_id', this.state.channelId)
+        .eq('user_id', this.localProfileId);
+    } catch {
+      // noop
+    }
   }
 
   async toggleScreenShare() {
@@ -1131,7 +1319,7 @@ class ServerVoiceSessionStore {
   }
 
   private async performToggleScreenShare() {
-    if (!this.client || !this.state.channelId || !this.localProfileId || !this.localUid || !AGORA_APP_ID) return;
+    if (!this.client || !this.state.channelId || !this.localProfileId || !this.localUid || !RTC_APP_ID) return;
     if (this.state.isScreenSharing) {
       await this.stopScreenShare();
       return;
@@ -1152,7 +1340,7 @@ class ServerVoiceSessionStore {
       for (const quality of qualityAttemptOrder) {
         const attemptFns: Array<{
           label: string;
-          run: () => Promise<{ videoTrack: ILocalVideoTrack; audioTrack: ILocalAudioTrack | null }>;
+          run: () => Promise<{ videoTrack: IRTCLocalVideoTrack; audioTrack: IRTCLocalAudioTrack | null }>;
         }> = preferNativeCapture
           ? [
             {
@@ -1164,22 +1352,14 @@ class ServerVoiceSessionStore {
               run: () => this.createNativeScreenTracks(quality, false),
             },
             {
-              label: `${quality}:agora:audio-on`,
-              run: () => this.createAgoraScreenTracks(quality, 'enable'),
-            },
-            {
-              label: `${quality}:agora:audio-off`,
-              run: () => this.createAgoraScreenTracks(quality, 'disable'),
+              label: `${quality}:provider`,
+              run: () => this.createProviderScreenTracks(quality),
             },
           ]
           : [
             {
-              label: `${quality}:agora:audio-on`,
-              run: () => this.createAgoraScreenTracks(quality, 'enable'),
-            },
-            {
-              label: `${quality}:agora:audio-off`,
-              run: () => this.createAgoraScreenTracks(quality, 'disable'),
+              label: `${quality}:provider`,
+              run: () => this.createProviderScreenTracks(quality),
             },
             {
               label: `${quality}:native:audio-on`,
@@ -1198,14 +1378,15 @@ class ServerVoiceSessionStore {
             this.screenAudioTrack = created.audioTrack;
             this.bindScreenTrackEnded(this.screenTrack);
 
-            const AgoraRTC = await getAgoraModule();
-            this.screenClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+            const provider = await getProvider();
+            this.screenClient = await provider.createClient({ mode: 'rtc', codec: 'vp8' });
             await this.configureRtcOptimizations(this.screenClient);
             this.screenUid = `${this.localUid}::screen`;
-            const token = await resolveAgoraJoinToken(this.state.channelId, this.screenUid);
-            await this.screenClient.join(AGORA_APP_ID, this.state.channelId, token, this.screenUid);
+            const token = await provider.resolveToken(this.state.channelId, this.screenUid);
+            await this.screenClient.join({ channelName: this.state.channelId, token, uid: this.screenUid });
+            this.bindTokenRenewalHandlers(this.screenClient, this.state.channelId, this.screenUid, 'screen');
 
-            const publishTracks: Array<ILocalVideoTrack | ILocalAudioTrack> = [];
+            const publishTracks: Array<IRTCLocalVideoTrack | IRTCLocalAudioTrack> = [];
             if (this.screenTrack) publishTracks.push(this.screenTrack);
             if (this.screenAudioTrack) publishTracks.push(this.screenAudioTrack);
             if (publishTracks.length) {
@@ -1218,7 +1399,7 @@ class ServerVoiceSessionStore {
             attemptErrors.push(`${attempt.label}: ${formatRtcError(error)}`);
             if (this.screenClient) {
               try {
-                this.screenClient.removeAllListeners();
+                this.screenClient.removeAllListeners?.();
               } catch {
                 // noop
               }
@@ -1258,7 +1439,19 @@ class ServerVoiceSessionStore {
         error: formatRtcError(error),
       }, { userId: this.localProfileId, sampleRate: 1 });
       await this.stopScreenShare(false);
-      this.setState({ connectionError: `Could not start screen sharing: ${formatRtcError(error)}` });
+
+      /*
+        Dismissing the picker is a normal thing to do, not a failure. Showing a
+        red error banner for it trains people to ignore the banner, so the
+        cancel case is silent and only real failures are reported — and those
+        get a sentence someone can act on rather than a concatenation of
+        internal attempt labels.
+      */
+      if (isUserCancelledCapture(error)) {
+        this.setState({ connectionError: '' });
+        return;
+      }
+      this.setState({ connectionError: describeMediaError(error, 'screen') });
     }
   }
 
@@ -1276,7 +1469,7 @@ class ServerVoiceSessionStore {
     await this.disposeAudioDenoiser();
 
     try {
-      await this.client.unpublish(this.localAudioTrack);
+      await this.client.unpublish([this.localAudioTrack]);
     } catch {
       // noop
     }
@@ -1287,17 +1480,23 @@ class ServerVoiceSessionStore {
       // noop
     }
 
-    let rebuilt: ILocalAudioTrack | null = null;
-    let denoiserBinding: AIDenoiserBinding | null = null;
+    let rebuilt: IRTCLocalAudioTrack | null = null;
+    let denoiserBinding: NoiseSuppressionBinding | null = null;
     try {
-      rebuilt = await createConfiguredLocalAudioTrack(nextSettings);
-      denoiserBinding = await createAIDenoiserBinding(rebuilt, nextSettings.noiseSuppression);
+      const provider = await getProvider();
+      rebuilt = await provider.createAudioTrack({
+        deviceId: nextSettings.inputDeviceId,
+        echoCancellation: nextSettings.echoCancellation,
+        noiseSuppression: nextSettings.noiseSuppression,
+        autoGainControl: nextSettings.automaticGainControl,
+      });
+      denoiserBinding = await provider.createNoiseSuppression(rebuilt, nextSettings.noiseSuppression);
       if (this.state.isMuted) {
         await rebuilt.setEnabled(false);
       }
       this.localAudioTrack = rebuilt;
       this.audioDenoiserBinding = denoiserBinding;
-      await this.client.publish(rebuilt);
+      await this.client.publish([rebuilt]);
       this.setState({ connectionError: '' });
     } catch (error) {
       if (denoiserBinding) {

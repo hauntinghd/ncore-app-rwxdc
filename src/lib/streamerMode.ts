@@ -23,6 +23,18 @@ function readStoredRolloutSettings(): Record<string, boolean> {
   }
 }
 
+/**
+ * Reads one of the toggles from the Settings rollout store.
+ *
+ * These are client-local by design — they describe how this device renders,
+ * not what the account prefers. Anything that should follow the user between
+ * devices belongs on `profiles` instead.
+ */
+export function getRolloutFlag(key: string, fallback = false): boolean {
+  const rollout = readStoredRolloutSettings();
+  return key in rollout ? rollout[key] : fallback;
+}
+
 export function getStreamerModeSettings(): StreamerModeSettings {
   const rollout = readStoredRolloutSettings();
   const enabled = Boolean(rollout.streamer_mode_enabled);

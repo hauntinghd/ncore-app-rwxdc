@@ -1,9 +1,374 @@
 {
     "releases": [
         {
+            "version": "11.7.122",
+            "date": "2026-08-12",
+            "badge": "Current Build",
+            "improvements": [
+                "The desktop window can now be dragged from the title area again, and the minimize, maximize, and close buttons work — including on the sign-in screen."
+            ],
+            "bugFixes": [
+                "Fixed the desktop app repeatedly logging you out. Your session is now saved to a file that survives restarts, instead of relying on browser storage that the desktop window did not reliably keep."
+            ]
+        },
+        {
+            "version": "11.7.121",
+            "date": "2026-08-11",
+            "badge": "Previous",
+            "improvements": [
+                "Bring your Discord life with you: upload your Discord data package under Settings → Data Import and your friendships restore automatically as your friends arrive — blocklists carry over too, so anyone you blocked there can't find you fresh here.",
+                "No access to your Discord package? Link your Discord User ID instead and you become findable: friends who import their packages reconnect with you instantly or land as normal friend requests.",
+                "Everything is private by design: your package is read on your own device, and only anonymous fingerprints of Discord IDs are stored — no names, no messages, and no way to look up who your friends are."
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.120",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "The website loads faster: it paints the NCore background before any code runs, and warms the connection to the backend while the page is still parsing.",
+                "Refined the site's typography, spacing, and panel treatment."
+            ],
+            "bugFixes": [
+                "Fixed direct messages appearing and then instantly vanishing. A finished load could replace a populated conversation list with an empty one; it now keeps what it has whenever the server confirmed conversations exist.",
+                "The website's Download Desktop button serves the current production installer instead of an older build from a different release track."
+            ]
+        },
+        {
+            "version": "11.7.119",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "Download Latest Update now actually downloads and installs. The updater was rejecting every update because it checked for a code-signing signature the build does not carry."
+            ],
+            "bugFixes": [
+                "Update failures are surfaced in the update panel instead of the button appearing to do nothing."
+            ]
+        },
+        {
+            "version": "11.7.118",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "When the conversation list is empty but the server did return conversations, the app now shows exactly which step dropped them instead of a bare \"No conversations yet\"."
+            ],
+            "bugFixes": [
+                "The update panel no longer says \"NCore is up to date\" directly underneath \"Update available\". When a newer release exists but no signed in-app update is published, it says so and points at the manual download."
+            ]
+        },
+        {
+            "version": "11.7.117",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "Links posted in a channel unfurl into a preview card with the site name, title, description, and image.",
+                "New mention inbox: the @ button in the top bar collects every mention of you across every server, with jump-to-message.",
+                "Quick switcher on Ctrl+K jumps to any channel, server, or conversation, opening on your recent destinations.",
+                "Moderation tools: timeouts, kicks, and bans, with optional cleanup of a banned member's recent messages. Every action is recorded in the server audit log.",
+                "Notification settings follow your account instead of one device. Mute a channel or a whole server anywhere and it is muted everywhere, with temporary mutes from 15 minutes to a day.",
+                "Messages from people you have not spoken to before wait in a Message Requests inbox instead of arriving unannounced.",
+                "In-call connection panel showing average ping, last ping, and packet loss, from the voice bar and the voice channel page.",
+                "Voice diagnostics in Settings with per-region latency and how recent calls actually performed.",
+                "Encryption keys for private messages are held in protected browser storage and can no longer be exported.",
+                "Per-server custom emoji, an emoji picker, and emoji autocomplete in the message box.",
+                "You stay signed in. Sessions survive restarts instead of asking you to log in again roughly every hour."
+            ],
+            "bugFixes": [
+                "Fixed direct message conversations disappearing. Closing a conversation hid it permanently, so new messages never brought it back; that stored list is discarded and conversations now reopen on new activity.",
+                "The conversation list can no longer be emptied by hidden-conversation state.",
+                "Fixed the desktop app losing your sign-in between launches.",
+                "Fixed the camera and screen share silently doing nothing when they failed. Denied permission, a missing camera, and a device held by another application now each say so.",
+                "Moved the window minimize, maximize, and close buttons to the top right corner.",
+                "Fixed opening a direct message silently adding that person to your friends list without asking.",
+                "Fixed blocked people still being able to start a direct message with you.",
+                "Fixed the emoji button in the message box, the top bar search, and the Inline Media Previews and Quick Switcher settings, all of which were connected to nothing."
+            ]
+        },
+        {
+            "version": "11.7.113",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "You stay signed in. Sessions now survive restarts instead of asking you to log in again roughly every hour."
+            ],
+            "bugFixes": [
+                "Fixed the desktop app losing your sign-in. The session was saved to one location and deleted from the other, so if the first was unavailable at startup it existed in neither and you were sent back to the login screen.",
+                "Signing out now reliably clears the session from both locations, so it cannot silently sign you back in on the next launch."
+            ]
+        },
+        {
+            "version": "11.7.112",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "The window minimize, maximize, and close buttons now line up with the app's header row instead of sitting in a shorter strip above it."
+            ],
+            "bugFixes": [
+                "Fixed direct message conversations still not appearing. Conversations closed under older versions were hidden permanently, and that stored list is now discarded on upgrade so every conversation comes back.",
+                "The conversation list can no longer be emptied by hidden-conversation state. If every conversation would be hidden at once, they are shown instead, because an inbox you cannot get out of is never the correct result."
+            ]
+        },
+        {
+            "version": "11.7.111",
+            "date": "2026-07-30",
+            "badge": "Previous",
+            "improvements": [
+                "Links posted in a channel now unfurl into a preview card with the site name, title, description, and image.",
+                "Added a mention inbox: an @ button in the top bar collects every mention of you across every server, newest first, with jump-to-message.",
+                "Added a quick switcher on Ctrl+K (Cmd+K) to jump to any channel, server, or conversation, opening on your recent destinations.",
+                "Added moderation tools: timeouts, kicks, and bans, with an optional cleanup of a banned member's recent messages. Every action is recorded in the server audit log, which is now readable by anyone holding the View Audit Log permission rather than owners and admins only.",
+                "Notification settings now follow your account instead of a single device. Mute a channel or a whole server anywhere and it is muted everywhere you sign in, with temporary mutes from 15 minutes to a day. A muted channel keeps showing direct mentions.",
+                "Messages from people you have not spoken to before now wait in a Message Requests inbox instead of arriving unannounced. Nobody is told whether you opened, ignored, or accepted a request.",
+                "Added an in-call connection panel showing average ping, last ping, and packet loss, reachable from the voice bar and the voice channel page.",
+                "Added voice diagnostics in Settings, including per-region latency and how your recent calls actually performed.",
+                "Encryption keys for private messages are now held in protected browser storage and can no longer be exported. Existing keys are moved automatically, and Settings shows which devices are affected.",
+                "Added a per-server custom emoji picker and emoji autocomplete in the message box."
+            ],
+            "bugFixes": [
+                "Fixed direct message conversations disappearing from the sidebar. Closing a conversation hid it permanently, so new messages from that person never brought it back; a closed conversation now reopens as soon as it has new activity.",
+                "Fixed a second cause of missing conversations, where a network or session hiccup returned an empty result and the app treated it as proof you had no conversations.",
+                "Fixed the camera and screen share silently doing nothing when they failed. Denied permission, a missing camera, and a device held by another application now each say so and explain what to do.",
+                "Dismissing the screen share picker no longer shows an error, and a failed camera start no longer leaves the camera active with nothing using it.",
+                "Moved the window minimize, maximize, and close buttons to the top right corner of the window.",
+                "Fixed opening a direct message with someone silently adding them to your friends list without asking.",
+                "Fixed blocked people still being able to start a direct message with you.",
+                "Fixed the emoji button in the message box doing nothing when clicked.",
+                "Fixed the search box in the top bar and the Inline Media Previews and Quick Switcher settings, all of which were previously connected to nothing."
+            ]
+        },
+        {
+            "version": "11.7.110",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Updated the desktop runtime to Electron 40 and modernized the production build toolchain.",
+                "Strengthened local development tooling with current Vite, React plugin, router, and dependency patches."
+            ],
+            "bugFixes": [
+                "Resolved all known npm audit vulnerabilities across shipped and development dependencies.",
+                "Removed outdated WebSocket and dependency-chain security issues from the release build."
+            ]
+        },
+        {
+            "version": "11.7.109",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "NCore now has a visible Check update action in the top bar while the desktop app is open.",
+                "Updates download in the background with live checking and progress states, then offer a restart to install."
+            ],
+            "bugFixes": [
+                "Fixed the desktop update action only appearing after the background updater had already started."
+            ]
+        },
+        {
+            "version": "11.7.108",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Profiles can safely resume or repeat setup without getting stuck on a partially created account.",
+                "Broken avatars and community icons now fall back to initials instead of showing failed-image text."
+            ],
+            "bugFixes": [
+                "Fixed profile setup relying on a one-time insert instead of a retry-safe upsert.",
+                "Fixed remote image failures degrading the Direct Messages and community navigation UI."
+            ]
+        },
+        {
+            "version": "11.7.107",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Password recovery now accepts the eight-digit email code provided by Supabase."
+            ],
+            "bugFixes": [
+                "Fixed password reset code entry rejecting valid eight-digit codes."
+            ]
+        },
+        {
+            "version": "11.7.106",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Password recovery now supports secure six-digit email codes instead of relying on a clickable reset link.",
+                "Authenticator-app MFA enrollment and sign-in verification now use Supabase native MFA.",
+                "Desktop update delivery now includes the Capacitor push-notifications dependency required for successful production builds."
+            ],
+            "bugFixes": [
+                "Fixed recovery callbacks that could leave users on a blank screen after a reset email.",
+                "Fixed the missing Capacitor push-notifications package that blocked production builds."
+            ]
+        },
+        {
+            "version": "11.7.105",
+            "date": "2026-07-10",
+            "badge": "Previous",
+            "improvements": [
+                "Password recovery now supports secure six-digit email codes instead of relying on a clickable reset link.",
+                "Authenticator-app MFA enrollment and sign-in verification now use Supabase native MFA.",
+                "Desktop update delivery now includes the Capacitor push-notifications dependency required for successful production builds."
+            ],
+            "bugFixes": [
+                "Fixed recovery callbacks that could leave users on a blank screen after a reset email.",
+                "Fixed the missing Capacitor push-notifications package that blocked production builds."
+            ]
+        },
+        {
+            "version": "11.7.104",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Installer wrapper metadata now reads 'NYPTID Industries Advanced Technologies' in the Windows File Properties dialog, UAC elevation prompt, and installed-programs list (where possible without a code-signing certificate)",
+                "Added electron-builder afterAllArtifactBuild hook that patches the NSIS setup wrapper with CompanyName + LegalCopyright + LegalTrademarks via rcedit, so both the runtime NCore.exe and the installer itself show consistent company branding",
+                "Wired win.publisherName in build config so the metadata lines up cleanly once a code-signing certificate is added"
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.103",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Download page fix: the landing page's Download Desktop button now uses the current no-space installer filename (NCore-Setup-<version>.exe). Previously it could generate the old 'NCore Setup <version>.exe' fallback URL before the version feed fetch resolved, producing a 404",
+                "New dedicated /updates/ download page reads latest.yml dynamically, shows the current version + installer size, and works even if the landing page is cached",
+                "/download shortcut: https://ncore.nyptidindustries.com/download routes to the downloads page",
+                "Legacy-filename redirects: any bookmarked or cached link to 'NCore Setup X.Y.Z.exe' now 302s to the new NCore-Setup-X.Y.Z.exe path instead of 404ing"
+            ],
+            "bugFixes": [
+                "Download button on nyptidindustries.com was 404ing for users who clicked before latest.yml resolved"
+            ]
+        },
+        {
+            "version": "11.7.102",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "The arc-reactor update animation now appears the instant you click the green Restart/Install button — not just during auto-triggered updates",
+                "Overlay window is explicitly kept alive during the quit-for-update handoff so the animation stays on screen until NSIS takes over",
+                "Install path runs a Defender / SmartScreen preflight check before calling NSIS; if the pending installer was already removed, the overlay flips straight to the recovery UI (Download manually / Show folder / Retry) instead of flashing the animation and dying"
+            ],
+            "bugFixes": [
+                "Fixed: clicking 'Restart now' from Settings or the overlay itself previously closed all windows before the overlay could render, so users saw no animation at all",
+                "Fixed: close-all-windows tear-down during install was also destroying the overlay; it now has a keep-alive flag for the update path"
+            ]
+        },
+        {
+            "version": "11.7.101",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Update overlay now recovers from 'Windows cannot find the installer' errors — the arc-reactor window shows a clear error state with 'Download manually', 'Show folder', and 'Retry' buttons so you can finish updating even when Windows Defender quietly removes the downloaded installer",
+                "Installer filename no longer contains spaces (NCore-Setup-11.7.101.exe) — eliminates one common source of 'cannot find' shell errors when launching the NSIS installer",
+                "Defender / SmartScreen guidance surfaced in the overlay: tells you to whitelist the ncore-updater folder under Windows Security → Exclusions to prevent the problem recurring"
+            ],
+            "bugFixes": [
+                "quitAndInstall() failures are now caught and surfaced with a recovery UI instead of silently killing the update",
+                "Pending-installer folder is checked before install is attempted; if empty, the overlay immediately surfaces the error with a manual-download link"
+            ]
+        },
+        {
+            "version": "11.7.100",
+            "date": "2026-04-18",
+            "badge": "Latest Build",
+            "improvements": [
+                "Discord-style update overlay — when NCore updates itself, a small frameless window appears with an arc-reactor animation (spinning concentric rings, pulsing core) showing the NCore logo, a live progress bar, version chip, and Restart Now / Later buttons",
+                "Overlay survives the install handoff so you have a clear 'we are working on it' surface during the brief moment between the main app quitting and NSIS relaunching the new exe",
+                "Honors prefers-reduced-motion: skips the spinning animations for users who opt out"
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.99",
+            "date": "2026-04-17",
+            "badge": "Previous",
+            "improvements": [
+                "Real threads panel — messages with replies branch into threads you can open, browse, and reply in; replies stream live",
+                "Seen indicator on DMs — own messages show 'Seen' the moment the other side catches up",
+                "Block and Mute from the Friends list; a new Blocked tab lets you review and unblock / unmute",
+                "Tablet layout — iPad and any viewport >= 1024px now gets the desktop split-pane UI (no more bottom-tab mobile on a 12.9\" screen)",
+                "Optional error sink: set VITE_ERROR_WEBHOOK_URL and runtime errors get POSTed to Sentry / Discord / any HTTP receiver (rate-limited client-side)",
+                "New GitHub Actions CI: lint + typecheck + build run on every PR and main push",
+                "Hot-path DB indexes migration (messages / direct_messages / user_growth_capabilities / profiles / security cases) — idempotent, re-runnable"
+            ],
+            "bugFixes": [
+                "TypeScript: noUnusedLocals is now on; 39 dead imports / variables cleaned up across the app",
+                "Error boundaries on CommunityPage and AuthPage stats replace the silent infinite-spinner states",
+                ".env.example added so new developer setup doesn't guess what variables are required"
+            ]
+        },
+        {
+            "version": "11.7.98",
+            "date": "2026-04-17",
+            "badge": "Previous",
+            "improvements": [
+                "Forgot-password + magic-link + resend-confirmation flows in-app — no more getting locked out",
+                "Push-to-talk, VAD threshold slider, in-call device switcher, and live network-quality bars",
+                "Noise suppression now runs through Jitsi RNNoise (open-source, transparent) before Agora — cleaner voice at 48 kHz stereo 192 kbps",
+                "Calls no longer drop at 60 minutes — token renewal is wired end-to-end on DM + server-voice",
+                "Windows install now starts with your PC by default and lives in the tray — 'always on' with one click",
+                "iOS PWA polish — safe-area everywhere, 100dvh layout, no zoom-on-input, Add-to-Home-Screen hint",
+                "Error boundaries + retry UX replace infinite spinners on Community, Friends, and Discover"
+            ],
+            "bugFixes": [
+                "Fixed owner account login after a Bolt/StackBlitz reset silently renamed the email row",
+                "Electron renderer now runs sandboxed with a strict CSP — defence-in-depth against renderer-process exploits",
+                "TypeScript: 26 pre-existing errors cleared, full project typechecks clean",
+                "Removed dead agora-token-debug and agora-token-relaxed edge function code paths"
+            ]
+        },
+        {
+            "version": "11.7.97",
+            "date": "2026-04-10",
+            "badge": "Previous",
+            "improvements": [
+                "Notifications now clear completely after Mark All Read instead of staying in the list grayed out. Only new notifications appear after clearing.",
+                "Server creation overhauled to Discord-style 3-step wizard: pick template, choose purpose (friends/community), name your server and create. Under 10 seconds.",
+                "QuickDraw marketplace fully renamed for professionalism: Specialist Desk → My Dashboard, Contract Grid → Browse Services, Founder Command → Hire Talent, Issue New Contract → Post a Job.",
+                "Steam-style Game Detail Page with hero banner, screenshot gallery, system requirements, publisher card, price/buy/wishlist, and user reviews with thumbs ratio bar.",
+                "Cosmetic auto-generation system creates randomized nameplate, frame, flair, banner, and badge variants with unique gradients, ring styles, and pricing.",
+                "Game listings now support screenshots, system requirements, short descriptions, and genre tags for richer store browsing."
+            ],
+            "bugFixes": [
+                "Fixed notification list not clearing visually after marking all as read.",
+                "Fixed server creation modal showing too many fields upfront instead of a simple step-by-step flow."
+            ]
+        },
+        {
+            "version": "11.7.95",
+            "date": "2026-04-10",
+            "badge": "Previous",
+            "improvements": [
+                "RTC Provider Abstraction: Voice and video calling now runs through a provider-agnostic layer, enabling future migration from Agora to self-hosted LiveKit with a single environment variable flip.",
+                "LiveKit Integration: Full LiveKit provider implementation with room management, track wrapping, screen share, and token generation — ready to activate when self-hosted server is deployed.",
+                "Krisp-grade Noise Cancellation: RNNoise WASM AudioWorklet processor with voice activity detection, auto-mute threshold, and layered noise suppression pipeline. New AI engine selector in Voice & Video settings.",
+                "Security Shield v2: Homograph/IDN attack detection, unicode impersonation blocking, shortened URL warnings, script injection blocking, and extended executable file type filtering. 8 protection categories (up from 4).",
+                "Forum Channels: New forum channel type with threaded post/reply system, tag-based filtering, sort modes (Latest/Hot/Oldest), and dedicated ForumChannelPage.",
+                "Game Library: Steam-style game library with My Library, Store, and Wishlist tabs. Grid and list views, discount pricing, review labels (Overwhelmingly Positive → Negative), play/buy actions.",
+                "Developer Portal: Create and manage bots with auto-generated tokens, enable/disable controls, and delete. Configure webhooks with event subscriptions, HMAC signing, and failure tracking.",
+                "Bot Platform: Bot REST API for sending messages, listing channels, adding reactions, and reading members. HMAC-SHA256 signed webhook dispatch with auto-disable on failures. BOT badge on bot messages.",
+                "AI Catch Up: Channel summarization via configurable LLM endpoint. Click the lightning bolt in any channel to get a bullet-point summary of recent conversations.",
+                "Community Events: Scheduled events with RSVP (Going/Maybe), live event detection with animated LIVE badge, and smart time formatting.",
+                "E2E Encryption Foundation: ECDH P-256 key exchange, AES-256-GCM message encryption, HKDF key derivation, and safety number verification — all via WebCrypto with zero external dependencies.",
+                "Plugin SDK: Sandboxed iframe plugin runtime with manifest system, 5 permission scopes, postMessage bridge, and PluginManager singleton for registration and lifecycle management.",
+                "Rich Presence: Activity type support (Playing, Streaming, Listening, Watching) with details, timestamps, and party info. Displayed in friends list with accent color.",
+                "2FA Setup Flow: Full TOTP authenticator, WebAuthn hardware key, and recovery code UI in Security settings.",
+                "Active Sessions: View current session with auto-detected browser and OS, manage other sessions, revoke all button, and security tips.",
+                "Marketplace Expansion: 21 new database tables for job briefs, seller applications, service/game reviews with auto-rating triggers, game categories, wishlists, bundles, mods, tiered commissions (10%/7%/4%/3%), and forum tags.",
+                "Seller Analytics: Revenue dashboard with total earnings, pending/available balance, order stats, completion rate, average rating, and transaction ledger.",
+                "Startup Performance: PWA init deferred to after first paint. Agora (1.4MB) and LiveKit (485KB) SDKs split into on-demand chunks that only load when joining a call."
+            ],
+            "bugFixes": [
+                "Fixed closed DMs reopening on app restart — switched from sessionStorage (cleared on close) to localStorage for persistent closed conversation tracking.",
+                "Fixed forum/stage channel types not recognized in sidebar routing — added icons and navigation paths for forum and stage channels.",
+                "Fixed Avatar component prop mismatches in new pages (ForumChannelPage, GameLibraryPage, DeveloperPortalPage).",
+                "Fixed channel type database constraint using wrong column name (type vs channel_type)."
+            ]
+        },
+        {
             "version": "11.7.92",
             "date": "2026-04-08",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "User dock mute and deafen toggles now work even while idle, matching Discord-style pre-call behavior.",
                 "Pre-call mute/deafen preferences now persist and auto-apply when joining direct calls or server voice channels.",

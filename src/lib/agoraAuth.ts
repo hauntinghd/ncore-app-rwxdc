@@ -5,7 +5,7 @@ const AGORA_TOKEN_FUNCTION = (import.meta.env.VITE_AGORA_TOKEN_FUNCTION || 'agor
 const AGORA_ALLOW_UNAUTH_JOIN = String(import.meta.env.VITE_AGORA_ALLOW_UNAUTH_JOIN || 'true').toLowerCase() === 'true';
 const AGORA_REQUIRE_TOKEN = String(import.meta.env.VITE_AGORA_REQUIRE_TOKEN || '').toLowerCase() === 'true';
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
-const AGORA_TOKEN_FALLBACK_FUNCTIONS = ['agora-token-relaxed', 'agora-token-debug'];
+const AGORA_TOKEN_FALLBACK_FUNCTIONS: string[] = [];
 
 function isFunctionsMissingError(message: string): boolean {
   const normalized = message.toLowerCase();

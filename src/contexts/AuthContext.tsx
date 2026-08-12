@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/types';
-import { registerDeviceToken } from '../lib/push';
+import { autoRegisterPushToken, registerDeviceToken } from '../lib/push';
+import { ensureIdentityKey, isE2EEnabled, resetIdentityCache } from '../lib/crypto/e2eManager';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 
 interface AuthContextType {
@@ -11,11 +12,18 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   profileLoading: boolean;
+  mfaPending: boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithMagicLink: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
+  clearSignInThrottle: () => void;
+  sendPasswordResetEmail: (email: string) => Promise<{ error: Error | null }>;
+  updatePassword: (newPassword: string) => Promise<{ error: Error | null }>;
+  resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
+  refreshMfaState: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -83,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [mfaPending, setMfaPending] = useState(false);
   const DEFAULT_DEVICE_TOKEN_KEY = '__ncore_default_device_token_registered';
 
   function getProfileCacheKey(userId: string): string {
@@ -150,23 +159,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function refreshMfaState(): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (error || !data) {
+        setMfaPending(false);
+        return false;
+      }
+      const pending = data.currentLevel === 'aal1' && data.nextLevel === 'aal2';
+      setMfaPending(pending);
+      return pending;
+    } catch {
+      setMfaPending(false);
+      return false;
+    }
+  }
+
   useEffect(() => {
     async function registerDefaultDeviceTokenOnce() {
       try {
         const defaultToken = (import.meta.env.VITE_DEFAULT_DEVICE_TOKEN || '').trim();
         const platform = (import.meta.env.VITE_DEFAULT_DEVICE_PLATFORM || '').trim() || null;
-        if (!defaultToken) return;
-        if (typeof window !== 'undefined') {
-          const alreadyRegistered = localStorage.getItem(DEFAULT_DEVICE_TOKEN_KEY);
-          if (alreadyRegistered === '1') return;
+        const alreadyRegistered = typeof window !== 'undefined'
+          ? localStorage.getItem(DEFAULT_DEVICE_TOKEN_KEY) === '1'
+          : false;
+
+        // 1. Honor a developer-injected token even if push is unavailable.
+        if (defaultToken && !alreadyRegistered) {
+          await registerDeviceToken(defaultToken, platform);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(DEFAULT_DEVICE_TOKEN_KEY, '1');
+          }
         }
-        await registerDeviceToken(defaultToken, platform);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(DEFAULT_DEVICE_TOKEN_KEY, '1');
+
+        // 2. Try the real push pipeline (Capacitor on mobile, web push in
+        //    browsers). Fails silently if no source is available.
+        const result = await autoRegisterPushToken();
+        if (!result.ok && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info('Push registration skipped:', result.error);
         }
       } catch (err) {
         // ignore registration errors
-        console.warn('Default device token registration failed', err);
+        console.warn('Push token registration failed', err);
       }
     }
 
@@ -189,10 +224,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfileLoading(false);
         });
         void registerDefaultDeviceTokenOnce();
+        if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
+        void refreshMfaState();
       } else {
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        setMfaPending(false);
       }
     });
 
@@ -214,6 +252,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfileLoading(false);
         });
         void registerDefaultDeviceTokenOnce();
+        if (isE2EEnabled()) void ensureIdentityKey(session.user.id);
+        void refreshMfaState();
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         queueRuntimeEvent('auth_session_recovered', {
           user_id: session.user.id,
@@ -225,11 +265,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        resetIdentityCache();
+        setMfaPending(false);
       } else if (!session) {
         clearCachedProfile(user?.id);
         setProfile(null);
         setProfileLoading(false);
         setLoading(false);
+        setMfaPending(false);
       }
     });
 
@@ -281,6 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, { sampleRate: 1 });
     } else {
       resetSignInThrottleState();
+      await refreshMfaState();
     }
     return { error: error as Error | null };
   }
@@ -290,6 +334,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await touchLastSeen(user.id);
     }
     await supabase.auth.signOut();
+  }
+
+  async function signInWithMagicLink(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.signInWithOtp({
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: origin ? `${origin}/app/dm` : undefined,
+      },
+    });
+    return { error: error as Error | null };
+  }
+
+  function clearSignInThrottle() {
+    resetSignInThrottleState();
+  }
+
+  async function sendPasswordResetEmail(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      // The base origin is generally already on Supabase's redirect allow
+      // list. AppRoutes detects the recovery fragment and forwards it to the
+      // reset screen without losing the one-time token.
+      redirectTo: origin || undefined,
+    });
+    return { error: error as Error | null };
+  }
+
+  async function updatePassword(newPassword: string) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return { error: error as Error | null };
+  }
+
+  async function resendConfirmationEmail(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: origin ? `${origin}/app/dm` : undefined,
+      },
+    });
+    return { error: error as Error | null };
   }
 
   async function updateProfile(updates: Partial<Profile>) {
@@ -314,8 +404,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, session, profile, loading, profileLoading,
-      signUp, signIn, signOut, updateProfile, refreshProfile,
+      user, session, profile, loading, profileLoading, mfaPending,
+      signUp, signIn, signInWithMagicLink, signOut, updateProfile, refreshProfile,
+      clearSignInThrottle, sendPasswordResetEmail, updatePassword, resendConfirmationEmail, refreshMfaState,
     }}>
       {children}
     </AuthContext.Provider>

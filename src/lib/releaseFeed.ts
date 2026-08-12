@@ -17,6 +17,11 @@ export interface MobileLatestEntry {
   updatedAt?: string;
 }
 
+export interface NativeDesktopLatestEntry {
+  version: string;
+  url: string;
+}
+
 function clean(value: unknown): string {
   return String(value || '').trim().replace(/^['"]|['"]$/g, '');
 }
@@ -296,6 +301,42 @@ export async function fetchLatestInstallerAssetPath(feedBase: string): Promise<s
   }
 
   return '';
+}
+
+/**
+ * The installer the website should hand out.
+ *
+ * Reads the **Tauri** feed (`tauri/latest.json`): as of 11.7.121 the Tauri
+ * build is the production desktop client — it carries the Authenticode
+ * signature from Azure Trusted Signing, and its updater key was rotated the
+ * same day, so the feed and the installer the site serves finally agree.
+ *
+ * History, because this function has flip-flopped: it originally read
+ * `tauri/latest.json` while nothing published there (users downloaded a
+ * client that could never update), was pointed at the Electron `latest.yml`
+ * on 2026-07-30 to stop that, and switched back on 2026-08-11 when Tauri
+ * became the published, signed production build. The Electron feed still
+ * exists solely to keep already-installed Electron clients updating until
+ * the handoff release retires them.
+ */
+export async function fetchLatestNativeDesktopInstaller(feedBase: string): Promise<NativeDesktopLatestEntry | null> {
+  const normalizedBase = normalizeUpdateFeedBase(feedBase, DEFAULT_UPDATE_FEED_URL);
+  try {
+    const response = await fetch(`${normalizedBase}/tauri/latest.json?ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    const payload = await response.json();
+
+    const version = clean(payload?.version);
+    const installer = clean(payload?.platforms?.['windows-x86_64']?.url);
+    if (!version || !installer) return null;
+
+    const url = /^https?:\/\//i.test(installer)
+      ? installer
+      : `${normalizedBase}/tauri/${installer}`;
+    return { version, url };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchLatestMobileInstaller(feedBase: string): Promise<MobileLatestEntry | null> {

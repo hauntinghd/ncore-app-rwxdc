@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Copy, Palette, Plus, Save, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { CustomEmojiSection } from '../components/community/CustomEmojiSection';
+import { CustomRolesSection } from '../components/community/CustomRolesSection';
+import { MemberModerationMenu } from '../components/community/MemberModerationMenu';
+import { ModerationSection } from '../components/community/ModerationSection';
 import { useAuth } from '../contexts/AuthContext';
+import { PERMISSION, getEffectivePermissions, hasPermission } from '../lib/communityRoles';
 import { supabase } from '../lib/supabase';
 import { buildCommunityInviteLink } from '../lib/inviteLinks';
 import type { Community, CommunityMember, CommunityRole, Profile, Visibility } from '../lib/types';
@@ -98,6 +103,9 @@ export function CommunitySettingsPage() {
 
   const [community, setCommunity] = useState<Community | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  /** Effective permission bits for the viewer, so moderation controls follow
+   *  custom roles rather than only the legacy owner/admin column. */
+  const [permissionBits, setPermissionBits] = useState<bigint>(0n);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -600,9 +608,37 @@ function buildInviteLink(code: string): string {
     }
   }
 
+  async function refreshMembers() {
+    if (!communityId) return;
+    setMembers(await loadMembers(communityId));
+  }
+
   const isCommunityOwner = Boolean(
     community && profile && (community.owner_id === profile.id || profile.platform_role === 'owner'),
   );
+
+  useEffect(() => {
+    if (!communityId || !profile?.id) return;
+    let cancelled = false;
+    void getEffectivePermissions(communityId, profile.id)
+      .then((bits) => {
+        if (!cancelled) setPermissionBits(bits);
+      })
+      .catch(() => {
+        // A failed lookup leaves the bits at zero, which hides the moderation
+        // controls. The server would refuse the actions anyway.
+        if (!cancelled) setPermissionBits(0n);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [communityId, profile?.id]);
+
+  // The owner is not required to hold any bit explicitly.
+  const canKickMembers = isCommunityOwner || hasPermission(permissionBits, PERMISSION.KICK_MEMBERS);
+  const canBanMembers = isCommunityOwner || hasPermission(permissionBits, PERMISSION.BAN_MEMBERS);
+  const canTimeoutMembers = isCommunityOwner || hasPermission(permissionBits, PERMISSION.MUTE_MEMBERS);
+  const canViewAuditLog = isCommunityOwner || hasPermission(permissionBits, PERMISSION.VIEW_AUDIT_LOG);
   const canDeleteCommunity = Boolean(
     community && profile && (community.owner_id === profile.id || profile.platform_role === 'owner'),
   );
@@ -1136,6 +1172,19 @@ function buildInviteLink(code: string): string {
                         Remove
                       </button>
                     )}
+                    {!isSelf && !isOwnerMember && (
+                      <MemberModerationMenu
+                        communityId={communityId ?? ''}
+                        userId={member.user_id}
+                        memberName={memberName}
+                        canKick={canKickMembers}
+                        canBan={canBanMembers}
+                        canTimeout={canTimeoutMembers}
+                        onActionComplete={() => {
+                          void refreshMembers();
+                        }}
+                      />
+                    )}
                     {isCommunityOwner && !isSelf && !isOwnerMember && (
                       <button
                         type="button"
@@ -1153,6 +1202,17 @@ function buildInviteLink(code: string): string {
               })}
             </div>
           </div>
+
+          <ModerationSection
+            communityId={communityId ?? ''}
+            canBan={canBanMembers}
+            canTimeout={canTimeoutMembers}
+            canViewAudit={canViewAuditLog}
+          />
+
+          <CustomRolesSection communityId={communityId ?? ''} canManage={isAdmin} />
+
+          <CustomEmojiSection communityId={communityId ?? ''} canManage={isAdmin} />
 
           <div className="nyptid-card p-5 border border-red-500/30">
             <div className="flex items-center gap-2 mb-3">

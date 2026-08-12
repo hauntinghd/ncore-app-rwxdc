@@ -44,12 +44,63 @@ export function reportRuntimeError(
   options: RuntimeTelemetryOptions = {},
 ): void {
   const err = error as any;
-  queueRuntimeEvent(eventName, {
+  const errorPayload: Record<string, Json> = {
     ...payload,
     error_name: String(err?.name || 'Error'),
     error_message: String(err?.message || error || ''),
     error_code: String(err?.code || ''),
-  }, options);
+  };
+  queueRuntimeEvent(eventName, errorPayload, options);
+  // Optional external forward (Sentry, Discord, any HTTP receiver). Off by default.
+  forwardErrorToExternalHook(eventName, errorPayload, err).catch(() => {
+    // Telemetry must never break the product path.
+  });
+}
+
+let errorHookBudget = {
+  minuteStart: 0,
+  count: 0,
+};
+
+async function forwardErrorToExternalHook(
+  eventName: string,
+  payload: Record<string, Json>,
+  errorObject: any,
+): Promise<void> {
+  const url = String(
+    (typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_ERROR_WEBHOOK_URL : '')
+    || '',
+  ).trim();
+  if (!url) return;
+
+  // Crude in-memory rate limit: max 30 errors/min per tab to avoid spamming
+  // a misbehaving endpoint during a render loop.
+  const now = Date.now();
+  if (now - errorHookBudget.minuteStart > 60_000) {
+    errorHookBudget = { minuteStart: now, count: 0 };
+  }
+  if (errorHookBudget.count >= 30) return;
+  errorHookBudget.count += 1;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        event: eventName,
+        app: 'ncore',
+        version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '',
+        ts: new Date().toISOString(),
+        payload,
+        stack: String(errorObject?.stack || ''),
+        href: typeof window !== 'undefined' ? window.location.href : '',
+        ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      }),
+    });
+  } catch {
+    // swallow — this is best-effort telemetry
+  }
 }
 
 export function createDurationTracker(

@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.92",
+  "version": "11.7.122",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -11,12 +11,14 @@
   "scripts": {
     "dev": "vite",
     "audio:assets:sync": "node scripts/sync-ai-denoiser-assets.cjs",
-    "build": "npm run audio:assets:sync && vite build",
+    "audio:voice-cues": "node scripts/generate-voice-cues.cjs",
+    "build": "npm run audio:assets:sync && npm run audio:voice-cues && vite build",
     "build:electron:web": "npm run audio:assets:sync && set NCORE_ELECTRON_BUILD=1&& vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "desktop": "npm run build:electron:web && electron .",
+    "desktop:tauri": "tauri dev",
     "build:mobile:web": "npm run build && node scripts/prepare-mobile-web.cjs",
     "sync:android:mobile": "set CAPACITOR_WEB_DIR=dist-mobile&& npx cap sync android",
     "build:apk:debug": "npm run build:mobile:web && npm run sync:android:mobile && cd android && gradlew.bat assembleDebug --no-daemon",
@@ -25,29 +27,44 @@
     "version:bump": "node scripts/bump-version.cjs patch",
     "build:exe": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false",
     "build:exe:portable": "npm run icons:sync && npm run build:electron:web && electron-builder --win portable --x64 -c.win.signAndEditExecutable=false",
+    "build:tauri:web": "npm run audio:assets:sync && npm run audio:voice-cues && node scripts/prepare-tauri-public.cjs && set NCORE_DESKTOP_BUILD=1&& vite build",
+    "build:tauri": "npm run icons:sync && tauri build",
+    "build:tauri:release": "npm run version:bump && npm run build:tauri && node scripts/sync-tauri-update-feed.cjs",
     "build:exe:auto:nobump": "npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "build:exe:auto": "npm run version:bump && npm run icons:sync && npm run build:electron:web && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false && node scripts/sync-update-feed.cjs",
     "release:web": "node scripts/release-web.cjs",
     "release:web:auto": "npm run version:bump && node scripts/release-web.cjs",
-    "release:update": "npm run build:exe:auto && npm run release:web"
+    "release:update": "npm run build:exe:auto && npm run release:web",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
+    "@capacitor/push-notifications": "^8.1.1",
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@supabase/supabase-js": "^2.57.4",
-    "electron-updater": "^6.6.2"
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-store": "^2.4.3",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "electron-updater": "^6.6.2",
+    "livekit-client": "^2.18.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.2.0",
     "@capacitor/cli": "^8.2.0",
     "@capacitor/core": "^8.2.0",
     "@eslint/js": "^9.9.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^6.0.3",
     "agora-extension-ai-denoiser": "^2.0.1",
     "agora-rtc-react": "^2.5.1",
     "agora-rtc-sdk-ng": "^4.24.2",
     "autoprefixer": "^10.4.18",
-    "electron": "^35.0.3",
+    "electron": "^40.10.6",
     "electron-builder": "^26.0.12",
     "eslint": "^9.9.1",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
@@ -65,14 +82,18 @@
     "simple-icons": "^16.12.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.5.3",
-    "typescript-eslint": "^8.3.0",
-    "vite": "^5.4.2"
+    "typescript-eslint": "^8.46.0",
+    "vite": "^8.1.4"
   },
   "build": {
     "appId": "com.nyptid.ncore",
     "productName": "NCore",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
     "executableName": "NCore",
-    "copyright": "Copyright © 2026 NYPTID Industries Advanced Technologies",
+    "copyright": "Copyright Ãƒâ€šÃ‚Â© 2026 NYPTID Industries Advanced Technologies",
     "directories": {
       "output": "release"
     },
@@ -118,7 +139,8 @@
       "createStartMenuShortcut": true,
       "installerIcon": "electron/assets/ncore-icon.ico",
       "uninstallerIcon": "electron/assets/ncore-icon.ico",
-      "installerHeaderIcon": "electron/assets/ncore-icon.ico"
+      "installerHeaderIcon": "electron/assets/ncore-icon.ico",
+      "artifactName": "NCore-Setup-${version}.${ext}"
     }
   }
 }

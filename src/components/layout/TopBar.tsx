@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
-  Download, Mic, MicOff, RefreshCw, Search, Settings, User, Volume2, VolumeX, X, Zap,
+  AtSign, Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
+  Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, Volume2, VolumeX, X, Zap,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
+import { MessageSearchPanel } from '../chat/MessageSearchPanel';
+import { MentionInboxPanel } from '../chat/MentionInboxPanel';
+import { fetchMentionUnreadCount } from '../../lib/mentionInbox';
+import {
+  fetchMutedScopes,
+  resolveMode,
+  type NotificationPreference,
+} from '../../lib/notificationPrefs';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -111,6 +119,38 @@ function writeReleaseCache(releases: ReleaseLogEntry[], latestVersion: string) {
   }
 }
 
+/**
+ * Whether a notification should arrive silently, given the user's muted scopes.
+ *
+ * Calls are never silenced. A missed call cannot be caught up on later the way
+ * a message can, and someone who muted a server did not mean "do not ring me".
+ *
+ * Under 'mentions' mode a direct mention still rings — that is the entire
+ * distinction between "only @mentions" and "nothing".
+ */
+function isNotificationSilenced(
+  notification: Notification,
+  mutedScopes: readonly NotificationPreference[],
+): boolean {
+  const type = String(notification.type || '').toLowerCase();
+  if (type === 'incoming_call') return false;
+  if (mutedScopes.length === 0) return false;
+
+  const data = (notification.data || {}) as Record<string, unknown>;
+  const channelId = typeof data.channel_id === 'string' ? data.channel_id : null;
+  const communityId = typeof data.community_id === 'string' ? data.community_id : null;
+  const conversationId = typeof data.conversation_id === 'string' ? data.conversation_id : null;
+  if (!channelId && !communityId && !conversationId) return false;
+
+  const mode = resolveMode(mutedScopes, channelId ?? conversationId, communityId);
+  if (mode === 'none') return true;
+  if (mode === 'mentions') {
+    const isMention = type === 'mention' || data.mention === true;
+    return !isMention;
+  }
+  return false;
+}
+
 function getNotificationSoundKind(notification: Notification): NotificationSoundKind {
   const type = String(notification.type || '').trim().toLowerCase();
   const data = (notification.data || {}) as any;
@@ -131,9 +171,78 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const callSession = useDirectCallShellState();
   const useMainProcessDesktopNotifications = typeof window !== 'undefined' && Boolean(window.desktopBridge?.realtimeStart);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [showMentionInbox, setShowMentionInbox] = useState(false);
+  const [mentionUnread, setMentionUnread] = useState(0);
+  /*
+    Muted scopes, held in a ref because the notification handlers below are
+    created inside a subscription effect that must not re-run every time a mute
+    changes — re-subscribing on every preference edit would drop notifications
+    in the gap.
+  */
+  const mutedScopesRef = useRef<NotificationPreference[]>([]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    const refresh = () => {
+      void fetchMutedScopes()
+        .then((scopes) => {
+          if (!cancelled) mutedScopesRef.current = scopes;
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 120_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [profile?.id]);
+
+  /*
+    Mention badge. Polled rather than subscribed: the count depends on both new
+    mentions and read-cursor movement, and a realtime subscription would only
+    see one of those. A minute of staleness on a badge is not worth a second
+    channel to keep in sync — and navigating refreshes it immediately.
+  */
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    const refresh = () => {
+      void fetchMentionUnreadCount()
+        .then((count) => {
+          if (!cancelled) setMentionUnread(count);
+        })
+        .catch(() => {});
+    };
+
+    refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [profile?.id, location.pathname]);
+
+  // Scope search to the community the user is looking at, when there is one.
+  const activeCommunityIdFromPath = useMemo(() => {
+    const match = /^\/app\/community\/([0-9a-f-]{36})/i.exec(location.pathname);
+    return match ? match[1] : null;
+  }, [location.pathname]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [lastClearedAt, setLastClearedAt] = useState<string | null>(() => {
+    try { return localStorage.getItem('ncore.notifications.lastClearedAt'); } catch { return null; }
+  });
   const [incomingCall, setIncomingCall] = useState<Notification | null>(null);
   const [notificationError, setNotificationError] = useState('');
   const [callNowMs, setCallNowMs] = useState(Date.now());
@@ -156,10 +265,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   const unreadCount = notificationUnreadCount + updateUnreadCount;
   const hasActiveCall = callSession.phase === 'active' || callSession.phase === 'connecting';
   const isElectronClient = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
-  const topBarStyle: CSSProperties | undefined = isElectronClient
+  const isTauriClient = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const topBarStyle: CSSProperties | undefined = (isElectronClient || isTauriClient)
     ? ({ paddingRight: 156, WebkitAppRegion: 'drag' } as CSSProperties)
     : undefined;
-  const noDragStyle: CSSProperties | undefined = isElectronClient
+  const noDragStyle: CSSProperties | undefined = (isElectronClient || isTauriClient)
     ? ({ WebkitAppRegion: 'no-drag' } as CSSProperties)
     : undefined;
   const streamerBannerTop = isElectronClient ? 36 : 8;
@@ -169,7 +279,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     : false;
   const updateInstallInProgress = installingFromTopbar || updateRuntimeState.installing;
   const updateDownloadInProgress = updateRuntimeState.checking || updateRuntimeState.downloading;
-  const showTopbarUpdateButton = !updateRuntimeState.portable && (updateRuntimeState.ready || updateInstallInProgress || updateDownloadInProgress);
+  // Native releases are discovered in the background by the bottom-right
+  // update card. Do not leave a permanent control in the title bar when no
+  // update exists.
+  const showTopbarUpdateButton = false;
 
   function markReleaseUpdatesRead(version = latestReleaseVersion) {
     const normalized = String(version || '').trim();
@@ -374,7 +487,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         return;
       }
       if (!data) return;
-      const list = sortNotificationsByCreatedAt(data as Notification[]);
+      const filtered = lastClearedAt
+        ? (data as Notification[]).filter((n) => n.created_at > lastClearedAt)
+        : (data as Notification[]);
+      const list = sortNotificationsByCreatedAt(filtered);
       setNotificationError('');
       setNotifications((prev) => mergeNotificationLists(prev, list).slice(0, 50));
       const latestIncomingCall = list.find((notification) => notification.type === 'incoming_call' && !notification.is_read) || null;
@@ -384,6 +500,9 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         for (const notification of list) {
           if (!seenNotificationIdsRef.current.has(notification.id)) {
             seenNotificationIdsRef.current.add(notification.id);
+            // Mute has to reach the delivery path, not just the badges — a
+            // muted channel that still rings is not muted.
+            if (isNotificationSilenced(notification, mutedScopesRef.current)) continue;
             new Notification(
               sanitizeNotificationTitle(notification.title || 'NCore', notification.type || ''),
               { body: sanitizeNotificationBody(notification.body || '', notification.type || '') },
@@ -417,11 +536,15 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         },
         (payload) => {
           const incoming = payload.new as Notification;
+          if (lastClearedAt && incoming.created_at <= lastClearedAt) return;
           setNotifications((prev) => mergeNotificationLists(prev, [incoming]).slice(0, 50));
           setNotificationError('');
           if (incoming.type === 'incoming_call') {
             setIncomingCall(incoming);
           }
+          // Silenced notifications still land in the list — mute suppresses the
+          // interruption, not the record of what happened.
+          if (isNotificationSilenced(incoming, mutedScopesRef.current)) return;
           if (canUseRendererNotificationAudio()) {
             const soundKind = getNotificationSoundKind(incoming);
             if (soundKind === 'call') {
@@ -486,7 +609,10 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     markReleaseUpdatesRead();
     if (!profile) return;
     await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id);
-    setNotifications((prev) => prev.map((notification) => ({ ...notification, is_read: true })));
+    const clearedAt = new Date().toISOString();
+    setLastClearedAt(clearedAt);
+    try { localStorage.setItem('ncore.notifications.lastClearedAt', clearedAt); } catch { /* noop */ }
+    setNotifications([]);
     setIncomingCall(null);
     setShowNotifications(false);
     stopIncomingCallRing();
@@ -596,11 +722,50 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
     }
   }
 
+  async function handleCheckForUpdateFromTopbar() {
+    const downloadLatestUpdate = window.desktopBridge?.downloadLatestUpdate;
+    if (!downloadLatestUpdate || updateDownloadInProgress || updateInstallInProgress) return;
+
+    setUpdateRuntimeState((previous) => ({
+      ...previous,
+      checking: true,
+      message: 'Checking for the latest NCore update...',
+    }));
+
+    try {
+      const result = await downloadLatestUpdate();
+      setUpdateRuntimeState((previous) => ({
+        ...previous,
+        portable: Boolean(result?.portable ?? previous.portable),
+        ready: Boolean(result?.ready),
+        checking: Boolean(result?.checking),
+        downloading: Boolean(result?.downloading),
+        installing: Boolean(result?.installing),
+        progress: Number(result?.progress || 0),
+        version: String(result?.currentVersion || previous.version || ''),
+        latestVersion: String(result?.latestVersion || previous.latestVersion || ''),
+        message: String(result?.message || (result?.noUpdate ? 'NCore is already up to date.' : previous.message || 'Checking for updates...')),
+      }));
+    } catch {
+      setUpdateRuntimeState((previous) => ({
+        ...previous,
+        checking: false,
+        downloading: false,
+        message: 'Could not check for updates. Try again.',
+      }));
+    }
+  }
+
   return (
     <>
     <div
-      className="relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4"
+      /* On desktop, reserve the width of the three window buttons so bar
+         content never slides underneath them. */
+      className={`relative z-10 flex h-14 flex-shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 pl-4 ${
+        isTauriClient ? 'pr-40' : 'pr-4'
+      }`}
       style={topBarStyle}
+      data-tauri-drag-region={isTauriClient ? '' : undefined}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {showSidebarToggle && (
@@ -678,8 +843,8 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         {showTopbarUpdateButton && (
           <button
             type="button"
-            onClick={handleInstallUpdateFromTopbar}
-            disabled={!updateRuntimeState.ready || updateInstallInProgress}
+            onClick={updateRuntimeState.ready ? handleInstallUpdateFromTopbar : handleCheckForUpdateFromTopbar}
+            disabled={updateInstallInProgress || updateDownloadInProgress}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
               updateRuntimeState.ready || updateInstallInProgress
                 ? 'border-green-500/40 bg-green-500/15 text-green-100 hover:bg-green-500/25'
@@ -689,7 +854,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
               ? 'Applying update and restarting NCore...'
               : updateDownloadInProgress
                 ? (updateRuntimeState.message || 'NCore is downloading the latest update in the background.')
-                : 'Apply downloaded update and restart NCore'}
+                : (updateRuntimeState.message || 'Check for and download the latest NCore update')}
           >
             {updateInstallInProgress || updateDownloadInProgress
               ? <RefreshCw size={13} className="animate-spin" />
@@ -701,7 +866,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
                   ? (updateRuntimeState.downloading
                     ? `Downloading${updateRuntimeState.progress ? ` ${Math.round(updateRuntimeState.progress)}%` : '...'}`
                     : 'Checking...')
-                  : `Update${updateRuntimeState.version ? ` v${updateRuntimeState.version}` : ' Ready'}`}
+                  : updateRuntimeState.message.includes('already up to date')
+                    ? 'Up to date'
+                    : updateRuntimeState.ready
+                      ? `Install v${updateRuntimeState.latestVersion || 'update'}`
+                    : 'Check update'}
             </span>
           </button>
         )}
@@ -711,16 +880,35 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           <input
             type="text"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search..."
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              if (event.target.value) setShowSearchPanel(true);
+            }}
+            onFocus={() => setShowSearchPanel(true)}
+            placeholder="Search messages..."
+            aria-label="Search messages"
             className="w-48 rounded-lg border border-surface-700 bg-surface-950 py-1.5 pr-4 pl-9 text-sm text-surface-300 placeholder-surface-600 transition-all focus:border-nyptid-300 focus:outline-none"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute top-1/2 right-2 -translate-y-1/2 text-surface-500 hover:text-surface-300">
+            <button onClick={() => setSearchQuery('')} aria-label="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 text-surface-500 hover:text-surface-300">
               <X size={14} />
             </button>
           )}
         </div>
+
+        <button
+          onClick={() => setShowMentionInbox(true)}
+          title="Mentions"
+          aria-label="Mentions"
+          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-200"
+        >
+          <AtSign size={18} />
+          {mentionUnread > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+              {mentionUnread > 9 ? '9+' : mentionUnread}
+            </span>
+          )}
+        </button>
 
         <div ref={notifRef} className="relative">
           <button
@@ -881,6 +1069,61 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
         </div>
       </div>
 
+      {/*
+        Window controls are pinned to the window's top-right corner rather than
+        laid out inline at the end of the bar. Inline, they sit wherever the
+        flex row happens to end — which is short of the corner whenever
+        anything to their left is narrower than expected — and Fitts's law says
+        a close button belongs in the corner, where the pointer cannot overshoot
+        it. `h-14` matches the bar so they fill its full height.
+
+        `data-tauri-drag-region` is deliberately absent: the buttons must
+        receive clicks, not move the window.
+      */}
+      {isTauriClient && (
+        <div className="absolute top-0 right-0 z-20 flex h-14 items-stretch" style={noDragStyle}>
+          <button
+            type="button"
+            aria-label="Minimize"
+            title="Minimize"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-100"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                getCurrentWindow().minimize(),
+              )
+            }
+          >
+            <Minus size={15} />
+          </button>
+          <button
+            type="button"
+            aria-label="Maximize"
+            title="Maximize"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-surface-700 hover:text-surface-100"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+                await getCurrentWindow().toggleMaximize();
+              })
+            }
+          >
+            <Square size={13} />
+          </button>
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            className="flex w-12 items-center justify-center text-surface-400 transition-colors hover:bg-red-600 hover:text-white"
+            onClick={() =>
+              void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+                getCurrentWindow().close(),
+              )
+            }
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
       {incomingCall && (
         <div
           className="absolute top-[calc(100%+10px)] right-4 z-[80] w-80 rounded-xl border border-nyptid-300/30 bg-surface-800 p-4 shadow-2xl"
@@ -922,6 +1165,23 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
           </span>
         </div>
       )}
+
+      <MentionInboxPanel
+        isOpen={showMentionInbox}
+        onClose={() => {
+          setShowMentionInbox(false);
+          // Reading a channel is what actually clears a mention, so refresh
+          // rather than zeroing the badge on close.
+          void fetchMentionUnreadCount().then(setMentionUnread).catch(() => {});
+        }}
+      />
+
+      <MessageSearchPanel
+        isOpen={showSearchPanel}
+        onClose={() => setShowSearchPanel(false)}
+        communityId={activeCommunityIdFromPath}
+        initialQuery={searchQuery}
+      />
     </>
   );
 }

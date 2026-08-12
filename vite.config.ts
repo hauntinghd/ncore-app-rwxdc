@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 
 const appVersion = process.env.npm_package_version || '0.0.0';
 const buildTime = new Date().toISOString();
-const isElectronBuild = process.env.NCORE_ELECTRON_BUILD === '1';
+const isDesktopBuild = process.env.NCORE_ELECTRON_BUILD === '1' || process.env.NCORE_DESKTOP_BUILD === '1';
+const isTauriBuild = process.env.NCORE_DESKTOP_BUILD === '1';
 
 function stampPwaAssets(): Plugin {
   return {
@@ -29,7 +30,8 @@ function stampPwaAssets(): Plugin {
 export default defineConfig({
   // Electron packaged builds need relative assets (file://).
   // Web/PWA builds must use absolute assets so deep links like /app/dm load correctly.
-  base: isElectronBuild ? './' : '/',
+  base: isDesktopBuild ? './' : '/',
+  publicDir: isTauriBuild ? 'public-tauri' : 'public',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_TIME__: JSON.stringify(buildTime),
@@ -39,21 +41,32 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   build: {
+    outDir: isTauriBuild ? 'dist-tauri' : 'dist',
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('@supabase/supabase-js')) {
+            // Heavy RTC SDKs — only loaded when user joins a call
+            if (id.includes('agora-rtc-sdk-ng') || id.includes('agora-extension-ai-denoiser')) {
+              return 'vendor-agora';
+            }
+            if (id.includes('livekit-client')) {
+              return 'vendor-livekit';
+            }
+            if (id.includes('@supabase/supabase-js') || id.includes('@supabase/realtime') || id.includes('@supabase/postgrest') || id.includes('@supabase/gotrue') || id.includes('@supabase/storage')) {
               return 'vendor-supabase';
             }
             if (id.includes('react-router') || id.includes('react-router-dom')) {
               return 'vendor-router';
             }
-            if (id.includes('react') || id.includes('react-dom')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
               return 'vendor-react';
             }
-            if (id.includes('lucide-react')) {
+            if (id.includes('lucide-react') || id.includes('simple-icons')) {
               return 'vendor-icons';
+            }
+            if (id.includes('jszip')) {
+              return 'vendor-jszip';
             }
           }
           return undefined;

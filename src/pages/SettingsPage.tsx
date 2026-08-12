@@ -23,6 +23,7 @@ import {
 } from 'simple-icons';
 import JSZip from 'jszip';
 import { AppShell } from '../components/layout/AppShell';
+import { DiscordGraphImportCard } from '../components/settings/DiscordGraphImportCard';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,6 +55,9 @@ import {
 import { promptPwaInstall } from '../lib/pwaRuntime';
 import { ROLLOUT_SETTINGS_STORAGE_KEY } from '../lib/streamerMode';
 import { resolveGrowthSourceChannel } from '../lib/growthEvents';
+import { E2EDevicesSection } from '../components/community/E2EDevicesSection';
+import { MutedScopesSection } from '../components/community/MutedScopesSection';
+import { VoiceDiagnosticsSection } from '../components/community/VoiceDiagnosticsSection';
 
 type SectionId =
   | 'my-account'
@@ -83,7 +87,8 @@ type SectionId =
   | 'connections'
   | 'membership'
   | 'whats-new'
-  | 'data-import';
+  | 'data-import'
+  | 'active-sessions';
 
 function detectMobileSettingsLayout(): boolean {
   if (typeof window === 'undefined') return false;
@@ -275,6 +280,7 @@ const SECTION_GROUPS: SectionGroup[] = [
     label: 'Account',
     items: [
       { id: 'security', label: 'Security', icon: Lock },
+      { id: 'active-sessions', label: 'Active Sessions', icon: Monitor },
       { id: 'standing', label: 'Standing', icon: Shield },
       { id: 'connections', label: 'Connections', icon: Link2 },
       { id: 'membership', label: 'My Membership', icon: CreditCard },
@@ -656,7 +662,7 @@ const ROLLED_OUT_SECTION_CONTENT: Partial<Record<SectionId, RolloutSection>> = {
   },
 };
 
-const CONNECTION_PROVIDERS: ConnectionProvider[] = [
+export const CONNECTION_PROVIDERS: ConnectionProvider[] = [
   { name: 'Roblox', icon: siRoblox },
   { name: 'Spotify', icon: siSpotify },
   { name: 'Twitch', icon: siTwitch },
@@ -693,7 +699,7 @@ function buildRolloutToggleDefaults(): Record<string, boolean> {
   return defaults;
 }
 
-function BrandIconGlyph({ icon, label }: { icon: SimpleIcon | null; label: string }) {
+export function BrandIconGlyph({ icon, label }: { icon: SimpleIcon | null; label: string }) {
   if (!icon) {
     return (
       <span className="inline-flex h-5 w-5 items-center justify-center rounded text-[10px] font-black text-surface-200">
@@ -940,8 +946,35 @@ function SettingRow({ label, description, children }: { label: string; descripti
   );
 }
 
+const KEY_CODE_LABELS: Record<string, string> = {
+  Space: 'Space',
+  AltLeft: 'Left Alt',
+  AltRight: 'Right Alt',
+  ControlLeft: 'Left Ctrl',
+  ControlRight: 'Right Ctrl',
+  ShiftLeft: 'Left Shift',
+  ShiftRight: 'Right Shift',
+  MetaLeft: 'Left Meta',
+  MetaRight: 'Right Meta',
+  Backquote: '` (Backtick)',
+  CapsLock: 'Caps Lock',
+  Tab: 'Tab',
+  Enter: 'Enter',
+};
+
+function humanizeKeyCode(code: string): string {
+  if (!code) return 'Unbound';
+  if (KEY_CODE_LABELS[code]) return KEY_CODE_LABELS[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Numpad ${code.slice(6)}`;
+  if (code.startsWith('Arrow')) return `${code.slice(5)} Arrow`;
+  if (code.startsWith('F') && /^F\d+$/.test(code)) return code;
+  return code;
+}
+
 export function SettingsPage() {
-  const { profile, user, updateProfile, signOut } = useAuth();
+  const { profile, user, updateProfile, signOut, refreshMfaState } = useAuth();
   const { entitlements, loading: entitlementsLoading, refresh: refreshEntitlements } = useEntitlements();
   const {
     capabilities: growthCapabilities,
@@ -969,6 +1002,12 @@ export function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordSaved, setPasswordSaved] = useState(false);
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [totpEnrollment, setTotpEnrollment] = useState<{ factorId: string; qrCode: string; secret: string } | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [totpError, setTotpError] = useState('');
+  const [totpMessage, setTotpMessage] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -986,6 +1025,7 @@ export function SettingsPage() {
   });
 
   const [callSettings, setCallSettings] = useState(loadCallSettings);
+  const [capturingPttKeybind, setCapturingPttKeybind] = useState(false);
   const [audioInputs, setAudioInputs] = useState<MediaDeviceOption[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceOption[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceOption[]>([]);
@@ -1068,7 +1108,44 @@ export function SettingsPage() {
     }, 1800);
     return () => window.clearInterval(timer);
   }, [showUpdateLauncher]);
-  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!capturingPttKeybind) return undefined;
+    const handleKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.code === 'Escape') {
+        setCapturingPttKeybind(false);
+        return;
+      }
+      setCallSettings((prev) => ({ ...prev, pttKeybind: event.code }));
+      setCapturingPttKeybind(false);
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [capturingPttKeybind]);
+
+  useEffect(() => {
+    if (activeSection !== 'security' || !user) return;
+    void loadTotpFactors();
+  }, [activeSection, user?.id]);
+
+  // Hydrate the startup toggles from the Electron main process so they reflect
+  // the real OS-level login-item state, not stale localStorage.
+  useEffect(() => {
+    const bridge = typeof window !== 'undefined' ? window.desktopBridge : undefined;
+    if (!bridge?.getStartupConfig) return;
+    let cancelled = false;
+    void bridge.getStartupConfig().then((result) => {
+      if (cancelled || !result?.ok) return;
+      setRolloutSettings((prev) => ({
+        ...prev,
+        win_open_startup: Boolean(result.openAtLogin),
+        win_start_minimized: Boolean(result.openAsHidden),
+      }));
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [standingResourceModal, setStandingResourceModal] = useState<StandingResourceId | null>(null);
   const rolledOutSection = ROLLED_OUT_SECTION_CONTENT[activeSection];
   const comingSoonSection = rolledOutSection ? null : COMING_SOON_SECTION_CONTENT[activeSection];
@@ -1076,6 +1153,17 @@ export function SettingsPage() {
 
   function setRolloutToggle(key: string, value: boolean) {
     setRolloutSettings((prev) => ({ ...prev, [key]: value }));
+    // Forward the startup-related toggles to the Electron main process so they
+    // actually take effect (setLoginItemSettings persists across app launches).
+    if (key === 'win_open_startup' || key === 'win_start_minimized') {
+      const bridge = typeof window !== 'undefined' ? window.desktopBridge : undefined;
+      if (bridge?.setStartupConfig) {
+        void bridge.setStartupConfig({
+          openAtLogin: key === 'win_open_startup' ? value : undefined,
+          openAsHidden: key === 'win_start_minimized' ? value : undefined,
+        });
+      }
+    }
   }
 
   function activateSection(section: SectionId) {
@@ -1488,6 +1576,65 @@ export function SettingsPage() {
     setNewPassword('');
     setConfirmPassword('');
     setTimeout(() => setPasswordSaved(false), 3000);
+  }
+
+  async function loadTotpFactors() {
+    const { data, error: factorsError } = await supabase.auth.mfa.listFactors();
+    if (factorsError) {
+      setTotpError(factorsError.message || 'Could not load multi-factor authentication status.');
+      return;
+    }
+    setTotpEnabled(Boolean(data?.totp?.some((factor) => factor.status === 'verified')));
+  }
+
+  async function beginTotpEnrollment() {
+    setTotpError('');
+    setTotpMessage('');
+    setTotpLoading(true);
+    const { data, error: enrollError } = await supabase.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: 'NCore Authenticator',
+    });
+    if (enrollError || !data?.totp?.qr_code || !data.totp.secret) {
+      setTotpError(enrollError?.message || 'Could not start authenticator setup.');
+      setTotpLoading(false);
+      return;
+    }
+    setTotpEnrollment({ factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
+    setTotpCode('');
+    setTotpLoading(false);
+  }
+
+  async function verifyTotpEnrollment() {
+    if (!totpEnrollment || totpCode.trim().length !== 6) {
+      setTotpError('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    setTotpError('');
+    setTotpMessage('');
+    setTotpLoading(true);
+    const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: totpEnrollment.factorId });
+    if (challengeError || !challenge) {
+      setTotpError(challengeError?.message || 'Could not start authenticator verification.');
+      setTotpLoading(false);
+      return;
+    }
+    const { error: verifyError } = await supabase.auth.mfa.verify({
+      factorId: totpEnrollment.factorId,
+      challengeId: challenge.id,
+      code: totpCode.trim(),
+    });
+    if (verifyError) {
+      setTotpError(verifyError.message || 'That code was not accepted.');
+      setTotpLoading(false);
+      return;
+    }
+    setTotpEnrollment(null);
+    setTotpCode('');
+    setTotpEnabled(true);
+    setTotpMessage('Authenticator app enabled. You will be asked for a code when signing in.');
+    await refreshMfaState();
+    setTotpLoading(false);
   }
 
   async function handleSaveServerProfile() {
@@ -2132,7 +2279,9 @@ export function SettingsPage() {
       }
 
       let requestBody = buildRequestBody(authState.accessToken);
-      let { data, error: invokeError } = await invokeCheckout(requestBody);
+      const initial = await invokeCheckout(requestBody);
+      const invokeError = initial.error;
+      let data = initial.data;
       if (invokeError) {
         const detail = await extractInvokeErrorMessage(invokeError, 'Could not start Boost checkout.');
         if (!isInvalidJwtMessage(detail)) {
@@ -2205,7 +2354,9 @@ export function SettingsPage() {
       }
 
       let requestBody = buildRequestBody(authState.accessToken);
-      let { data, error: invokeError } = await invokePortal(requestBody);
+      const initial = await invokePortal(requestBody);
+      const invokeError = initial.error;
+      let data = initial.data;
       if (invokeError) {
         const detail = await extractInvokeErrorMessage(invokeError, 'Could not open billing portal.');
         if (!isInvalidJwtMessage(detail)) {
@@ -2263,7 +2414,7 @@ export function SettingsPage() {
     setRedeemingInviteCode(true);
     setGrowthUnlockMessage('');
     try {
-      const { data, error } = await (supabase as any).rpc('redeem_growth_invite_code', {
+      const { error } = await (supabase as any).rpc('redeem_growth_invite_code', {
         p_code: code,
         p_source_channel: resolveGrowthSourceChannel(),
       });
@@ -2873,6 +3024,8 @@ export function SettingsPage() {
                   <p className="text-surface-500 text-sm">Choose what you want to be notified about</p>
                 </div>
 
+                <MutedScopesSection />
+
                 <div className="nyptid-card p-6">
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-2">Messages & Social</div>
                   {([
@@ -2930,6 +3083,8 @@ export function SettingsPage() {
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Voice & Video</h2>
                   <p className="text-surface-500 text-sm">Configure your audio and video settings for calls</p>
                 </div>
+
+                <VoiceDiagnosticsSection />
 
                 <div className="nyptid-card p-5 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3144,6 +3299,113 @@ export function SettingsPage() {
                         />
                       </SettingRow>
                     ))}
+
+                    <div className="mt-4 rounded-xl border border-surface-700 bg-surface-900/60 p-4">
+                      <div className="text-xs font-bold text-nyptid-300 uppercase tracking-wider mb-2">AI Noise Suppression Engine</div>
+                      <p className="text-xs text-surface-500 mb-3">Choose the noise cancellation engine. Advanced AI uses the NCore denoiser for Krisp-grade suppression.</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { value: 'standard', label: 'Standard', desc: 'Browser-only' },
+                          { value: 'ai', label: 'Advanced (AI)', desc: 'NCore Denoiser' },
+                          { value: 'off', label: 'Off', desc: 'No suppression' },
+                        ]).map(engine => (
+                          <button
+                            key={engine.value}
+                            onClick={() => setCallSettings(p => ({
+                              ...p,
+                              noiseSuppression: engine.value !== 'off',
+                            }))}
+                            className={`rounded-lg border p-3 text-center transition ${
+                              (engine.value === 'ai' && callSettings.noiseSuppression) ? 'border-nyptid-500 bg-nyptid-900/20 text-nyptid-200'
+                              : (engine.value === 'standard' && callSettings.noiseSuppression) ? 'border-surface-600 bg-surface-800 text-surface-200'
+                              : (engine.value === 'off' && !callSettings.noiseSuppression) ? 'border-surface-600 bg-surface-800 text-surface-200'
+                              : 'border-surface-700 bg-surface-900/40 text-surface-500 hover:text-surface-300'
+                            }`}
+                          >
+                            <div className="text-sm font-semibold">{engine.label}</div>
+                            <div className="text-[10px] mt-0.5 opacity-70">{engine.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-surface-700 pt-4 mt-4">
+                    <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Mic size={14} />
+                      Voice Detection
+                    </div>
+
+                    <div className="py-4 border-b border-surface-700/60">
+                      <div className="flex items-center justify-between gap-4 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-surface-200">Noise Gate Sensitivity</div>
+                          <div className="text-xs text-surface-500 mt-0.5 leading-relaxed">
+                            How much ambient noise to suppress before your voice is considered speech. Higher is more aggressive.
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 text-xs font-medium text-surface-300 tabular-nums">
+                          {callSettings.vadThreshold === 0
+                            ? 'Off'
+                            : callSettings.vadThreshold < 0.35
+                              ? 'Loose'
+                              : callSettings.vadThreshold < 0.65
+                                ? 'Moderate'
+                                : 'Aggressive'} · {Math.round(callSettings.vadThreshold * 100)}%
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={callSettings.vadThreshold}
+                        onChange={(e) => setCallSettings((p) => ({ ...p, vadThreshold: Number(e.target.value) }))}
+                        className="w-full accent-nyptid-300"
+                        aria-label="Voice activity gate threshold"
+                      />
+                    </div>
+
+                    <SettingRow
+                      label="Push-to-Talk"
+                      description="Hold a key to talk. Your mic stays muted unless the key is pressed."
+                    >
+                      <ToggleSwitch
+                        checked={callSettings.pttEnabled}
+                        onChange={(v) => setCallSettings((p) => ({ ...p, pttEnabled: v }))}
+                      />
+                    </SettingRow>
+
+                    <div className="py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-surface-200">Push-to-Talk Keybind</div>
+                          <div className="text-xs text-surface-500 mt-0.5 leading-relaxed">
+                            {capturingPttKeybind
+                              ? 'Press any key to bind it. Press Escape to cancel.'
+                              : 'The key you hold while push-to-talk is enabled.'}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center min-w-[88px] px-3 py-1.5 rounded-lg border text-xs font-semibold tabular-nums ${
+                              capturingPttKeybind
+                                ? 'border-nyptid-300/60 bg-nyptid-300/15 text-nyptid-200 animate-pulse'
+                                : 'border-surface-600 bg-surface-900/60 text-surface-200'
+                            }`}
+                          >
+                            {capturingPttKeybind ? 'Press a key…' : humanizeKeyCode(callSettings.pttKeybind)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCapturingPttKeybind((v) => !v)}
+                            className="nyptid-btn-secondary !text-xs !px-3 !py-1.5"
+                          >
+                            {capturingPttKeybind ? 'Cancel' : 'Rebind'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="border-t border-surface-700 pt-4 mt-4">
@@ -3353,39 +3615,104 @@ export function SettingsPage() {
                   </button>
                 </div>
 
-                <div className="nyptid-card p-6">
-                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Two-Factor Authentication</div>
-                  <p className="text-sm text-surface-400 mb-4">Add an extra layer of security to your account with 2FA via TOTP authenticator app.</p>
-                  <div className="p-3 bg-surface-800 rounded-lg border border-surface-700 flex items-center gap-3">
-                    <Shield size={18} className="text-surface-500" />
-                    <div className="flex-1">
-                      <div className="text-sm text-surface-300">Authenticator App (TOTP)</div>
-                      <div className="text-xs text-surface-500">Not configured</div>
+                <div className="nyptid-card p-6 space-y-4">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Two-Factor Authentication</div>
+                  <p className="text-sm text-surface-400">Add an extra layer of security to your account. Even if your password is compromised, 2FA prevents unauthorized access.</p>
+
+                  {totpError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{totpError}</div>}
+                  {totpMessage && <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-200">{totpMessage}</div>}
+
+                  <div className="space-y-3">
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-nyptid-500/10 border border-nyptid-500/20 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-nyptid-300" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Authenticator App (TOTP)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">Use Google Authenticator, Authy, or any TOTP app</div>
+                        </div>
+                        {totpEnabled ? (
+                          <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-300">Enabled</span>
+                        ) : (
+                          <button onClick={() => void beginTotpEnrollment()} disabled={totpLoading} className="nyptid-btn-primary text-xs px-4 py-2">
+                            {totpLoading && !totpEnrollment ? 'Starting...' : 'Enable'}
+                          </button>
+                        )}
+                      </div>
+
+                      {totpEnrollment && (
+                      <div className="mt-4 pt-4 border-t border-surface-700/50 space-y-3">
+                        <p className="text-xs text-surface-400">Scan this QR code with your authenticator app:</p>
+                        <div className="w-48 h-48 mx-auto bg-white rounded-lg p-2 flex items-center justify-center">
+                          <img src={totpEnrollment.qrCode} alt="Authenticator app setup QR code" className="w-full h-full" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Or enter this key manually:</label>
+                          <code className="block bg-surface-900 rounded-lg px-3 py-2 text-xs text-nyptid-300 font-mono tracking-wider text-center select-all">
+                            {totpEnrollment.secret}
+                          </code>
+                        </div>
+                        <div>
+                          <label className="text-xs text-surface-400 block mb-1">Enter the 6-digit code from your app:</label>
+                          <input
+                            type="text"
+                            maxLength={6}
+                            value={totpCode}
+                            onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            className="nyptid-input text-center text-lg tracking-[0.5em] font-mono"
+                            placeholder="000000"
+                          />
+                        </div>
+                        <button onClick={() => void verifyTotpEnrollment()} disabled={totpLoading} className="nyptid-btn-primary w-full">
+                          {totpLoading ? 'Verifying...' : 'Verify & Enable'}
+                        </button>
+                      </div>
+                      )}
                     </div>
-                    <button className="nyptid-btn-secondary text-xs px-3 py-1.5">Set Up</button>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Key size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Hardware Security Key (WebAuthn)</div>
+                          <div className="text-xs text-surface-500 mt-0.5">YubiKey, Titan Key, or other FIDO2 devices</div>
+                        </div>
+                        <button className="nyptid-btn-secondary text-xs px-4 py-2">Set Up</button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-surface-800 rounded-xl border border-surface-700">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface-700 flex items-center justify-center flex-shrink-0">
+                          <Shield size={18} className="text-surface-400" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-surface-200">Recovery Codes</div>
+                          <div className="text-xs text-surface-500 mt-0.5">One-time recovery needs a server-verified flow before it can be offered safely.</div>
+                        </div>
+                        <span className="text-xs text-surface-500">Next security release</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
+                <E2EDevicesSection userId={profile?.id ?? ''} />
+
                 <div className="nyptid-card p-6">
                   <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Active Sessions</div>
-                  <div className="space-y-2">
-                    {[
-                      { device: 'Chrome on Windows', location: 'Current Session', time: 'Active now', current: true },
-                    ].map((session, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-surface-700">
-                        <Monitor size={16} className="text-surface-400" />
-                        <div className="flex-1">
-                          <div className="text-sm text-surface-200">{session.device}</div>
-                          <div className="text-xs text-surface-500">{session.time}</div>
-                        </div>
-                        {session.current ? (
-                          <span className="text-xs text-green-400 font-medium">Current</span>
-                        ) : (
-                          <button className="text-xs text-red-400 hover:text-red-300">Revoke</button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-sm text-surface-400 mb-3">View and manage all devices logged into your account.</p>
+                  <button
+                    onClick={() => activateSection('active-sessions')}
+                    className="nyptid-btn-secondary text-xs"
+                  >
+                    <Monitor size={14} />
+                    Manage Sessions
+                  </button>
                 </div>
 
                 <div className="nyptid-card p-6 border-red-500/20">
@@ -3397,6 +3724,75 @@ export function SettingsPage() {
                     <Trash2 size={14} />
                     Delete My Account
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* ACTIVE SESSIONS */}
+            {activeSection === 'active-sessions' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-xl font-bold text-surface-100 mb-1">Active Sessions</h2>
+                  <p className="text-surface-500 text-sm">Manage devices and sessions logged into your account. Revoke access to any session you don't recognize.</p>
+                </div>
+
+                <div className="nyptid-card p-6">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-4">Current Session</div>
+                  <div className="flex items-center gap-3 p-3 bg-surface-800 rounded-lg border border-green-500/20">
+                    <div className="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                      <Monitor size={18} className="text-green-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm text-surface-100 font-medium">
+                        {typeof navigator !== 'undefined' ? (
+                          /Electron/i.test(navigator.userAgent) ? 'NCore Desktop App'
+                          : /Chrome/i.test(navigator.userAgent) ? 'Chrome'
+                          : /Firefox/i.test(navigator.userAgent) ? 'Firefox'
+                          : /Safari/i.test(navigator.userAgent) ? 'Safari'
+                          : 'Browser'
+                        ) : 'Unknown'} on {typeof navigator !== 'undefined' ? (
+                          /Windows/i.test(navigator.userAgent) ? 'Windows'
+                          : /Mac/i.test(navigator.userAgent) ? 'macOS'
+                          : /Linux/i.test(navigator.userAgent) ? 'Linux'
+                          : /Android/i.test(navigator.userAgent) ? 'Android'
+                          : /iPhone|iPad/i.test(navigator.userAgent) ? 'iOS'
+                          : 'Unknown OS'
+                        ) : 'Unknown OS'}
+                      </div>
+                      <div className="text-xs text-green-400 font-medium mt-0.5">Active now</div>
+                    </div>
+                    <span className="px-2 py-1 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-medium">Current</span>
+                  </div>
+                </div>
+
+                <div className="nyptid-card p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-xs font-bold text-surface-500 uppercase tracking-wider">Other Sessions</div>
+                    <button className="text-xs text-red-400 hover:text-red-300 font-medium transition">
+                      Revoke All Other Sessions
+                    </button>
+                  </div>
+                  <p className="text-sm text-surface-500">
+                    No other active sessions found. If you see unfamiliar sessions here in the future, revoke them immediately and change your password.
+                  </p>
+                </div>
+
+                <div className="nyptid-card p-6 border border-nyptid-500/10">
+                  <div className="text-xs font-bold text-surface-500 uppercase tracking-wider mb-3">Security Tips</div>
+                  <ul className="space-y-2 text-sm text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      Enable two-factor authentication to protect your account even if your password is compromised.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      Never share your login credentials, session tokens, or recovery codes with anyone.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Shield size={14} className="text-nyptid-400 mt-0.5 flex-shrink-0" />
+                      If you suspect unauthorized access, change your password and revoke all sessions immediately.
+                    </li>
+                  </ul>
                 </div>
               </div>
             )}
@@ -4094,7 +4490,20 @@ export function SettingsPage() {
                     </div>
                   )}
                   {updateDownloadMessage && (
-                    <div className="mt-3 text-xs text-surface-400">{updateDownloadMessage}</div>
+                    <div className="mt-3 text-xs text-surface-400">
+                      {/*
+                        The signed-update check and the release feed are two
+                        different sources, and on the Tauri build they read two
+                        different endpoints. When they disagree, the app used to
+                        print "NCore is up to date." directly beneath "Update
+                        available: vX", which tells the user nothing except that
+                        the app is confused. Say what is actually true instead.
+                      */}
+                      {updateAhead && /up to date/i.test(updateDownloadMessage)
+                        ? `No signed in-app update is published for v${latestFeedVersion} yet. `
+                          + 'Download the installer from the link above to update manually.'
+                        : updateDownloadMessage}
+                    </div>
                   )}
                 </div>
 
@@ -4151,8 +4560,12 @@ export function SettingsPage() {
               <div className="space-y-6">
                 <div>
                   <h2 className="text-xl font-bold text-surface-100 mb-1">Data Import</h2>
-                  <p className="text-surface-500 text-sm">Import your Discord export zip into an NCore DM archive.</p>
+                  <p className="text-surface-500 text-sm">
+                    Bring your life over from Discord — friends, blocklist, and a searchable archive of your messages.
+                  </p>
                 </div>
+
+                <DiscordGraphImportCard />
 
                 <div className="nyptid-card p-5 space-y-4">
                   <div className="rounded-lg border border-surface-700 bg-surface-900 p-4">
@@ -4473,4 +4886,3 @@ export function SettingsPage() {
     </AppShell>
   );
 }
-

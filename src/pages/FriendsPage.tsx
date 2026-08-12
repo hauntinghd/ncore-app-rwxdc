@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Ban,
+  BellOff,
   Clock3,
   CheckCircle2,
   Gamepad2,
@@ -17,13 +19,14 @@ import {
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { isCallsModernSchemaMissingError, normalizeCallRow } from '../lib/callsCompat';
 import type { Profile } from '../lib/types';
 import { formatRelativeTime } from '../lib/utils';
 
-type FriendsTab = 'online' | 'all' | 'pending' | 'add';
+type FriendsTab = 'online' | 'all' | 'pending' | 'blocked' | 'add';
 
 interface RelationshipRow {
   target_user_id: string;
@@ -63,6 +66,7 @@ export function FriendsPage() {
   const [loading, setLoading] = useState(true);
   const [friends, setFriends] = useState<FriendWithConversation[]>([]);
   const [pendingFriends, setPendingFriends] = useState<PendingFriendEntry[]>([]);
+  const [blockedFriends, setBlockedFriends] = useState<Array<Profile & { _relationship: 'blocked' | 'ignored' }>>([]);
   const [errorMessage, setErrorMessage] = useState('');
 
   const [addFriendInput, setAddFriendInput] = useState('');
@@ -94,7 +98,7 @@ export function FriendsPage() {
         .from('user_relationships')
         .select('target_user_id, relationship')
         .eq('user_id', profile.id)
-        .in('relationship', ['friend', 'friend_pending_incoming', 'friend_pending_outgoing']);
+        .in('relationship', ['friend', 'friend_pending_incoming', 'friend_pending_outgoing', 'blocked', 'ignored']);
 
       if (relationshipError) {
         setErrorMessage(relationshipError.message || 'Could not load friends.');
@@ -128,11 +132,20 @@ export function FriendsPage() {
             .filter(Boolean),
         ),
       );
+      const blockedIds = Array.from(
+        new Set(
+          rows
+            .filter((row) => row.relationship === 'blocked' || row.relationship === 'ignored')
+            .map((row) => String(row.target_user_id))
+            .filter(Boolean),
+        ),
+      );
 
-      const relatedIds = Array.from(new Set([...friendIds, ...incomingPendingIds, ...outgoingPendingIds]));
+      const relatedIds = Array.from(new Set([...friendIds, ...incomingPendingIds, ...outgoingPendingIds, ...blockedIds]));
       if (relatedIds.length === 0) {
         setFriends([]);
         setPendingFriends([]);
+        setBlockedFriends([]);
         return;
       }
 
@@ -163,8 +176,8 @@ export function FriendsPage() {
         new Set((myConversationMembers || []).map((row: any) => String(row.conversation_id)).filter(Boolean)),
       );
 
-      let conversationIdToFriendId = new Map<string, string>();
-      let friendIdToConversationId = new Map<string, string>();
+      const conversationIdToFriendId = new Map<string, string>();
+      const friendIdToConversationId = new Map<string, string>();
       if (myConversationIds.length > 0) {
         const [{ data: directConversations }, { data: conversationMembers }] = await Promise.all([
           supabase
@@ -192,7 +205,7 @@ export function FriendsPage() {
         }
       }
 
-      let activeCallByConversationId = new Map<string, CallRow>();
+      const activeCallByConversationId = new Map<string, CallRow>();
       const conversationIds = Array.from(friendIdToConversationId.values());
       if (conversationIds.length > 0) {
         const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
@@ -286,10 +299,21 @@ export function FriendsPage() {
         );
       });
       setPendingFriends(pending);
+
+      const blockedEntries = blockedIds.reduce<Array<Profile & { _relationship: 'blocked' | 'ignored' }>>((acc, id) => {
+        const relationship = (rows.find((r) => String(r.target_user_id) === id)?.relationship || 'blocked') as
+          | 'blocked'
+          | 'ignored';
+        const blockedProfile = profileById.get(id);
+        if (blockedProfile) acc.push({ ...blockedProfile, _relationship: relationship });
+        return acc;
+      }, []).sort((a, b) => String(a.display_name || a.username).localeCompare(String(b.display_name || b.username)));
+      setBlockedFriends(blockedEntries);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Could not load friends.');
       setFriends([]);
       setPendingFriends([]);
+      setBlockedFriends([]);
     } finally {
       setLoading(false);
     }
@@ -391,6 +415,27 @@ export function FriendsPage() {
       });
       if (error) {
         setErrorMessage(error.message || 'Could not remove friend.');
+        return;
+      }
+      await loadFriends();
+    } finally {
+      setRelationshipActionId(null);
+    }
+  }
+
+  async function handleSetRelationship(
+    targetUserId: string,
+    next: 'blocked' | 'ignored' | 'friend',
+  ) {
+    setRelationshipActionId(targetUserId);
+    setErrorMessage('');
+    try {
+      const { error } = await supabase.rpc('set_user_relationship', {
+        p_target_user_id: targetUserId,
+        p_next_relationship: next,
+      });
+      if (error) {
+        setErrorMessage(error.message || 'Could not update relationship.');
         return;
       }
       await loadFriends();
@@ -522,6 +567,7 @@ export function FriendsPage() {
               { id: 'online', label: 'Online' },
               { id: 'all', label: 'All' },
               { id: 'pending', label: 'Pending' },
+              { id: 'blocked', label: 'Blocked' },
               { id: 'add', label: 'Add Friend' },
             ] as { id: FriendsTab; label: string }[]).map((tab) => (
               <button
@@ -675,19 +721,71 @@ export function FriendsPage() {
                       </div>
                     );
                   })
+                ) : activeTab === 'blocked' ? (
+                  blockedFriends.length === 0 ? (
+                    <div className="nyptid-card">
+                      <EmptyState
+                        illustration={EmptyIllustrations.NoFriends}
+                        title="Nobody blocked or muted"
+                        description="Blocked users can't DM you or see your activity. Muted users can still see you but won't send notifications. Block or mute from a friend's row on the All tab."
+                      />
+                    </div>
+                  ) : blockedFriends.map((entry) => {
+                    const bname = entry.display_name || entry.username;
+                    const label = entry._relationship === 'blocked' ? 'Blocked' : 'Muted';
+                    const labelTone = entry._relationship === 'blocked'
+                      ? 'bg-red-500/15 text-red-300 border border-red-500/30'
+                      : 'bg-amber-500/15 text-amber-200 border border-amber-500/30';
+                    return (
+                      <div key={`blocked:${entry.id}`} className="nyptid-card px-4 py-3 flex items-center gap-3">
+                        <Avatar src={entry.avatar_url || undefined} name={bname} status={entry.status} size="md" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-surface-100 truncate">{bname}</div>
+                          <div className="text-xs text-surface-500 truncate">@{entry.username}</div>
+                          <span className={`inline-flex mt-1 items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide ${labelTone}`}>
+                            {entry._relationship === 'blocked' ? <Ban size={10} /> : <BellOff size={10} />}
+                            {label}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const verb = entry._relationship === 'blocked' ? 'Unblock' : 'Unmute';
+                            if (!confirm(`${verb} ${entry.username}? They'll be able to ${entry._relationship === 'blocked' ? 'see your profile and request friendship' : 'send you notifications'} again.`)) return;
+                            void handleSetRelationship(entry.id, 'friend');
+                          }}
+                          disabled={relationshipActionId === entry.id}
+                          className="px-3 h-9 rounded-lg bg-surface-800 hover:bg-emerald-500/20 text-surface-300 hover:text-emerald-200 transition-colors text-xs font-semibold flex items-center gap-1.5 disabled:opacity-60"
+                          title={entry._relationship === 'blocked' ? 'Unblock' : 'Unmute'}
+                        >
+                          <UserCheck size={13} />
+                          {entry._relationship === 'blocked' ? 'Unblock' : 'Unmute'}
+                        </button>
+                      </div>
+                    );
+                  })
                 ) : visibleFriends.length === 0 ? (
-                  <div className="nyptid-card p-6 text-sm text-surface-500">
-                    {activeTab === 'online'
-                      ? 'No friends are online right now.'
-                      : 'No friends yet. Use Add Friend to connect with people.'}
+                  <div className="nyptid-card">
+                    <EmptyState
+                      illustration={EmptyIllustrations.NoFriends}
+                      title={activeTab === 'online' ? 'No friends online' : 'No friends yet'}
+                      description={activeTab === 'online'
+                        ? 'Your friends will show up here when they come online.'
+                        : "Use 'Add Friend' above to send a request. Once they accept, they'll appear here."}
+                    />
                   </div>
                 ) : (
                   visibleFriends.map((entry) => {
                     const friend = entry.profile;
                     const friendName = friend.display_name || friend.username;
-                    const statusText = friend.custom_status
-                      ? `${friend.custom_status_emoji ? `${friend.custom_status_emoji} ` : ''}${friend.custom_status}`
-                      : friend.bio || (friend.status === 'online' ? 'Online' : `Last seen ${formatRelativeTime(friend.last_seen)}`);
+                    const activity = (friend as any).activity as { type?: string; name?: string; details?: string } | null | undefined;
+                    const activityText = activity?.name
+                      ? `${activity.type === 'playing' ? 'Playing' : activity.type === 'streaming' ? 'Streaming' : activity.type === 'listening' ? 'Listening to' : activity.type === 'watching' ? 'Watching' : ''} ${activity.name}`.trim()
+                      : null;
+                    const statusText = activityText
+                      || (friend.custom_status
+                        ? `${friend.custom_status_emoji ? `${friend.custom_status_emoji} ` : ''}${friend.custom_status}`
+                        : friend.bio || (friend.status === 'online' ? 'Online' : `Last seen ${formatRelativeTime(friend.last_seen)}`));
                     return (
                       <div
                         key={friend.id}
@@ -697,7 +795,11 @@ export function FriendsPage() {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-surface-100 truncate">{friendName}</div>
                           <div className="text-xs text-surface-500 truncate">@{friend.username}</div>
-                          <div className="text-xs text-surface-400 truncate mt-0.5">{statusText || 'No status set.'}</div>
+                          {activityText ? (
+                            <div className="text-xs text-nyptid-300 truncate mt-0.5">{activityText}{activity?.details ? ` - ${activity.details}` : ''}</div>
+                          ) : (
+                            <div className="text-xs text-surface-400 truncate mt-0.5">{statusText || 'No status set.'}</div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button
@@ -729,6 +831,30 @@ export function FriendsPage() {
                             title="Start video call"
                           >
                             <Video size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!confirm(`Mute ${friend.username}? You'll stop getting notifications from them but they can still see your profile.`)) return;
+                              void handleSetRelationship(friend.id, 'ignored');
+                            }}
+                            disabled={relationshipActionId === friend.id}
+                            className="w-9 h-9 rounded-lg bg-surface-800 hover:bg-amber-500/20 text-surface-300 hover:text-amber-300 transition-colors flex items-center justify-center disabled:opacity-60"
+                            title="Mute this person"
+                          >
+                            <BellOff size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!confirm(`Block ${friend.username}? They'll be removed from your friends and won't be able to DM you or see your activity.`)) return;
+                              void handleSetRelationship(friend.id, 'blocked');
+                            }}
+                            disabled={relationshipActionId === friend.id}
+                            className="w-9 h-9 rounded-lg bg-surface-800 hover:bg-red-500/20 text-surface-300 hover:text-red-300 transition-colors flex items-center justify-center disabled:opacity-60"
+                            title="Block this person"
+                          >
+                            <Ban size={15} />
                           </button>
                           <button
                             type="button"

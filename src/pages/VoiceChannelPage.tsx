@@ -12,10 +12,16 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { ConnectionPanel } from '../components/layout/ConnectionPanel';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { serverVoiceSession, useServerVoiceSession } from '../lib/serverVoiceSession';
+import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
+import { InCallDevicePicker } from '../components/call/InCallDevicePicker';
+import { NetworkQualityBars } from '../components/call/NetworkQualityBars';
+import { VadThresholdSlider } from '../components/call/VadThresholdSlider';
+import { usePushToTalk } from '../components/call/usePushToTalk';
 import type { Channel, VoiceSession } from '../lib/types';
 
 function LocalVideoMount() {
@@ -99,6 +105,13 @@ export function VoiceChannelPage() {
   const navigate = useNavigate();
   const session = useServerVoiceSession();
   const [channel, setChannel] = useState<Channel | null>(null);
+  const [pttEnabled, setPttEnabled] = useState<boolean>(() => loadCallSettings().pttEnabled);
+  const [pttKeybind] = useState<string>(() => loadCallSettings().pttKeybind || 'Space');
+  const pttHeld = usePushToTalk({
+    enabled: pttEnabled,
+    keybind: pttKeybind,
+    onMuted: async (muted) => { await serverVoiceSession.setMuted(muted, { playSound: false, syncRemote: true }); },
+  });
 
   useEffect(() => {
     if (!channelId) return;
@@ -136,6 +149,8 @@ export function VoiceChannelPage() {
     }
     return map;
   }, [session.dbSessions]);
+
+  const [showConnectionPanel, setShowConnectionPanel] = useState(false);
 
   const localSpeakerUid = String(user?.id || profile?.id || '');
   const isLocalSpeaking = localSpeakerUid ? session.activeSpeakerUids.includes(localSpeakerUid) : false;
@@ -249,13 +264,39 @@ export function VoiceChannelPage() {
             </div>
 
             <div className="relative flex items-center justify-center gap-4 py-4 border-t border-surface-800 bg-surface-900 flex-shrink-0">
-              <div className="text-xs text-surface-500 absolute left-4">
+              <div className="absolute left-4 text-xs text-surface-500">
                 {session.isConnected ? (
-                  <span className="flex items-center gap-1.5 text-green-400">
-                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                    {connectionTelemetryLabel ? `Connected • ${connectionTelemetryLabel}` : 'Connected'}
-                  </span>
-                ) : 'Connecting...'}
+                  <div className="relative">
+                    {/* The summary was already here but was not clickable. The
+                        detail behind it is what people actually want when a
+                        call sounds wrong. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowConnectionPanel((value) => !value)}
+                      className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-green-400 transition-colors hover:bg-surface-800"
+                      title="Connection details"
+                    >
+                      <div className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                      {connectionTelemetryLabel
+                        ? `Connected • ${connectionTelemetryLabel}`
+                        : 'Connected'}
+                    </button>
+                    {showConnectionPanel && (
+                      <div className="absolute bottom-full left-0 z-50 mb-2">
+                        <ConnectionPanel
+                          averagePingMs={session.averagePingMs}
+                          lastPingMs={session.lastPingMs}
+                          outboundPacketLossPct={session.outboundPacketLossPct}
+                          uplinkQuality={session.uplinkQuality}
+                          downlinkQuality={session.downlinkQuality}
+                          onClose={() => setShowConnectionPanel(false)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  'Connecting...'
+                )}
               </div>
 
               <button
@@ -329,6 +370,25 @@ export function VoiceChannelPage() {
               </button>
 
               <button
+                type="button"
+                onClick={() => {
+                  const next = !pttEnabled;
+                  setPttEnabled(next);
+                  saveCallSettings({ ...loadCallSettings(), pttEnabled: next });
+                }}
+                className={`h-12 px-3 rounded-full text-xs font-semibold transition-all ${pttEnabled ? 'bg-nyptid-300 text-surface-950' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
+                title={pttEnabled ? `Push-to-talk on (${pttKeybind})` : 'Push-to-talk off'}
+              >
+                PTT {pttEnabled ? 'On' : 'Off'}
+              </button>
+
+              <InCallDevicePicker
+                onMicChange={(id) => serverVoiceSession.setInputDevice(id)}
+                onCameraChange={(id) => serverVoiceSession.setCameraDevice(id)}
+                onSpeakerChange={(id) => serverVoiceSession.setOutputDevice(id)}
+              />
+
+              <button
                 onClick={() => void handleLeave()}
                 title="Leave voice channel"
                 className="w-12 h-12 rounded-full bg-red-600 flex items-center justify-center text-white hover:bg-red-500 transition-colors"
@@ -336,7 +396,27 @@ export function VoiceChannelPage() {
                 <PhoneOff size={20} />
               </button>
 
-              <div className="absolute right-4 flex items-center gap-2">
+              <div className="absolute right-4 flex items-center gap-2 flex-wrap justify-end max-w-[50%]">
+                <NetworkQualityBars
+                  uplink={session.uplinkQuality}
+                  downlink={session.downlinkQuality}
+                  rttMs={session.lastPingMs}
+                  compact
+                />
+                {session.noiseSuppressionEnabled && (
+                  <VadThresholdSlider
+                    onChange={(value) => serverVoiceSession.setVadThreshold(value)}
+                  />
+                )}
+                {pttEnabled && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium transition-colors ${pttHeld ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200' : 'border-surface-700 bg-surface-900/80 text-surface-300'}`}
+                    title={pttHeld ? 'Transmitting' : `Hold ${pttKeybind} to talk`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${pttHeld ? 'bg-emerald-400 animate-pulse' : 'bg-surface-500'}`} />
+                    {pttHeld ? 'Transmitting' : `PTT ${pttKeybind}`}
+                  </span>
+                )}
                 <span className="text-xs text-surface-500">
                   {session.dbSessions.length} in channel
                 </span>

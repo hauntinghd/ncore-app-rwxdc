@@ -1,0 +1,10 @@
+{$DOMAIN} {
+    reverse_proxy localhost:7880
+
+    # WebSocket support for LiveKit signaling
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websocket localhost:7880
+}

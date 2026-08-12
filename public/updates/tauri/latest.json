@@ -1,0 +1,11 @@
+{
+  "version": "11.7.122",
+  "notes": "NCore 11.7.122: The desktop window can now be dragged from the title area again, and the minimize, maximize, and close buttons work — including on the sign-in screen. Fixed the desktop app repeatedly logging you out. Your session is now saved to a file that survives restarts, instead of relying on browser storage that the desktop window did not reliably keep.",
+  "pub_date": "2026-08-12T19:41:05.419Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEhoR3dsMlB1Z0FnbFFhaytBcG8wTFlLeEJMUTlCV0EzSnZlOU90aHNpSmFJc1pjK2lzd0xkYjN0N1FoeEhmcmt5UitGNmdpQXlpNlFLRWdpQmF1aGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NTYzNjE2CWZpbGU6TkNvcmVfMTEuNy4xMjJfeDY0LXNldHVwLmV4ZQpFUU40cUNOY3BXaUEyVm5yL2txd3JHc2RjUXJRS2RQVjFqd3hqUzNOUEcwUmt5RTFiQUJ0OW1mTW5TNFNRdkVEYjBWamVyTkpHM1ExTElhcVorczhEdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.122_x64-setup.exe"
+    }
+  }
+}

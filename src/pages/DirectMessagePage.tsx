@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect, useRef, useMemo, type ChangeEvent, ty
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
+  Inbox,
   Plus,
   Send,
   Video,
@@ -17,12 +18,19 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { MessageRequestsPanel } from '../components/chat/MessageRequestsPanel';
+import {
+  fetchAcceptedConversationIds,
+  fetchMessageRequestCount,
+} from '../lib/messageRequests';
 import { SidebarUserDock, type SidebarVoiceDockState } from '../components/layout/SidebarUserDock';
 import { Avatar } from '../components/ui/Avatar';
 import { Modal } from '../components/ui/Modal';
+import { SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { getCapabilityLockReason, useGrowthCapabilities } from '../lib/growthCapabilities';
+import { SafetyNumberBadge } from '../components/chat/SafetyNumberBadge';
 import { trackGrowthEvent } from '../lib/growthEvents';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { supabase } from '../lib/supabase';
@@ -38,9 +46,21 @@ import {
   hasBroadcastMention,
   insertMentionSuggestion,
   resolveMentionTargetIds,
-  splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
+import { MarkdownContent } from '../components/ui/MarkdownContent';
+import {
+  type AttachmentCipherEnvelope,
+  E2E_VERSION,
+  E2ERequiredError,
+  E2E_PLACEHOLDER,
+  decryptAttachmentFromConversation,
+  decryptFromConversation,
+  encryptAttachmentForConversation,
+  encryptForConversation,
+  isE2EEnabled,
+  type ConversationCipherEnvelope,
+} from '../lib/crypto/e2eManager';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
 import { runServerVoiceAction, useServerVoiceShellState } from '../lib/serverVoiceShell';
 import { loadCallSettings } from '../lib/callSettings';
@@ -71,11 +91,59 @@ interface ActiveConversationCall {
   participantNames: string[];
 }
 
+interface PreparedDmAttachmentUpload {
+  originalFile: File;
+  uploadBody: Blob | File;
+  storageFileName: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  encryptionMetadata: AttachmentCipherEnvelope | null;
+}
+
 const CALL_JOIN_WINDOW_MS = 3 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen, bio, banner_url, platform_role, rank, xp, is_banned, created_at, updated_at';
 const DM_LIST_PROFILE_SELECT_COLUMNS = 'id, username, display_name, avatar_url, status, last_seen';
 const MAX_BOOTSTRAP_DM_CONVERSATIONS = 80;
+
+/**
+ * Reads the closed-conversation record, accepting both the current
+ * `{ id: closedAtIso }` shape and the legacy `string[]` one.
+ *
+ * **The legacy array is discarded, not migrated.** Under the old code a closed
+ * conversation was hidden permanently — nothing ever removed it from the list —
+ * so that list is not a record of what someone chose to hide. It is the
+ * accumulated residue of a bug, and for at least one account it had grown to
+ * cover every conversation they had, which is exactly what "my DMs disappeared"
+ * turned out to be.
+ *
+ * An earlier attempt stamped these entries at read time so they would stay
+ * closed and reopen on the next message. That was wrong: it preserved the
+ * broken state and left the list empty until someone happened to send a
+ * message. Showing a conversation the user once dismissed is a trivial
+ * annoyance; hiding conversations they never chose to hide is the actual bug.
+ */
+function parseClosedRecord(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return {};
+    }
+    if (parsed && typeof parsed === 'object') {
+      const record: Record<string, string> = {};
+      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value === 'string' && value) record[id] = value;
+      }
+      return record;
+    }
+  } catch {
+    // Malformed record: treat as nothing closed. Showing an extra conversation
+    // is a far smaller problem than hiding a real one.
+  }
+  return {};
+}
 const MAX_ACTIVE_CALL_SYNC_CONVERSATIONS = 40;
 
 interface LightweightDirectMessageAuthor {
@@ -133,22 +201,124 @@ function buildRealtimeDirectMessage(row: any, authorMap: Map<string, Lightweight
 }
 
 function renderDirectMessageContent(content: string) {
-  return splitMentionText(content).map((segment, index) => (
-    segment.isMention ? (
-      <span
-        key={`${segment.text}:${index}`}
-        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
-      >
-        {segment.text}
-      </span>
-    ) : (
-      <span key={`${segment.text}:${index}`}>{segment.text}</span>
-    )
-  ));
+  return <MarkdownContent content={content} />;
 }
 
 function isUuid(value: unknown): boolean {
   return UUID_REGEX.test(String(value || '').trim());
+}
+
+function getAttachmentEnvelope(attachment: DirectMessageAttachment): AttachmentCipherEnvelope | null {
+  const metadata = attachment.encryption_metadata as AttachmentCipherEnvelope | null | undefined;
+  if (!metadata || (metadata.v !== 1 && metadata.v !== 2)) return null;
+  if (metadata.alg !== 'ECDH-P256+AES-256-GCM' && metadata.alg !== 'ECDH-P256+AES-256-GCM-MULTIDEVICE') return null;
+  return metadata;
+}
+
+interface DirectMessageAttachmentPreviewProps {
+  attachment: DirectMessageAttachment;
+  isOwn: boolean;
+  myUserId: string | undefined;
+}
+
+function DirectMessageAttachmentPreview({ attachment, isOwn, myUserId }: DirectMessageAttachmentPreviewProps) {
+  const envelope = getAttachmentEnvelope(attachment);
+  const [objectUrl, setObjectUrl] = useState('');
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'failed'>(envelope ? 'loading' : 'ready');
+  const displayName = envelope?.originalName || attachment.file_name;
+  const displayType = envelope?.originalType || attachment.file_type || 'application/octet-stream';
+  const displaySize = envelope?.originalSize || Number(attachment.file_size || 0);
+  const href = envelope ? objectUrl || undefined : attachment.file_url;
+  const isImage = String(displayType || '').startsWith('image/');
+
+  useEffect(() => {
+    if (!envelope) {
+      setObjectUrl('');
+      setLoadState('ready');
+      return undefined;
+    }
+    if (!myUserId) {
+      setLoadState('failed');
+      return undefined;
+    }
+
+    let cancelled = false;
+    let nextObjectUrl = '';
+    const decryptingUserId = myUserId;
+    setLoadState('loading');
+
+    async function decryptAttachment() {
+      try {
+        const response = await fetch(attachment.file_url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`download failed: ${response.status}`);
+        const encryptedBytes = await response.arrayBuffer();
+        const blob = await decryptAttachmentFromConversation({
+          myUserId: decryptingUserId,
+          envelope,
+          encryptedBytes,
+        });
+        if (!blob) throw new Error('decrypt failed');
+        nextObjectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setObjectUrl(nextObjectUrl);
+          setLoadState('ready');
+        }
+      } catch {
+        if (!cancelled) setLoadState('failed');
+      }
+    }
+
+    void decryptAttachment();
+
+    return () => {
+      cancelled = true;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [attachment.file_url, attachment.id, envelope, myUserId]);
+
+  const className = `block rounded-lg border text-xs overflow-hidden ${
+    isOwn
+      ? 'border-surface-950/20 hover:border-surface-950/30'
+      : 'border-surface-500/30 hover:border-surface-400/40'
+  }`;
+
+  const body = isImage && href && loadState === 'ready' ? (
+    <img
+      src={href}
+      alt={displayName}
+      className="max-h-64 w-auto object-contain bg-black/20"
+    />
+  ) : (
+    <div className="flex items-center gap-2 px-2.5 py-2">
+      <Paperclip size={13} />
+      <div className="min-w-0">
+        <div className="truncate font-medium">{displayName}</div>
+        <div className="opacity-70">
+          {loadState === 'loading'
+            ? 'Decrypting...'
+            : loadState === 'failed'
+              ? 'Unable to decrypt on this device'
+              : formatFileSize(displaySize)}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!href || loadState === 'loading' || loadState === 'failed') {
+    return <div className={className}>{body}</div>;
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      download={displayName}
+      className={className}
+    >
+      {body}
+    </a>
+  );
 }
 
 export function DirectMessagePage() {
@@ -165,13 +335,46 @@ export function DirectMessagePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [conversations, setConversations] = useState<DirectConversation[]>([]);
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [activeConversation, setActiveConversation] = useState<DirectConversation | null>(null);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [decryptedById, setDecryptedById] = useState<Map<string, string>>(() => new Map());
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [showNewDM, setShowNewDM] = useState(false);
+  /*
+    Where the conversation list lost its rows.
+
+    The DM list has now come back empty on a fresh install with a healthy
+    server (24 memberships returned by both RPCs under the account's own RLS),
+    after several wrong guesses at the cause. Rather than guess again, each
+    stage of the pipeline records its count and the empty state shows them, so
+    the step where N becomes 0 is visible instead of inferred.
+  */
+  const [dmLoadStages, setDmLoadStages] = useState<Record<string, number | string> | null>(null);
+  const [showMessageRequests, setShowMessageRequests] = useState(false);
+  const [messageRequestCount, setMessageRequestCount] = useState(0);
+
+  // Refreshed on mount and on focus. A pending request is not urgent enough to
+  // justify another realtime subscription on this already-heavy page.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void fetchMessageRequestCount()
+        .then((count) => {
+          if (!cancelled) setMessageRequestCount(count);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
   const [newDmMode, setNewDmMode] = useState<NewDmMode>('direct');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMemberIds, setNewGroupMemberIds] = useState<string[]>([]);
@@ -182,7 +385,35 @@ export function DirectMessagePage() {
   const [creatingConversation, setCreatingConversation] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [conversationContextMenu, setConversationContextMenu] = useState<ConversationContextMenuState | null>(null);
-  const [closedConversationIds, setClosedConversationIds] = useState<string[]>([]);
+  /*
+    Closing a DM used to hide it forever. The only way one ever came back was
+    navigating straight to its URL — a new message from the other person did
+    nothing, so from the outside it looked exactly like DMs vanishing.
+
+    Closing now records *when*, and a conversation reopens on its own as soon
+    as it has activity newer than that. Closing a DM is a low-commitment "I am
+    done with this for now", not a decision to never hear from someone again.
+  */
+  const [closedAtByConversation, setClosedAtByConversation] = useState<Record<string, string>>({});
+  const closedConversationIds = useMemo(
+    () => Object.keys(closedAtByConversation),
+    [closedAtByConversation],
+  );
+  // Kept as a setter-shaped shim so the existing call sites read unchanged.
+  const setClosedConversationIds = useCallback(
+    (updater: string[] | ((prev: string[]) => string[])) => {
+      setClosedAtByConversation((prev) => {
+        const prevIds = Object.keys(prev);
+        const nextIds = typeof updater === 'function' ? updater(prevIds) : updater;
+        const nextSet = new Set(nextIds.map(String));
+        const next: Record<string, string> = {};
+        const now = new Date().toISOString();
+        for (const id of nextSet) next[id] = prev[id] ?? now;
+        return next;
+      });
+    },
+    [],
+  );
   const [mutedConversationIds, setMutedConversationIds] = useState<string[]>([]);
   const [friendNicknames, setFriendNicknames] = useState<Record<string, string>>({});
   const [friendNotes, setFriendNotes] = useState<Record<string, string>>({});
@@ -291,7 +522,25 @@ export function DirectMessagePage() {
   const visibleConversations = useMemo(() => {
     if (closedConversationIds.length === 0) return conversations;
     const hidden = new Set(closedConversationIds.map((id) => String(id)));
-    return conversations.filter((conversation) => !hidden.has(String(conversation.id)));
+    const visible = conversations.filter((conversation) => !hidden.has(String(conversation.id)));
+
+    /*
+      Never let the closed list hide everything.
+
+      "You have no conversations" and "all of your conversations are hidden"
+      look identical to the user and only one of them is true, so if this
+      filter would empty a non-empty list, it is the filter that is wrong.
+      Whatever put every id in the closed list, the answer is never to show a
+      person an empty inbox they cannot get out of.
+    */
+    if (visible.length === 0 && conversations.length > 0) {
+      console.warn(
+        `[dm] closed-conversation filter would hide all ${conversations.length} conversations; ignoring it.`,
+      );
+      return conversations;
+    }
+
+    return visible;
   }, [closedConversationIds, conversations]);
 
   useEffect(() => {
@@ -597,13 +846,15 @@ export function DirectMessagePage() {
       const rawNicknames = localStorage.getItem(nicknamesStorageKey);
       const rawNotes = localStorage.getItem(notesStorageKey);
       const rawMuted = localStorage.getItem(mutedStorageKey);
-      const rawClosed = closedSessionStorageKey ? window.sessionStorage.getItem(closedSessionStorageKey) : null;
+      const rawClosed = closedStorageKey ? localStorage.getItem(closedStorageKey) : null;
       setFriendNicknames(rawNicknames ? JSON.parse(rawNicknames) : {});
       setFriendNotes(rawNotes ? JSON.parse(rawNotes) : {});
-      setClosedConversationIds(rawClosed ? JSON.parse(rawClosed) : []);
+      setClosedConversationIds([]);
+      setClosedAtByConversation(parseClosedRecord(rawClosed));
       setMutedConversationIds(rawMuted ? JSON.parse(rawMuted) : []);
-      if (closedStorageKey) {
-        localStorage.removeItem(closedStorageKey);
+      // Also clean up legacy sessionStorage key
+      if (closedSessionStorageKey) {
+        try { window.sessionStorage.removeItem(closedSessionStorageKey); } catch { /* noop */ }
       }
     } catch {
       setFriendNicknames({});
@@ -629,13 +880,13 @@ export function DirectMessagePage() {
   }, [mutedConversationIds, mutedStorageKey]);
 
   useEffect(() => {
-    if (!closedSessionStorageKey) return;
+    if (!closedStorageKey) return;
     try {
-      window.sessionStorage.setItem(closedSessionStorageKey, JSON.stringify(closedConversationIds));
+      localStorage.setItem(closedStorageKey, JSON.stringify(closedAtByConversation));
     } catch {
-      // best-effort session persistence
+      // best-effort persistence
     }
-  }, [closedConversationIds, closedSessionStorageKey]);
+  }, [closedAtByConversation, closedStorageKey]);
 
   useEffect(() => {
     if (!conversationsCacheKey) return;
@@ -779,7 +1030,22 @@ export function DirectMessagePage() {
         },
         (payload) => {
           const changedConversationId = String((payload.new as any)?.conversation_id || '').trim();
-          if (!changedConversationId || !trackedConversationIdsRef.current.has(changedConversationId)) return;
+          if (!changedConversationId) return;
+
+          /*
+            A message arriving in a closed conversation reopens it immediately,
+            before the tracked-id check below — a closed conversation is not in
+            the tracked set, so checking first would drop exactly the event
+            that is supposed to bring it back.
+          */
+          setClosedAtByConversation((prev) => {
+            if (!prev[changedConversationId]) return prev;
+            const next = { ...prev };
+            delete next[changedConversationId];
+            return next;
+          });
+
+          if (!trackedConversationIdsRef.current.has(changedConversationId)) return;
           const createdAtIso = String((payload.new as any)?.created_at || '').trim() || new Date().toISOString();
           promoteConversationActivity(changedConversationId, createdAtIso);
           scheduleActiveConversationRefresh(changedConversationId, 120);
@@ -1291,12 +1557,20 @@ export function DirectMessagePage() {
     let membershipRows: Array<{ conversation_id: string }> = [];
     let membershipError: any = null;
 
-    // Prefer RPC path (SECURITY DEFINER) so DM list still loads if select policies drift.
+    // Prefer the RPC path (SECURITY DEFINER) so the DM list still loads if
+    // select policies drift. An empty RPC result is deliberately *not*
+    // authoritative, though: older deployments of the helper could return an
+    // empty set for a valid member. Verify that case against the membership
+    // table before treating the account as having no conversations.
     const { data: rpcMembershipRows, error: rpcMembershipError } = await (supabase as any).rpc('get_my_dm_conversation_ids');
-    if (!rpcMembershipError && Array.isArray(rpcMembershipRows)) {
-      membershipRows = rpcMembershipRows
+    const rpcRows = !rpcMembershipError && Array.isArray(rpcMembershipRows)
+      ? rpcMembershipRows
         .map((row: any) => ({ conversation_id: String(row?.conversation_id || '') }))
-        .filter((row: any) => Boolean(row.conversation_id));
+        .filter((row: any) => Boolean(row.conversation_id))
+      : [];
+
+    if (rpcRows.length > 0) {
+      membershipRows = rpcRows;
     } else {
       if (rpcMembershipError && !isMissingRpcFunctionError(rpcMembershipError)) {
         console.warn('DM conversation id RPC failed; falling back to table query.', rpcMembershipError);
@@ -1314,17 +1588,92 @@ export function DirectMessagePage() {
 
     if (membershipError) {
       console.warn('DM membership lookup failed; keeping cached conversations if available.', membershipError);
+      setConversationsLoaded(true);
       return;
     }
 
-    const requestedConversationIds = Array.from(
+    let requestedConversationIds = Array.from(
       new Set((membershipRows || []).map((row: any) => String(row.conversation_id)).filter((id) => isUuid(id)))
     );
 
+    /*
+      Pending message requests do not belong in the conversation list — they
+      live in the requests panel until accepted. `null` means the lookup failed
+      (most likely an un-migrated database), in which case nothing is filtered:
+      showing an extra conversation is a far smaller problem than hiding all of
+      them. The open conversation is always kept so a direct link still works
+      and so accepting from the panel navigates into something that exists.
+    */
+    const stages: Record<string, number | string> = {
+      membership: requestedConversationIds.length,
+      source: rpcRows.length > 0 ? 'rpc' : 'table',
+    };
+
+    const acceptedIds = await fetchAcceptedConversationIds();
+    stages.acceptedRpc = acceptedIds === null ? 'null (skipped)' : acceptedIds.length;
+    if (acceptedIds) {
+      const accepted = new Set(acceptedIds);
+      requestedConversationIds = requestedConversationIds.filter(
+        (id) => accepted.has(id) || id === conversationId,
+      );
+    }
+
     if (requestedConversationIds.length === 0) {
+      /*
+        An empty membership result is NOT proof the user has no conversations.
+
+        This is the "DMs disappearing" bug: a stale JWT, an RLS evaluation
+        during a token refresh, or a transient PostgREST hiccup all return zero
+        rows with no error, and the old code took that at face value and
+        cleared the list. The conversations were never gone — the client had
+        simply been told nothing and believed it.
+
+        So: refresh the session and ask once more. Only a second empty answer,
+        on a known-good session, is treated as real.
+      */
+      const hadConversations = conversations.length > 0;
+      if (hadConversations) {
+        const refreshed = await ensureFreshAuthSession(60, {
+          forceRefresh: true,
+          verifyOnServer: false,
+        });
+        if (refreshed.ok) {
+          const { data: retryRows, error: retryError } = await supabase
+            .from('direct_conversation_members')
+            .select('conversation_id')
+            .eq('user_id', profile.id)
+            .limit(MAX_BOOTSTRAP_DM_CONVERSATIONS * 4);
+
+          const retryIds = Array.from(
+            new Set(
+              ((retryRows || []) as any[])
+                .map((row: any) => String(row?.conversation_id || ''))
+                .filter((id) => isUuid(id)),
+            ),
+          );
+
+          if (retryError || retryIds.length > 0) {
+            // Either the retry failed (so we still know nothing) or it found
+            // the conversations that the first query missed. Keep what we have
+            // and let the next refresh sort it out.
+            console.warn('DM membership came back empty but conversations exist; keeping cached list.', retryError);
+            setConversationsLoaded(true);
+            return;
+          }
+        } else {
+          // Could not establish a good session, so the empty answer is
+          // unverifiable. Never clear on an unverifiable result.
+          setConversationsLoaded(true);
+          return;
+        }
+      }
+
       setConversations([]);
+      setConversationsLoaded(true);
       return;
     }
+
+    stages.afterAcceptedFilter = requestedConversationIds.length;
 
     const { data: conversationsData, error: conversationsError } = await supabase
       .from('direct_conversations')
@@ -1490,8 +1839,56 @@ export function DirectMessagePage() {
       };
     });
 
+    /*
+      Reopen any closed conversation that has heard from someone since it was
+      closed. Without this a closed DM is closed forever, which is how "my DMs
+      disappeared" happens: the other person keeps messaging and you never see
+      any of it.
+
+      Scoped to the closed set only, so this is a small bounded query rather
+      than a scan of every conversation.
+    */
+    const closedIds = Object.keys(closedAtByConversation);
+    let reopenedIds: string[] = [];
+    if (closedIds.length > 0) {
+      const { data: activityRows } = await supabase
+        .from('direct_messages')
+        .select('conversation_id, created_at')
+        .in('conversation_id', closedIds)
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      const latestByConversation = new Map<string, string>();
+      for (const row of (activityRows || []) as any[]) {
+        const key = String(row?.conversation_id || '');
+        if (!key || latestByConversation.has(key)) continue;
+        latestByConversation.set(key, String(row?.created_at || ''));
+      }
+
+      reopenedIds = closedIds.filter((id) => {
+        const latest = latestByConversation.get(id);
+        if (!latest) return false;
+        const closedAt = new Date(closedAtByConversation[id]).getTime();
+        const lastMessageAt = new Date(latest).getTime();
+        if (!Number.isFinite(closedAt) || !Number.isFinite(lastMessageAt)) return false;
+        return lastMessageAt > closedAt;
+      });
+
+      if (reopenedIds.length > 0) {
+        setClosedAtByConversation((prev) => {
+          const next = { ...prev };
+          for (const id of reopenedIds) delete next[id];
+          return next;
+        });
+      }
+    }
+
+    const stillClosed = new Set(
+      closedIds.filter((id) => !reopenedIds.includes(id)),
+    );
+
     const filtered = hydrated
-      .filter((conv: any) => !closedConversationIds.includes(String(conv.id)))
+      .filter((conv: any) => !stillClosed.has(String(conv.id)))
       .sort((a: any, b: any) => {
         const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
         const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
@@ -1510,7 +1907,33 @@ export function DirectMessagePage() {
       return true;
     });
 
+    stages.hydrated = hydrated.length;
+    stages.afterClosedFilter = filtered.length;
+    stages.afterDedupe = deduped.length;
+    setDmLoadStages(stages);
+
+    /*
+      Never replace a populated list with an empty one when the server just
+      told us there are conversations.
+
+      This is the "DMs vanish instantly" path: the cache paints the list, then
+      this load finishes, and if anything between membership and dedupe drops
+      every row the assignment wipes the screen. Membership is authoritative
+      for "conversations exist" — if it returned rows and we ended up with
+      none, the pipeline lost them and the previous list is closer to the truth
+      than an empty one.
+    */
+    if (deduped.length === 0 && requestedConversationIds.length > 0) {
+      console.warn(
+        `[dm] load produced 0 conversations from ${requestedConversationIds.length} memberships; keeping previous list.`,
+        stages,
+      );
+      setConversationsLoaded(true);
+      return;
+    }
+
     setConversations(deduped as DirectConversation[]);
+    setConversationsLoaded(true);
   }
 
   async function loadUserRelationships() {
@@ -1525,10 +1948,50 @@ export function DirectMessagePage() {
     setUserRelationships(map);
   }
 
+  useEffect(() => {
+    if (!isE2EEnabled() || !profile?.id) return;
+    if (messages.length === 0) return;
+    let cancelled = false;
+
+    const pending = messages.filter((msg) => {
+      if (!msg?.id || decryptedById.has(msg.id)) return false;
+      return Boolean(msg.ciphertext) && (msg.e2e_version ?? 0) >= 1;
+    });
+    if (pending.length === 0) return;
+
+    void (async () => {
+      const updates = new Map<string, string>();
+      for (const msg of pending) {
+        const envelope = msg.ciphertext as ConversationCipherEnvelope | null | undefined;
+        const plaintext = await decryptFromConversation({ myUserId: profile.id, envelope });
+        if (plaintext != null) updates.set(msg.id, plaintext);
+      }
+      if (cancelled || updates.size === 0) return;
+      setDecryptedById((prev) => {
+        const next = new Map(prev);
+        for (const [id, value] of updates) next.set(id, value);
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, profile?.id, decryptedById]);
+
+  const resolveMessageContent = useCallback(
+    (msg: DirectMessage): string => {
+      const decrypted = decryptedById.get(msg.id);
+      if (decrypted != null) return decrypted;
+      return msg.content || '';
+    },
+    [decryptedById],
+  );
+
   async function loadMessages(convId: string) {
     const primary = await supabase
       .from('direct_messages')
-      .select(`id, conversation_id, author_id, content, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS}), attachments:direct_message_attachments(*)`)
+      .select(`id, conversation_id, author_id, content, ciphertext, e2e_version, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS}), attachments:direct_message_attachments(*)`)
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true })
       .limit(100);
@@ -1542,7 +2005,7 @@ export function DirectMessagePage() {
       }
       const fallback = await supabase
         .from('direct_messages')
-        .select(`id, conversation_id, author_id, content, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS})`)
+        .select(`id, conversation_id, author_id, content, ciphertext, e2e_version, is_edited, created_at, updated_at, author:profiles(${PROFILE_SELECT_COLUMNS})`)
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true })
         .limit(100);
@@ -1842,31 +2305,76 @@ export function DirectMessagePage() {
     )));
   }
 
-  async function uploadPendingFilesForMessage(messageId: string, files: File[]) {
+  async function preparePendingFilesForMessage(files: File[], recipientUserIds: string[]): Promise<PreparedDmAttachmentUpload[]> {
+    if (!profile || files.length === 0) return [];
+
+    const shouldEncrypt = isE2EEnabled() && recipientUserIds.length > 0;
+    const prepared: PreparedDmAttachmentUpload[] = [];
+
+    for (const file of files) {
+      if (!shouldEncrypt) {
+        prepared.push({
+          originalFile: file,
+          uploadBody: file,
+          storageFileName: file.name,
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          encryptionMetadata: null,
+        });
+        continue;
+      }
+
+      const encrypted = await encryptAttachmentForConversation({
+        myUserId: profile.id,
+        recipientUserIds,
+        file,
+        requireComplete: true,
+      });
+
+      prepared.push({
+        originalFile: file,
+        uploadBody: encrypted.encryptedBlob,
+        storageFileName: `${file.name}.nce`,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        encryptionMetadata: encrypted.envelope,
+      });
+    }
+
+    return prepared;
+  }
+
+  async function uploadPendingFilesForMessage(messageId: string, files: PreparedDmAttachmentUpload[]) {
     if (!profile || !conversationId || files.length === 0) return;
     setUploadingFiles(true);
     try {
       for (const file of files) {
-        const safeName = file.name.replace(/[^\w.\-() ]/g, '_');
+        const safeName = file.storageFileName.replace(/[^\w.\-() ]/g, '_');
         const storagePath = `${profile.id}/dm/${conversationId}/${messageId}/${Date.now()}-${safeName}`;
         const { error: uploadError } = await supabase
           .storage
           .from('message-uploads')
-          .upload(storagePath, file, { upsert: false });
+          .upload(storagePath, file.uploadBody, {
+            upsert: false,
+            contentType: file.encryptionMetadata ? 'application/octet-stream' : file.fileType,
+          });
         if (uploadError) {
-          setErrorMessage(`Upload failed for ${file.name}: ${uploadError.message}`);
+          setErrorMessage(`Upload failed for ${file.fileName}: ${uploadError.message}`);
           continue;
         }
         const { data: publicData } = supabase.storage.from('message-uploads').getPublicUrl(storagePath);
         const { error: attachmentError } = await supabase.from('direct_message_attachments').insert({
           direct_message_id: messageId,
           file_url: publicData.publicUrl,
-          file_name: file.name,
-          file_type: file.type || 'application/octet-stream',
-          file_size: file.size,
+          file_name: file.fileName,
+          file_type: file.fileType,
+          file_size: file.fileSize,
+          encryption_metadata: file.encryptionMetadata,
         } as any);
         if (attachmentError) {
-          setErrorMessage(`Attachment save failed for ${file.name}: ${attachmentError.message}`);
+          setErrorMessage(`Attachment save failed for ${file.fileName}: ${attachmentError.message}`);
         }
       }
     } finally {
@@ -1912,13 +2420,89 @@ export function DirectMessagePage() {
     setSending(true);
     setErrorMessage('');
 
+    let otherMemberIds = Array.from(new Set(
+      ((activeConversation?.members || []) as Array<{ user_id?: string | null }>)
+        .map((member) => String(member?.user_id || '').trim())
+        .filter((userId) => userId && userId !== profile.id),
+    ));
+
+    if (isE2EEnabled() && otherMemberIds.length === 0) {
+      const { data: memberRows, error: memberLookupError } = await supabase
+        .from('direct_conversation_members')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', profile.id);
+
+      if (memberLookupError) {
+        setErrorMessage('Encrypted message blocked: could not verify recipient encryption keys. Try again in a moment.');
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
+      }
+
+      otherMemberIds = Array.from(new Set(
+        ((memberRows || []) as Array<{ user_id?: string | null }>)
+          .map((member) => String(member?.user_id || '').trim())
+          .filter(Boolean),
+      ));
+    }
+
+    let insertContent = content;
+    let envelope: ConversationCipherEnvelope | null = null;
+    if (isE2EEnabled() && otherMemberIds.length > 0) {
+      try {
+        const { envelope: produced } = await encryptForConversation({
+          myUserId: profile.id,
+          recipientUserIds: otherMemberIds,
+          plaintext: content,
+          requireComplete: true,
+        });
+        if (produced) {
+          envelope = produced;
+          insertContent = E2E_PLACEHOLDER;
+        }
+      } catch (error) {
+        const message = error instanceof E2ERequiredError
+          ? error.message
+          : 'Encrypted message blocked: recipient encryption keys are not ready.';
+        setErrorMessage(message);
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
+      }
+    }
+
+    let preparedFiles: PreparedDmAttachmentUpload[] = [];
+    if (filesToSend.length > 0) {
+      try {
+        preparedFiles = await preparePendingFilesForMessage(filesToSend, otherMemberIds);
+      } catch (error) {
+        const message = error instanceof E2ERequiredError
+          ? error.message
+          : 'Encrypted attachment blocked: recipient encryption keys are not ready.';
+        setErrorMessage(message);
+        setInput(content);
+        setPendingFiles(filesToSend);
+        setSending(false);
+        return;
+      }
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      conversation_id: conversationId,
+      author_id: profile.id,
+      content: insertContent,
+    };
+    if (envelope) {
+      insertPayload.ciphertext = envelope;
+      insertPayload.e2e_version = E2E_VERSION;
+    }
+
     const { data: insertedMessage, error } = await supabase
       .from('direct_messages')
-      .insert({
-        conversation_id: conversationId,
-        author_id: profile.id,
-        content,
-      })
+      .insert(insertPayload)
       .select('id')
       .maybeSingle();
 
@@ -1942,6 +2526,15 @@ export function DirectMessagePage() {
       attachments: [],
     };
     upsertDirectMessage(optimisticMessage);
+    if (envelope) {
+      // Cache the plaintext locally so when the encrypted version comes
+      // back over realtime we don't briefly show the placeholder.
+      setDecryptedById((prev) => {
+        const next = new Map(prev);
+        next.set(String(insertedMessage.id), content);
+        return next;
+      });
+    }
     scrollToBottom('auto');
 
     const activityAtIso = new Date().toISOString();
@@ -1951,8 +2544,8 @@ export function DirectMessagePage() {
       .update({ updated_at: activityAtIso } as any)
       .eq('id', conversationId);
 
-    if (filesToSend.length > 0) {
-      await uploadPendingFilesForMessage(String(insertedMessage.id), filesToSend);
+    if (preparedFiles.length > 0) {
+      await uploadPendingFilesForMessage(String(insertedMessage.id), preparedFiles);
     }
 
     try {
@@ -2361,6 +2954,34 @@ export function DirectMessagePage() {
     }
   }
 
+  // Compute "Seen by other" cutoff: the max last_read_at across all non-self
+  // conversation members. The last own-sent message with created_at <= cutoff
+  // gets a "Seen" indicator. Works for both 1:1 and group DMs.
+  const seenCutoffMs = useMemo(() => {
+    if (!activeConversation || !profile?.id) return 0;
+    let maxTs = 0;
+    for (const member of (activeConversation.members || []) as any[]) {
+      if (String(member?.user_id) === String(profile.id)) continue;
+      const raw = member?.last_read_at;
+      if (!raw) continue;
+      const t = new Date(raw).getTime();
+      if (Number.isFinite(t) && t > maxTs) maxTs = t;
+    }
+    return maxTs;
+  }, [activeConversation, profile?.id]);
+
+  const lastSeenOwnMessageId = useMemo(() => {
+    if (seenCutoffMs <= 0 || !profile?.id) return '';
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (String(msg.author_id) !== String(profile.id)) continue;
+      const msgTs = new Date(msg.created_at).getTime();
+      if (Number.isFinite(msgTs) && msgTs <= seenCutoffMs) return String(msg.id);
+      break; // only the newest own message can be "seen" — stop after the first non-seen hit
+    }
+    return '';
+  }, [messages, seenCutoffMs, profile?.id]);
+
   const renderedMessages = useMemo(() => (
     messages.map((msg, i) => {
       const prev = messages[i - 1];
@@ -2393,51 +3014,40 @@ export function DirectMessagePage() {
               ? 'bg-nyptid-300 text-surface-950 rounded-tr-sm'
               : 'bg-surface-700 text-surface-200 rounded-tl-sm'}`}>
               {msg.content && (
-                <div className="whitespace-pre-wrap break-words">{renderDirectMessageContent(msg.content)}</div>
+                <div className="whitespace-pre-wrap break-words">{renderDirectMessageContent(resolveMessageContent(msg))}</div>
               )}
               {attachments.length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
-                  {attachments.map((attachment) => {
-                    const isImage = String(attachment.file_type || '').startsWith('image/');
-                    return (
-                      <a
-                        key={attachment.id}
-                        href={attachment.file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={`block rounded-lg border text-xs overflow-hidden ${
-                          isOwn
-                            ? 'border-surface-950/20 hover:border-surface-950/30'
-                            : 'border-surface-500/30 hover:border-surface-400/40'
-                        }`}
-                      >
-                        {isImage ? (
-                          <img
-                            src={attachment.file_url}
-                            alt={attachment.file_name}
-                            className="max-h-64 w-auto object-contain bg-black/20"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 px-2.5 py-2">
-                            <Paperclip size={13} />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{attachment.file_name}</div>
-                              <div className="opacity-70">{formatFileSize(Number(attachment.file_size || 0))}</div>
-                            </div>
-                          </div>
-                        )}
-                      </a>
-                    );
-                  })}
+                  {attachments.map((attachment) => (
+                    <DirectMessageAttachmentPreview
+                      key={attachment.id}
+                      attachment={attachment}
+                      isOwn={isOwn}
+                      myUserId={profile?.id}
+                    />
+                  ))}
                 </div>
               )}
               {msg.is_edited && <span className="text-xs opacity-60 ml-1">(edited)</span>}
             </div>
+            {isOwn && String(msg.id) === lastSeenOwnMessageId && (
+              <div
+                className="mt-1 px-1 text-[11px] font-medium text-nyptid-200/80 flex items-center gap-1"
+                aria-label="Message seen"
+                title="Seen"
+              >
+                <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 12 7 18 15 6" />
+                  <polyline points="9 12 13 16 23 4" />
+                </svg>
+                Seen
+              </div>
+            )}
           </div>
         </div>
       );
     })
-  ), [messages, profile?.id]);
+  ), [messages, profile?.id, lastSeenOwnMessageId]);
 
   async function startCall(video: boolean) {
     if (!conversationId) return;
@@ -3032,6 +3642,13 @@ export function DirectMessagePage() {
 
   return (
     <AppShell showChannelSidebar={false} suppressPersistentVoiceBar title="Direct Messages">
+      <MessageRequestsPanel
+        isOpen={showMessageRequests}
+        onClose={() => setShowMessageRequests(false)}
+        onChanged={() => {
+          void fetchMessageRequestCount().then(setMessageRequestCount).catch(() => {});
+        }}
+      />
       <div className="flex h-full min-h-0">
         <div className={`${isCompactLayout && conversationId ? 'hidden' : 'flex'} ${isCompactLayout ? 'w-full' : 'w-72'} border-r border-surface-800 flex-col bg-surface-900`}>
           <div className="p-3 border-b border-surface-800">
@@ -3044,10 +3661,34 @@ export function DirectMessagePage() {
                 <Plus size={14} />
               </button>
             </div>
+
+            {messageRequestCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowMessageRequests(true)}
+                className="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-800/60 px-2.5 py-2 text-left transition-colors hover:border-surface-600 hover:bg-surface-800"
+              >
+                <Inbox size={14} className="flex-shrink-0 text-nyptid-300" />
+                <span className="flex-1 text-xs font-medium text-surface-200">
+                  Message Requests
+                </span>
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                  {messageRequestCount > 9 ? '9+' : messageRequestCount}
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {visibleConversations.length === 0 ? (
+            {!conversationsLoaded && visibleConversations.length === 0 ? (
+              <div className="py-2" aria-label="Loading conversations">
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+                <SkeletonUserRow />
+              </div>
+            ) : visibleConversations.length === 0 ? (
               <div className="text-center py-8 px-4">
                 <p className="text-surface-500 text-sm">No conversations yet</p>
                 <button
@@ -3056,6 +3697,29 @@ export function DirectMessagePage() {
                 >
                   Start a DM
                 </button>
+
+                {/*
+                  Shown only when the list is empty AND the server actually
+                  returned memberships — i.e. exactly the broken case. A genuine
+                  empty inbox reports membership 0 and this stays hidden.
+                */}
+                {dmLoadStages && Number(dmLoadStages.membership) > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-left">
+                    <div className="text-[11px] font-semibold text-amber-200">
+                      {dmLoadStages.membership} conversations were returned but none are showing.
+                    </div>
+                    <div className="mt-1.5 font-mono text-[10px] leading-relaxed text-amber-100/80">
+                      {Object.entries(dmLoadStages).map(([stage, value]) => (
+                        <div key={stage}>
+                          {stage}: {String(value)}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-amber-100/60">
+                      Send this to support — it identifies which step dropped them.
+                    </div>
+                  </div>
+                )}
               </div>
             ) : visibleConversations.map(conv => {
               const { src, name, status } = getConversationAvatar(conv);
@@ -3177,6 +3841,12 @@ export function DirectMessagePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {!activeConversation.is_group && (
+                      <SafetyNumberBadge
+                        peerUserId={dmMentionTargets[0]?.id ?? null}
+                        peerName={getConversationName(activeConversation)}
+                      />
+                    )}
                     <button
                       onClick={() => startCall(false)}
                       className="w-9 h-9 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
@@ -3657,7 +4327,7 @@ export function DirectMessagePage() {
                         }}
                         disabled={Boolean(updatingGroupRoleUserId)}
                         className={`text-xs rounded-md px-2 py-1 transition-colors text-nyptid-200 hover:bg-nyptid-300/15 ${
-                          Boolean(updatingGroupRoleUserId) ? 'opacity-50 cursor-not-allowed' : ''
+                          updatingGroupRoleUserId ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {changingRoleThis ? '...' : memberRole === 'admin' ? 'Demote' : 'Promote'}
@@ -3671,7 +4341,7 @@ export function DirectMessagePage() {
                         }}
                         disabled={Boolean(transferringGroupOwnerId)}
                         className={`text-xs rounded-md px-2 py-1 transition-colors text-amber-200 hover:bg-amber-500/15 ${
-                          Boolean(transferringGroupOwnerId) ? 'opacity-50 cursor-not-allowed' : ''
+                          transferringGroupOwnerId ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {transferringGroupOwnerId === String(member.user_id) ? '...' : 'Transfer'}
@@ -3978,5 +4648,3 @@ function formatShortTime(dateString: string): string {
     hour12: true,
   });
 }
-
-

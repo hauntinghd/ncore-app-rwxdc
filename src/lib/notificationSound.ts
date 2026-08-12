@@ -119,11 +119,16 @@ function playPattern(kind: NotificationSoundKind, ctx: AudioContext) {
     return;
   }
   if (kind === 'mute_on') {
-    scheduleTone(ctx, { frequency: 560, delaySec: 0, durationSec: 0.08, gainLevel: 0.095, wave: 'square' });
+    // Short downward two-note cue: unmistakably muted without the harsh
+    // square-wave click the original implementation produced.
+    scheduleTone(ctx, { frequency: 740, delaySec: 0, durationSec: 0.055, gainLevel: 0.065, wave: 'triangle' });
+    scheduleTone(ctx, { frequency: 520, delaySec: 0.065, durationSec: 0.09, gainLevel: 0.085, wave: 'triangle' });
     return;
   }
   if (kind === 'mute_off') {
-    scheduleTone(ctx, { frequency: 760, delaySec: 0, durationSec: 0.08, gainLevel: 0.095, wave: 'square' });
+    // Mirror the mute cue with a rising confirmation tone.
+    scheduleTone(ctx, { frequency: 520, delaySec: 0, durationSec: 0.055, gainLevel: 0.065, wave: 'triangle' });
+    scheduleTone(ctx, { frequency: 760, delaySec: 0.065, durationSec: 0.09, gainLevel: 0.085, wave: 'triangle' });
     return;
   }
   if (kind === 'deafen_on') {
@@ -140,14 +145,35 @@ function playPattern(kind: NotificationSoundKind, ctx: AudioContext) {
   scheduleTone(ctx, { frequency: 660, delaySec: 0.1, durationSec: 0.07, gainLevel: 0.09 });
 }
 
+function playVoiceCueAsset(kind: NotificationSoundKind): boolean {
+  if (typeof Audio === 'undefined') return false;
+  const fileName: Partial<Record<NotificationSoundKind, string>> = {
+    mute_on: 'ncore-mute-on.wav',
+    mute_off: 'ncore-mute-off.wav',
+    deafen_on: 'ncore-deafen-on.wav',
+    deafen_off: 'ncore-deafen-off.wav',
+  };
+  const cue = fileName[kind];
+  if (!cue) return false;
+  try {
+    const audio = new Audio(`${import.meta.env.BASE_URL}sounds/${cue}`);
+    audio.volume = 0.62;
+    void audio.play().catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function playNotificationSound(kind: NotificationSoundKind, options?: SoundPlaybackOptions): boolean {
   if (!canPlay(options)) return false;
   const now = Date.now();
   if (now - lastPlayedAt[kind] < MIN_GAP_MS[kind]) return false;
 
   const ctx = getAudioContext();
-  if (!ctx) return false;
   lastPlayedAt[kind] = now;
+  if (playVoiceCueAsset(kind)) return true;
+  if (!ctx) return false;
   playPattern(kind, ctx);
   return true;
 }

@@ -1,0 +1,58 @@
+# NCore LiveKit SFU Server
+# Deploy one instance per region for the global edge mesh.
+#
+# Usage:
+#   1. Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in .env (or generate below)
+#   2. Set DOMAIN to your domain (e.g., livekit-us.nyptidindustries.com)
+#   3. Run: docker compose up -d
+#
+# Generate keys:
+#   docker run --rm livekit/generate generate-keys
+#
+# Regions to deploy:
+#   - US-East  (livekit-use.nyptidindustries.com)
+#   - US-West  (livekit-usw.nyptidindustries.com)
+#   - EU-West  (livekit-eu.nyptidindustries.com)
+#   - Asia-Pacific (livekit-ap.nyptidindustries.com)
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: ncore-livekit
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+    command: --config /etc/livekit.yaml
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ncore-livekit-caddy
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-livekit.nyptidindustries.com}
+
+  redis:
+    image: redis:7-alpine
+    container_name: ncore-livekit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:
