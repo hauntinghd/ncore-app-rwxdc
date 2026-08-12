@@ -304,44 +304,35 @@ export async function fetchLatestInstallerAssetPath(feedBase: string): Promise<s
 }
 
 /**
- * The public download button must follow the native Tauri updater contract,
- * not the legacy Electron latest.yml feed. The latter can point at an older
- * installer even after a newer signed desktop release has shipped.
- */
-/**
  * The installer the website should hand out.
  *
- * Reads the **Electron** feed (`latest.yml`), because Electron is the
- * production desktop client — `docs/desktop-native-migration.md` keeps it that
- * way until the Tauri build passes its cutover checklist.
+ * Reads the **Tauri** feed (`tauri/latest.json`): as of 11.7.121 the Tauri
+ * build is the production desktop client — it carries the Authenticode
+ * signature from Azure Trusted Signing, and its updater key was rotated the
+ * same day, so the feed and the installer the site serves finally agree.
  *
- * This used to read `tauri/latest.json`, so the site's "Download Desktop"
- * button served an 8.2 MB Tauri build from 2026-07-11 while every published
- * release went to the Electron feed. Anyone who downloaded from the site
- * landed on a client that could never receive an update, because the two feeds
- * version independently and nothing was publishing to the Tauri one.
- *
- * When Tauri does become production, point this back at `tauri/latest.json` —
- * the whole switch is this function.
+ * History, because this function has flip-flopped: it originally read
+ * `tauri/latest.json` while nothing published there (users downloaded a
+ * client that could never update), was pointed at the Electron `latest.yml`
+ * on 2026-07-30 to stop that, and switched back on 2026-08-11 when Tauri
+ * became the published, signed production build. The Electron feed still
+ * exists solely to keep already-installed Electron clients updating until
+ * the handoff release retires them.
  */
 export async function fetchLatestNativeDesktopInstaller(feedBase: string): Promise<NativeDesktopLatestEntry | null> {
   const normalizedBase = normalizeUpdateFeedBase(feedBase, DEFAULT_UPDATE_FEED_URL);
   try {
-    const response = await fetch(`${normalizedBase}/latest.yml?ts=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch(`${normalizedBase}/tauri/latest.json?ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) return null;
-    const raw = await response.text();
+    const payload = await response.json();
 
-    const version = clean(raw.match(/^version:\s*(.+)$/m)?.[1]);
-    // `path` and the first `files[].url` carry the same installer name; either
-    // may be a bare filename (co-hosted) or an absolute URL (hosted elsewhere).
-    const installer = clean(
-      raw.match(/^path:\s*(.+)$/m)?.[1] || raw.match(/^\s*-\s*url:\s*(.+)$/m)?.[1],
-    );
+    const version = clean(payload?.version);
+    const installer = clean(payload?.platforms?.['windows-x86_64']?.url);
     if (!version || !installer) return null;
 
     const url = /^https?:\/\//i.test(installer)
       ? installer
-      : `${normalizedBase}/${installer}`;
+      : `${normalizedBase}/tauri/${installer}`;
     return { version, url };
   } catch {
     return null;

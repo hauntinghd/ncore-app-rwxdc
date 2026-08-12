@@ -28,7 +28,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ4NDMwRUZBMDUwNDA1MTgKUldRWUJRUUYrZzVEMkdnR1k5eXpqV2k3c0RhdGc0czZXb2tNdHRxQ3lpY0FaYm9FTC9KU3hIK1cK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDQzk3NEI5REE5MjdBQzIKUldUQ2VwTGF1WFRKVElhdWRlblpWcm5ReURJb2YwQkFvMlpGdWtJRVEzeU8wcU5weGhzRk92VmIK",
       "endpoints": [
         "https://ncore.nyptidindustries.com/updates/tauri/latest.json"
       ]
@@ -36,6 +36,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "nsis"
     ],
@@ -46,6 +47,7 @@
       "webviewInstallMode": {
         "type": "skip"
       },
+      "signCommand": "trusted-signing-cli -e https://eus.codesigning.azure.net -a nyptidsigning -c nyptid-public %1",
       "nsis": {
         "installMode": "currentUser"
       }

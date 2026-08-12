@@ -1,11 +1,11 @@
 {
-  "version": "11.7.116",
-  "notes": "NCore 11.7.116: restores DM and member-community visibility, hides Check update until a signed release exists, and replaces weak voice toggle tones with dedicated mute and deafen cues.",
-  "pub_date": "2026-07-11T17:56:03.710Z",
+  "version": "11.7.121",
+  "notes": "NCore 11.7.121: Bring your Discord life with you: upload your Discord data package under Settings → Data Import and your friendships restore automatically as your friends arrive — blocklists carry over too, so anyone you blocked there can't find you fresh here. No access to your Discord package? Link your Discord User ID instead and you become findable: friends who import their packages reconnect with you instantly or land as normal friend requests. Everything is private by design: your package is read on your own device, and only anonymous fingerprints of Discord IDs are stored — no names, no messages, and no way to look up who your friends are.",
+  "pub_date": "2026-08-12T03:10:18.459Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRWUJRUUYrZzVEMksvMWZHV0NWZmcyQVB5eDl5blVMejJyTnlCeVBXa21mQ3BjN1VEVUtWeEdrZ1V3MVVHWmd0ZFFwNGVFWU1GS1BQTEllTlFkb2hEQmFaU3JDTEs5b1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNzkyNTYzCWZpbGU6TkNvcmVfMTEuNy4xMTZfeDY0LXNldHVwLmV4ZQpSdkFuWVNVV1N3VEVFUDM0ZnRmSGNiYk9hOE11Z3dzcW1KcUp6dy9vb3FWQWh0K3dMVGlndTdFZElyWUtndnRuVjlHaDhid1VkaDBONDh2WmNsMkVDZz09Cg==",
-      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.116_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEdhUmlEUlNBa1JvaTlPbnpsR2hZZzMvMHl4NXBTc3N5SVJCVVlIR3U5OEdDZHQvdHdNeEFUL1JIZC9xVlM0eGFnd3l1anB0ay9pUzE2RnpjcWlnOVFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NTA0MTk4CWZpbGU6TkNvcmVfMTEuNy4xMjFfeDY0LXNldHVwLmV4ZQptVHM5alE5V0hOa05OTW1kb3JmMG5rYWVqS0FLWThtV0wyQmhBQ3hjdkNUNEpqbXlYY0JTUTMwOHJQcGZPRFNEZGNsZVEvUGUvMVc4R3FSbzFSQ2hEdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.121_x64-setup.exe"
     }
   }
 }
