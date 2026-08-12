@@ -19,6 +19,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { consumePendingInviteCode } from '../lib/inviteLinks';
 import { supabase } from '../lib/supabase';
+import { isTauriRuntime } from '../lib/desktopRuntime';
+import { TauriWindowChrome } from '../components/layout/TauriWindowChrome';
 
 interface GlobalStats {
   members: number | null;
@@ -135,6 +137,7 @@ export function AuthShell({
 
   return (
     <div className="min-h-screen bg-surface-950 text-surface-100 px-4 py-6 md:px-8 md:py-8">
+      {isTauriRuntime() && <TauriWindowChrome />}
       <div className="absolute inset-0 bg-grid pointer-events-none" />
       <div className="absolute inset-0 bg-hero-gradient pointer-events-none" />
 

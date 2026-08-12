@@ -25,14 +25,29 @@ const sig = fs.readFileSync(signature, 'utf8').trim();
 // Notes come from the published release-notes feed for this version; the
 // previous hardcoded string shipped stale 2026-07 notes with every release.
 function notesForVersion(v) {
+  const entryToNotes = (entry) => {
+    if (!entry) return null;
+    const lines = [...(entry.improvements || []), ...(entry.bugFixes || [])];
+    return lines.length > 0 ? `NCore ${v}: ${lines.join(' ')}` : null;
+  };
+
+  // Prefer the published feed; fall back to the staging file, which is what
+  // exists when the Tauri feed is synced before the web release has merged
+  // release-notes.next.json into release-notes.json.
   try {
     const feed = JSON.parse(
       fs.readFileSync(path.join(root, 'public', 'updates', 'release-notes.json'), 'utf8'),
     );
-    const entry = (feed.releases || []).find((r) => r.version === v);
-    if (entry) {
-      const lines = [...(entry.improvements || []), ...(entry.bugFixes || [])];
-      if (lines.length > 0) return `NCore ${v}: ${lines.join(' ')}`;
+    const notes = entryToNotes((feed.releases || []).find((r) => r.version === v));
+    if (notes) return notes;
+  } catch {
+    // try staging next
+  }
+  try {
+    const next = JSON.parse(fs.readFileSync(path.join(root, 'release-notes.next.json'), 'utf8'));
+    if (next.version === v) {
+      const notes = entryToNotes(next);
+      if (notes) return notes;
     }
   } catch {
     // fall through to the generic line

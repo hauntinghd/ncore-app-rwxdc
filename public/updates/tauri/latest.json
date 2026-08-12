@@ -1,11 +1,11 @@
 {
-  "version": "11.7.121",
-  "notes": "NCore 11.7.121: Bring your Discord life with you: upload your Discord data package under Settings → Data Import and your friendships restore automatically as your friends arrive — blocklists carry over too, so anyone you blocked there can't find you fresh here. No access to your Discord package? Link your Discord User ID instead and you become findable: friends who import their packages reconnect with you instantly or land as normal friend requests. Everything is private by design: your package is read on your own device, and only anonymous fingerprints of Discord IDs are stored — no names, no messages, and no way to look up who your friends are.",
-  "pub_date": "2026-08-12T03:10:18.459Z",
+  "version": "11.7.122",
+  "notes": "NCore 11.7.122: The desktop window can now be dragged from the title area again, and the minimize, maximize, and close buttons work — including on the sign-in screen. Fixed the desktop app repeatedly logging you out. Your session is now saved to a file that survives restarts, instead of relying on browser storage that the desktop window did not reliably keep.",
+  "pub_date": "2026-08-12T19:41:05.419Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEdhUmlEUlNBa1JvaTlPbnpsR2hZZzMvMHl4NXBTc3N5SVJCVVlIR3U5OEdDZHQvdHdNeEFUL1JIZC9xVlM0eGFnd3l1anB0ay9pUzE2RnpjcWlnOVFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NTA0MTk4CWZpbGU6TkNvcmVfMTEuNy4xMjFfeDY0LXNldHVwLmV4ZQptVHM5alE5V0hOa05OTW1kb3JmMG5rYWVqS0FLWThtV0wyQmhBQ3hjdkNUNEpqbXlYY0JTUTMwOHJQcGZPRFNEZGNsZVEvUGUvMVc4R3FSbzFSQ2hEdz09Cg==",
-      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.121_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEhoR3dsMlB1Z0FnbFFhaytBcG8wTFlLeEJMUTlCV0EzSnZlOU90aHNpSmFJc1pjK2lzd0xkYjN0N1FoeEhmcmt5UitGNmdpQXlpNlFLRWdpQmF1aGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NTYzNjE2CWZpbGU6TkNvcmVfMTEuNy4xMjJfeDY0LXNldHVwLmV4ZQpFUU40cUNOY3BXaUEyVm5yL2txd3JHc2RjUXJRS2RQVjFqd3hqUzNOUEcwUmt5RTFiQUJ0OW1mTW5TNFNRdkVEYjBWamVyTkpHM1ExTElhcVorczhEdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.122_x64-setup.exe"
     }
   }
 }

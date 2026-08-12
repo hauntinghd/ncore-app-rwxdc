@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "ncore"
-version = "11.7.121"
+version = "11.7.122"
 dependencies = [
  "getrandom 0.3.4",
  "keyring",

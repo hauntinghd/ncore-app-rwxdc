@@ -1,9 +1,20 @@
 {
     "releases": [
         {
+            "version": "11.7.122",
+            "date": "2026-08-12",
+            "badge": "Current Build",
+            "improvements": [
+                "The desktop window can now be dragged from the title area again, and the minimize, maximize, and close buttons work — including on the sign-in screen."
+            ],
+            "bugFixes": [
+                "Fixed the desktop app repeatedly logging you out. Your session is now saved to a file that survives restarts, instead of relying on browser storage that the desktop window did not reliably keep."
+            ]
+        },
+        {
             "version": "11.7.121",
             "date": "2026-08-11",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "Bring your Discord life with you: upload your Discord data package under Settings → Data Import and your friendships restore automatically as your friends arrive — blocklists carry over too, so anyone you blocked there can't find you fresh here.",
                 "No access to your Discord package? Link your Discord User ID instead and you become findable: friends who import their packages reconnect with you instantly or land as normal friend requests.",

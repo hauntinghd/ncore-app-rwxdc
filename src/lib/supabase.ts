@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { isTauri } from '@tauri-apps/api/core';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -120,13 +121,103 @@ const desktopAuthStorage = {
   },
 };
 
+/*
+  Tauri has no `window.desktopBridge` — that object is injected by Electron's
+  preload script and does not exist in a WebView2 window. So on the Tauri
+  client `hasDesktopAuthStorageBridge()` is false and Supabase would fall back
+  to plain localStorage, which is exactly the single-point-of-failure the
+  Electron file store was built to avoid: sessions in `auth.sessions` show
+  `updated_at == created_at` (created, never refreshed) because nothing durable
+  was persisted to refresh from. That is the "why do I keep getting logged out"
+  on the new desktop build.
+
+  This restores the same file-backed guarantee Electron had, using the Tauri
+  Store plugin. `store.get`/`set` persist to
+  `%LOCALAPPDATA%\com.nyptid.ncore\ncore-auth.json`, which survives restarts
+  regardless of how the embedded WebView2 treats localStorage. localStorage is
+  still mirrored so a launch that reads it before the store is ready keeps the
+  session, matching the Electron adapter's belt-and-braces behaviour.
+*/
+function createTauriAuthStorage() {
+  type TauriStore = {
+    get<T>(key: string): Promise<T | null>;
+    set(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<boolean>;
+    save(): Promise<void>;
+  };
+  let storePromise: Promise<TauriStore> | null = null;
+  const getStore = (): Promise<TauriStore> => {
+    if (!storePromise) {
+      storePromise = import('@tauri-apps/plugin-store').then(({ load }) =>
+        load('ncore-auth.json', { defaults: {}, autoSave: true }) as unknown as Promise<TauriStore>,
+      );
+    }
+    return storePromise;
+  };
+
+  return {
+    async getItem(key: string): Promise<string | null> {
+      try {
+        const store = await getStore();
+        const value = await store.get<string>(key);
+        if (typeof value === 'string' && value.length > 0) return value;
+      } catch {
+        // fall back to the localStorage mirror below
+      }
+      try {
+        const mirrored = window.localStorage.getItem(key);
+        if (typeof mirrored === 'string' && mirrored.length > 0) return mirrored;
+      } catch {
+        // ignore
+      }
+      return null;
+    },
+    async setItem(key: string, value: string): Promise<void> {
+      try {
+        const store = await getStore();
+        await store.set(key, value);
+        await store.save();
+      } catch {
+        // localStorage mirror is the fallback
+      }
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        // nowhere left to persist
+      }
+    },
+    async removeItem(key: string): Promise<void> {
+      try {
+        const store = await getStore();
+        await store.delete(key);
+        await store.save();
+      } catch {
+        // best-effort
+      }
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    },
+  };
+}
+
+function resolveDesktopAuthStorage() {
+  if (hasDesktopAuthStorageBridge()) return desktopAuthStorage;
+  if (typeof window !== 'undefined' && isTauri()) return createTauriAuthStorage();
+  return null;
+}
+
+const desktopAuthStorageAdapter = resolveDesktopAuthStorage();
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storageKey: DESKTOP_AUTH_STORAGE_KEY,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    ...(hasDesktopAuthStorageBridge() ? { storage: desktopAuthStorage } : {}),
+    ...(desktopAuthStorageAdapter ? { storage: desktopAuthStorageAdapter } : {}),
   },
   realtime: {
     params: {
