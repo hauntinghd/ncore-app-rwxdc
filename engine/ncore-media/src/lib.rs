@@ -29,3 +29,6 @@ pub mod tiles;
 
 #[cfg(feature = "capture")]
 pub mod capture;
+
+#[cfg(all(feature = "capture", windows))]
+pub mod live;

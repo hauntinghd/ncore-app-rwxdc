@@ -18,10 +18,14 @@ xcap = { version = "0.9", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
 base64 = { version = "0.22", optional = true }
 
+[target."cfg(windows)".dependencies]
+windows-capture = { version = "2.0.1", optional = true }
+
 [features]
 default = []
 # Native capture-source enumeration with thumbnails (used by the Tauri app).
-capture = ["dep:xcap", "dep:image", "dep:base64"]
+capture = ["dep:xcap", "dep:image", "dep:base64", "dep:windows-capture"]
+windows-capture = ["dep:windows-capture"]
 
 [dev-dependencies]
 rand = "0.9"
