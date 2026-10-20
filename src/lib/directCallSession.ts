@@ -18,6 +18,7 @@ import {
   isCallsModernSchemaMissingError,
   normalizeCallStateFromRow,
 } from './callsCompat';
+import { measureVoicePingMs } from './rtcPing';
 
 type Listener = () => void;
 export type ScreenShareQuality = '720p30' | '1080p120' | '4k60';
@@ -389,6 +390,15 @@ class DirectCallSessionStore {
       .find((value) => Number.isFinite(value) && value > 0) ?? 0;
     if (Number.isFinite(lastPingMs) && lastPingMs > 0) {
       this.latencySamples = [...this.latencySamples, Math.round(lastPingMs)].slice(-12);
+    } else {
+      // No media flowing yet (alone, or muted): read the ICE round-trip time
+      // to the media server instead, which is measured regardless.
+      void measureVoicePingMs().then((iceRttMs) => {
+        if (iceRttMs == null) return;
+        this.latencySamples = [...this.latencySamples, iceRttMs].slice(-12);
+        const avg = Math.round(this.latencySamples.reduce((a, b) => a + b, 0) / this.latencySamples.length);
+        this.setState({ lastPingMs: iceRttMs, averagePingMs: avg });
+      });
     }
     const averagePingMs = this.latencySamples.length > 0
       ? Math.round(this.latencySamples.reduce((sum, sample) => sum + sample, 0) / this.latencySamples.length)

@@ -1,11 +1,11 @@
 {
-  "version": "11.7.126",
-  "notes": "NCore 11.7.126: Calls now ring: you hear a ringback while the other person's phone rings, and they hear a ringtone. An unanswered call ends automatically after 20 seconds instead of sitting open forever. The call bar now shows your ping in milliseconds next to the connection quality. The desktop app no longer asks for permission to use your microphone and camera like a web page — NCore's own window is trusted. Deafening now also mutes you, like Discord. Undeafening puts your mute back how it was, and unmuting while deafened undeafens you. An incoming call popup no longer keeps ringing after the caller has hung up or the call timed out. Fixed profile picture, banner and attachment uploads failing with a security policy error after the server move.",
-  "pub_date": "2026-10-20T05:08:48.025Z",
+  "version": "11.7.127",
+  "notes": "NCore 11.7.127: Screen sharing opens a Go Live window: pick a quality preset, then what to share. Your ping now shows in milliseconds in calls and voice channels, even while you're muted or alone. The deafen button is now a headset, and deafening mutes your microphone too (voice channels included). The profile and status popup is simpler and works like Discord: click a status to switch instantly, click your custom status to edit it, and copy your user ID. Discovery has been removed for now while it's rebuilt. Fixed garbled characters in the voice connection details panel.",
+  "pub_date": "2026-10-20T05:25:07.423Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEdLTHV1MzBFMmlLWnMwaFBwRDBPZkJ1ZHZGVVRkWlQ3OWp0UTFvV3NGV0QrOC9Xd0ZRcFY0NFdQdzFuVzBvSmpoRzVJSko5NlVHRFcvSWZ6ajg2d0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDcyOTIyCWZpbGU6TkNvcmVfMTEuNy4xMjZfeDY0LXNldHVwLmV4ZQpHMm12NWR3QkpOcFdRNnplVE1ncTFyOFU0N3FIM0gzcmFaRW9nRG9BWGcraklkR2xFOVFib1dMbTFHWFNFamgyN0hMaFpUdVZlWnlaYWYzbXNGNWRCdz09Cg==",
-      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.126_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEtCbE9OK1pZdDc5NXRneE5odnk5aG5OQ1lCd1YwNVdwV21RZVZmakhiQW1ibTdycm4yemJQZHhEMERUMTRMQ2hMQlFLL3RRYmUwNTNSN1A5T1JvNFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDczODk3CWZpbGU6TkNvcmVfMTEuNy4xMjdfeDY0LXNldHVwLmV4ZQptUEZhbUxWdTBpQUVCK1Qxa3RWZmVCdXY3b0RaK0UyYW1iZVF1bnFic3Z6VFIwakhHekhnS3dMcS9jcksvUXFWRjRJMTlMRFN6ekFrZTUrdGFBM3NDdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.127_x64-setup.exe"
     }
   }
 }

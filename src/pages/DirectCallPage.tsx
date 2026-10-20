@@ -22,6 +22,8 @@ import {
   type CallState,
 } from '../lib/callsCompat';
 import type { Profile } from '../lib/types';
+import { DeafenIcon } from '../components/ui/DeafenIcon';
+import { GoLiveModal } from '../components/call/GoLiveModal';
 
 const RTC_APP_ID = String(import.meta.env.VITE_AGORA_APP_ID || '').trim();
 // An unanswered call rings for 20 seconds, then ends for both sides.
@@ -168,6 +170,7 @@ export function DirectCallPage() {
   const [screenSourceId, setScreenSourceId] = useState('');
   const [loadingScreenSources, setLoadingScreenSources] = useState(false);
   const [screenShareTransitioning, setScreenShareTransitioning] = useState(false);
+  const [showGoLive, setShowGoLive] = useState(false);
   const [fullscreenFallbackUid, setFullscreenFallbackUid] = useState<string | null>(null);
   const [remoteVolumesByUid, setRemoteVolumesByUid] = useState<Record<string, number>>({});
   const [remoteVolumeContextMenu, setRemoteVolumeContextMenu] = useState<RemoteVolumeContextMenuState | null>(null);
@@ -273,10 +276,6 @@ export function DirectCallPage() {
     }
   }, [screenSourceId]);
 
-  useEffect(() => {
-    if (!window.desktopBridge?.listDesktopCaptureSources) return;
-    void loadScreenSources();
-  }, [loadScreenSources]);
 
   useEffect(() => {
     setRemoteVolumesByUid((prev) => {
@@ -696,19 +695,45 @@ export function DirectCallPage() {
     await directCallSession.toggleVideo();
   }
 
+  // Sharing button: stop if live, otherwise open the Go Live picker.
   async function toggleScreenShare() {
     if (screenShareTransitioning) return;
+    if (!isScreenSharing) {
+      setShowGoLive(true);
+      void loadScreenSources();
+      return;
+    }
     setScreenShareTransitioning(true);
     try {
-      if (!isScreenSharing && screenSourceId && window.desktopBridge?.setPreferredDesktopCaptureSource) {
-        await window.desktopBridge.setPreferredDesktopCaptureSource(screenSourceId);
-      }
       await directCallSession.toggleScreenShare({
         quality: screenQuality,
         maxQuality: maxScreenShareQuality,
       });
     } catch (error) {
-      console.error('Direct-call screen share toggle failed', error);
+      console.error('Direct-call screen share stop failed', error);
+    } finally {
+      setScreenShareTransitioning(false);
+    }
+  }
+
+  async function startScreenShare(options: { quality: ScreenShareQuality; sourceId: string | null }) {
+    setShowGoLive(false);
+    if (screenShareTransitioning || isScreenSharing) return;
+    const clamped = clampScreenShareQuality(options.quality, maxScreenShareQuality) as ScreenShareQuality;
+    setScreenQuality(clamped);
+    saveCallSettings({ ...loadCallSettings(), screenShareQuality: clamped });
+    setScreenShareTransitioning(true);
+    try {
+      if (options.sourceId && window.desktopBridge?.setPreferredDesktopCaptureSource) {
+        setScreenSourceId(options.sourceId);
+        await window.desktopBridge.setPreferredDesktopCaptureSource(options.sourceId);
+      }
+      await directCallSession.toggleScreenShare({
+        quality: clamped,
+        maxQuality: maxScreenShareQuality,
+      });
+    } catch (error) {
+      console.error('Direct-call screen share start failed', error);
     } finally {
       setScreenShareTransitioning(false);
     }
@@ -953,6 +978,19 @@ export function DirectCallPage() {
   return (
     <AppShell showChannelSidebar={false} title="Direct Call">
       <div className="h-full flex flex-col bg-surface-950 relative">
+        <GoLiveModal
+          open={showGoLive}
+          onClose={() => setShowGoLive(false)}
+          onGoLive={(options) => void startScreenShare(options)}
+          sources={screenSources}
+          loadingSources={loadingScreenSources}
+          initialQuality={screenQuality}
+          allowedQualities={[
+            '720p30',
+            ...(canUse1080 ? (['1080p120'] as const) : []),
+            ...(canUse4k ? (['4k60'] as const) : []),
+          ]}
+        />
         {callState === 'ringing' && (
           <div className="absolute left-1/2 -translate-x-1/2 top-6 z-40">
             {isCaller ? (
@@ -1209,7 +1247,7 @@ export function DirectCallPage() {
               className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isDeafened ? 'bg-red-600 text-white' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
               title={isDeafened ? 'Undeafen' : 'Deafen'}
             >
-              {isDeafened ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              <DeafenIcon deafened={isDeafened} size={18} />
             </button>
 
             <button
@@ -1229,53 +1267,6 @@ export function DirectCallPage() {
               <MonitorUp size={18} />
             </button>
 
-            <select
-              value={screenQuality}
-              onChange={(e) => {
-                const next = e.target.value as ScreenShareQuality;
-                const clamped = clampScreenShareQuality(next, maxScreenShareQuality) as ScreenShareQuality;
-                setScreenQuality(clamped);
-                saveCallSettings({ ...loadCallSettings(), screenShareQuality: clamped });
-              }}
-              disabled={screenShareTransitioning}
-              className="nyptid-input w-auto text-xs py-2"
-            >
-              <option value="720p30">Screen: 720p 30fps</option>
-              <option value="1080p120" disabled={!canUse1080}>
-                {canUse1080 ? 'Screen: 1080p 120fps' : 'Screen: 1080p 120fps (unlock at Level 35)'}
-              </option>
-              <option value="4k60" disabled={!canUse4k}>
-                {canUse4k ? 'Screen: 4K 60fps' : 'Screen: 4K 60fps (Boost)'}
-              </option>
-            </select>
-
-            {screenSources.length > 0 && (
-              <select
-                value={screenSourceId}
-                onChange={(e) => setScreenSourceId(e.target.value)}
-                disabled={screenShareTransitioning}
-                className="nyptid-input w-auto max-w-[240px] text-xs py-2"
-                title="Choose screen or app window for screen share"
-              >
-                {screenSources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    {source.type === 'window' ? 'App' : 'Screen'}: {source.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {window.desktopBridge?.listDesktopCaptureSources && (
-              <button
-                type="button"
-                onClick={() => void loadScreenSources()}
-                disabled={loadingScreenSources || screenShareTransitioning}
-                className={`h-10 px-3 rounded-lg text-xs font-semibold transition-colors ${loadingScreenSources || screenShareTransitioning ? 'bg-surface-800 text-surface-500 cursor-wait' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
-                title="Refresh screen share sources"
-              >
-                {loadingScreenSources ? 'Refreshing...' : 'Refresh Sources'}
-              </button>
-            )}
 
             <button
               onClick={toggleNoiseSuppression}

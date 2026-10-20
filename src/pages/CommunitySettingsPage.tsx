@@ -693,7 +693,7 @@ function buildInviteLink(code: string): string {
         }
       }
 
-      navigate('/app/discover');
+      navigate('/app/dm');
     } finally {
       setDeletingCommunity(false);
     }

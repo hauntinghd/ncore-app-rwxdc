@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AtSign, Bell, Crown, LogOut, PanelLeftClose, PanelLeftOpen, PhoneCall, PhoneOff,
-  Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, Volume2, VolumeX, X, Zap,
+  Download, Mic, MicOff, Minus, RefreshCw, Search, Settings, Square, User, X, Zap
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { MessageSearchPanel } from '../chat/MessageSearchPanel';
@@ -30,6 +30,7 @@ import {
   type ReleaseLogEntry,
   resolveUpdateFeedBase,
 } from '../../lib/releaseFeed';
+import { DeafenIcon } from '../ui/DeafenIcon';
 
 interface TopBarProps {
   title?: string;
@@ -854,7 +855,7 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
               }`}
               title={callSession.isDeafened ? 'Undeafen' : 'Deafen'}
             >
-              {callSession.isDeafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
+              <DeafenIcon deafened={callSession.isDeafened} size={12} />
             </button>
             {!isOnActiveCallRoute && (
               <button

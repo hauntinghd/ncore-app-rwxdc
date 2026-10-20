@@ -1,9 +1,24 @@
 {
     "releases": [
         {
-            "version": "11.7.126",
+            "version": "11.7.127",
             "date": "2026-10-20",
             "badge": "Current Build",
+            "improvements": [
+                "Screen sharing opens a Go Live window: pick a quality preset, then what to share.",
+                "Your ping now shows in milliseconds in calls and voice channels, even while you're muted or alone.",
+                "The deafen button is now a headset, and deafening mutes your microphone too (voice channels included).",
+                "The profile and status popup is simpler and works like Discord: click a status to switch instantly, click your custom status to edit it, and copy your user ID.",
+                "Discovery has been removed for now while it's rebuilt."
+            ],
+            "bugFixes": [
+                "Fixed garbled characters in the voice connection details panel."
+            ]
+        },
+        {
+            "version": "11.7.126",
+            "date": "2026-10-20",
+            "badge": "Previous",
             "improvements": [
                 "Calls now ring: you hear a ringback while the other person's phone rings, and they hear a ringtone.",
                 "An unanswered call ends automatically after 20 seconds instead of sitting open forever.",

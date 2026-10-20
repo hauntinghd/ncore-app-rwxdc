@@ -7,9 +7,7 @@ import {
   MonitorOff,
   PhoneOff,
   Video,
-  VideoOff,
-  Volume2,
-  VolumeX,
+  VideoOff
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { ConnectionPanel } from '../components/layout/ConnectionPanel';
@@ -23,6 +21,7 @@ import { NetworkQualityBars } from '../components/call/NetworkQualityBars';
 import { VadThresholdSlider } from '../components/call/VadThresholdSlider';
 import { usePushToTalk } from '../components/call/usePushToTalk';
 import type { Channel, VoiceSession } from '../lib/types';
+import { DeafenIcon } from '../components/ui/DeafenIcon';
 
 function LocalVideoMount() {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -354,7 +353,7 @@ export function VoiceChannelPage() {
                 title={session.isDeafened ? 'Undeafen' : 'Deafen'}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${session.isDeafened ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-surface-700 text-surface-200 hover:bg-surface-600'}`}
               >
-                {session.isDeafened ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                <DeafenIcon deafened={session.isDeafened} size={20} />
               </button>
 
               <button
@@ -400,7 +399,7 @@ export function VoiceChannelPage() {
                 <NetworkQualityBars
                   uplink={session.uplinkQuality}
                   downlink={session.downlinkQuality}
-                  rttMs={session.lastPingMs}
+                  rttMs={session.averagePingMs ?? session.lastPingMs}
                   compact
                 />
                 {session.noiseSuppressionEnabled && (

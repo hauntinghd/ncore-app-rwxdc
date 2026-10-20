@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import { installTauriDesktopBridge, isDesktopRuntime } from './lib/desktopRuntime';
 import { detectWebSurface } from './lib/webSurface';
+import { installPeerConnectionRegistry } from './lib/rtcPing';
 
 // Polyfill for Safari (no native requestIdleCallback)
 if (typeof window !== 'undefined' && !window.requestIdleCallback) {
@@ -13,6 +14,10 @@ if (typeof window !== 'undefined' && !window.requestIdleCallback) {
 // Tauri exposes only the capabilities NCore needs. This runs before React so
 // any early navigation or auth code sees the same desktop contract.
 installTauriDesktopBridge();
+
+// Must run before the RTC SDK creates peer connections — it is how the call
+// bar reads the real voice-server ping (see lib/rtcPing.ts).
+installPeerConnectionRegistry();
 
 // Desktop Google sign-in returns through an ncore:// deep link; the listener
 // must exist before the link arrives, including when it is what launched us.

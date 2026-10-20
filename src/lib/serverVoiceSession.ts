@@ -16,6 +16,7 @@ import { publishServerVoiceShellState } from './serverVoiceShell';
 import { supabase } from './supabase';
 import type { Channel, VoiceSession } from './types';
 import { playVoiceToggleSound } from './notificationSound';
+import { measureVoicePingMs } from './rtcPing';
 
 type Listener = () => void;
 
@@ -484,16 +485,26 @@ class ServerVoiceSessionStore {
   private updateRtcStats() {
     const rtcStats = (this.client as any)?.getRTCStats?.();
     if (!rtcStats) return;
-    const lastPingMs = Number(
-      rtcStats.RTT
-      ?? rtcStats.rtt
-      ?? rtcStats.Rtt
-      ?? rtcStats.roundTripTime
-      ?? rtcStats.NetworkTransportDelay
-      ?? 0,
-    );
-    if (Number.isFinite(lastPingMs) && lastPingMs > 0) {
+    // RTT is 0 until media flows; take the first positive reading, and fall
+    // back to the ICE round-trip time (see lib/rtcPing.ts) when there is none.
+    const lastPingMs = [
+      rtcStats.RTT,
+      rtcStats.rtt,
+      rtcStats.Rtt,
+      rtcStats.roundTripTime,
+      rtcStats.NetworkTransportDelay,
+    ]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0) ?? 0;
+    if (lastPingMs > 0) {
       this.latencySamples = [...this.latencySamples, Math.round(lastPingMs)].slice(-12);
+    } else {
+      void measureVoicePingMs().then((iceRttMs) => {
+        if (iceRttMs == null) return;
+        this.latencySamples = [...this.latencySamples, iceRttMs].slice(-12);
+        const avg = Math.round(this.latencySamples.reduce((a, b) => a + b, 0) / this.latencySamples.length);
+        this.setState({ lastPingMs: iceRttMs, averagePingMs: avg });
+      });
     }
     const averagePingMs = this.latencySamples.length > 0
       ? Math.round(this.latencySamples.reduce((sum, sample) => sum + sample, 0) / this.latencySamples.length)
@@ -1193,7 +1204,13 @@ class ServerVoiceSessionStore {
     }
   }
 
-  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean; syncRemote?: boolean }) {
+  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean; syncRemote?: boolean; fromDeafen?: boolean }) {
+    // Unmuting yourself while deafened means you want back in: undeafen too.
+    if (!muted && this.state.isDeafened && !options?.fromDeafen) {
+      this.mutedBeforeDeafen = false;
+      await this.toggleDeafen();
+      return;
+    }
     if (this.state.isMuted === muted) return;
     if (this.localAudioTrack && this.state.channelId && this.localProfileId) {
       await this.localAudioTrack.setEnabled(!muted);
@@ -1210,11 +1227,25 @@ class ServerVoiceSessionStore {
       .eq('user_id', this.localProfileId);
   }
 
+  /*
+    Discord semantics, same as DirectCallSessionStore: deafening also mutes,
+    undeafening restores the prior mute state.
+  */
+  private mutedBeforeDeafen: boolean | null = null;
+
   async toggleDeafen() {
     const next = !this.state.isDeafened;
     persistVoiceTogglePreferences({ startDeafened: next });
     this.setState({ isDeafened: next });
     await this.applyRemoteAudioState();
+    if (next) {
+      this.mutedBeforeDeafen = this.state.isMuted;
+      await this.setMuted(true, { syncRemote: true, fromDeafen: true });
+    } else {
+      const restoreMuted = this.mutedBeforeDeafen ?? false;
+      this.mutedBeforeDeafen = null;
+      await this.setMuted(restoreMuted, { syncRemote: true, fromDeafen: true });
+    }
     playVoiceToggleSound('deafen', next);
     if (this.state.channelId && this.localProfileId) {
       await supabase

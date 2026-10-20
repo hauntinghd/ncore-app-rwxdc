@@ -18,7 +18,6 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then(
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
 const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage').then((m) => ({ default: m.MfaChallengePage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
-const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
 const CommunityPage = lazy(() => import('./pages/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const CommunitySettingsPage = lazy(() => import('./pages/CommunitySettingsPage').then((m) => ({ default: m.CommunitySettingsPage })));
@@ -104,7 +103,8 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
         <Route path="/marketplace/*" element={<Navigate to="/" replace />} />
 
         <Route path="/app" element={<Navigate to="/app/dm" replace />} />
-        <Route path="/app/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
+        {/* Discovery removed 2026-10-20 — to be rebuilt. */}
+        <Route path="/app/discover" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
         <Route path="/app/marketplace" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/marketplace/*" element={<Navigate to="/app/dm" replace />} />

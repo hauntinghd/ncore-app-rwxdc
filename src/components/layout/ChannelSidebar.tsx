@@ -19,7 +19,6 @@ import {
   PlusCircle,
   Settings,
   Shield,
-  Sparkles,
   Tag,
   Trash2,
   UserPlus,
@@ -425,15 +424,6 @@ export function ChannelSidebar({
                   </button>
                 </>
               )}
-
-              <button
-                type="button"
-                onClick={() => handleServerMenuNavigation('/app/discover?tab=apps')}
-                className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
-              >
-                <span>App Directory</span>
-                <Sparkles size={15} className="text-surface-500" />
-              </button>
 
               <div className="my-1 border-t border-surface-800" />
 

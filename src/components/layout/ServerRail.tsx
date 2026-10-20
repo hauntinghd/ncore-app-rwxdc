@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Compass, MessageSquare, Settings, Crown, UserPlus } from 'lucide-react';
+import { Plus, MessageSquare, Settings, Crown, UserPlus } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { CommunityAvatar } from '../ui/CommunityAvatar';
 import { UnreadBadge } from '../ui/UnreadBadge';
@@ -25,7 +25,6 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
 
   const isDMs = location.pathname.startsWith('/app/dm');
   const isFriends = location.pathname.startsWith('/app/friends');
-  const isDiscover = location.pathname.startsWith('/app/discover');
   const settingsTarget = activeCommunityId ? `/app/community/${activeCommunityId}/settings` : '/app/settings';
   const isSettingsActive = activeCommunityId
     ? location.pathname.startsWith(`/app/community/${activeCommunityId}/settings`)
@@ -54,10 +53,6 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
             <span className={mobileLabelBase}>Home</span>
           </button>
 
-          <button onClick={() => navigate('/app/discover')} className={`${mobileIconBase} ${isDiscover ? mobileIconActive : ''}`}>
-            <Compass size={18} />
-            <span className={mobileLabelBase}>Discover</span>
-          </button>
           <button onClick={() => navigate('/app/friends')} className={`${mobileIconBase} ${isFriends ? mobileIconActive : ''}`}>
             <UserPlus size={17} />
             <span className={mobileLabelBase}>Friends</span>
@@ -139,15 +134,6 @@ export function ServerRail({ communities, activeCommunityId, onCreateCommunity, 
       </Tooltip>
 
       <div className="w-8 h-px bg-surface-700 rounded-full my-1" />
-
-      <Tooltip content="Discover Communities" position="right">
-        <button
-          onClick={() => navigate('/app/discover')}
-          className={`server-icon ${isDiscover ? 'active' : ''}`}
-        >
-          <Compass size={20} />
-        </button>
-      </Tooltip>
 
       <Tooltip content="Friends" position="right">
         <button

@@ -65,6 +65,9 @@ export function NetworkQualityBars({ uplink, downlink, rttMs, compact }: Network
           {rttMs != null && Number.isFinite(rttMs) ? ` · ${Math.round(rttMs)}ms` : ''}
         </span>
       )}
+      {compact && rttMs != null && Number.isFinite(rttMs) && (
+        <span className={`text-[11px] font-semibold tabular-nums ${tone}`}>{Math.round(rttMs)}ms</span>
+      )}
     </div>
   );
 }

@@ -9,7 +9,6 @@ import {
   MessageSquare,
   MonitorPlay,
   Phone,
-  Plus,
   Search,
   UserCheck,
   UserPlus,
@@ -631,20 +630,6 @@ export function FriendsPage() {
                   )}
                 </div>
 
-                <div className="nyptid-card p-5">
-                  <h3 className="text-lg font-bold text-surface-100 mb-1">Other Places to Make Friends</h3>
-                  <p className="text-surface-500 text-sm mb-4">
-                    Explore public servers and meet people in gaming, anime, music, coding, and more.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/app/discover')}
-                    className="w-full md:w-auto nyptid-btn-secondary"
-                  >
-                    <Plus size={14} />
-                    Explore Discoverable Servers
-                  </button>
-                </div>
               </div>
             )}
 

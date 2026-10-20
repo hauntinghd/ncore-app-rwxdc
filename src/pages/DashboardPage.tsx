@@ -131,7 +131,7 @@ export function DashboardPage() {
                   My Communities
                 </h2>
                 <button
-                  onClick={() => navigate('/app/discover')}
+                  onClick={() => navigate('/app/dm')}
                   className="text-xs text-nyptid-300 hover:text-nyptid-200 transition-colors flex items-center gap-1"
                 >
                   Discover <ArrowRight size={12} />
@@ -141,7 +141,7 @@ export function DashboardPage() {
                 <div className="text-center py-8">
                   <Users size={32} className="text-surface-700 mx-auto mb-3" />
                   <p className="text-surface-500 text-sm mb-3">You haven't joined any communities yet</p>
-                  <button onClick={() => navigate('/app/discover')} className="nyptid-btn-primary text-sm px-4 py-2">
+                  <button onClick={() => navigate('/app/dm')} className="nyptid-btn-primary text-sm px-4 py-2">
                     Discover Communities
                   </button>
                 </div>
@@ -210,7 +210,7 @@ export function DashboardPage() {
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: 'Discover Communities', icon: Users, color: 'bg-blue-500/10 text-blue-400', action: () => navigate('/app/discover') },
+                  { label: 'Discover Communities', icon: Users, color: 'bg-blue-500/10 text-blue-400', action: () => navigate('/app/dm') },
                   { label: 'View Leaderboard', icon: TrendingUp, color: 'bg-yellow-500/10 text-yellow-400', action: () => navigate('/app/leaderboard') },
                   { label: 'My Profile', icon: Star, color: 'bg-nyptid-300/10 text-nyptid-300', action: () => navigate(`/app/profile/${profile.id}`) },
                   { label: 'Direct Messages', icon: MessageSquare, color: 'bg-green-500/10 text-green-400', action: () => navigate('/app/dm') },
