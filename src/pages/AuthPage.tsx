@@ -235,6 +235,24 @@ export function LoginPage() {
     navigate(inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app');
   }
 
+  async function handleGoogleSignIn() {
+    setError('');
+    setInfo('');
+    setLoading(true);
+    const inviteCode = String(searchParams.get('invite') || '').trim();
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}${inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app/dm'}`,
+      },
+    });
+    // On success the browser navigates to Google; only failures land here.
+    if (oauthError) {
+      setError(oauthError.message || 'Google sign-in is unavailable right now.');
+      setLoading(false);
+    }
+  }
+
   async function handleMagicLinkSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError('');
@@ -309,17 +327,43 @@ export function LoginPage() {
           </div>
         )}
 
+        {!isTauriRuntime() && (
+          <>
+            {/*
+              Google sign-in is web-only for now: Google refuses OAuth inside
+              embedded webviews (disallowed_useragent), so the desktop client
+              needs a system-browser + deep-link flow, which is a follow-up.
+            */}
+            <button
+              type="button"
+              onClick={() => void handleGoogleSignIn()}
+              disabled={loading}
+              className="nyptid-btn-secondary w-full py-3 inline-flex items-center justify-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
+                <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.9-5.5 3.9-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.1 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4.1 9.6-9.8 0-.7-.1-1.2-.2-1.7H12z" />
+              </svg>
+              Continue with Google
+            </button>
+            <div className="flex items-center gap-3 text-xs text-surface-500">
+              <span className="h-px flex-1 bg-surface-700" />
+              or
+              <span className="h-px flex-1 bg-surface-700" />
+            </div>
+          </>
+        )}
+
         <label className="block">
-          <span className="text-sm text-surface-300">Email address</span>
+          <span className="text-sm text-surface-300">{mode === 'password' ? 'Email or username' : 'Email address'}</span>
           <div className="mt-1 relative">
             <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
             <input
-              type="email"
+              type={mode === 'password' ? 'text' : 'email'}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              inputMode="email"
+              placeholder={mode === 'password' ? 'you@example.com or username' : 'you@example.com'}
+              autoComplete="username"
+              inputMode={mode === 'password' ? 'text' : 'email'}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}

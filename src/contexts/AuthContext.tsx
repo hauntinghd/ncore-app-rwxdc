@@ -313,7 +313,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // "email" is really "email or username": no @ means a username, which is
+    // resolved server-side by the username-login function so emails are never
+    // exposed to the browser.
+    let error: Error | null = null;
+    if (normalizedEmail.includes('@')) {
+      ({ error } = await supabase.auth.signInWithPassword({ email, password }));
+    } else {
+      const { data, error: invokeError } = await supabase.functions.invoke('username-login', {
+        body: { username: String(email || '').trim(), password },
+      });
+      const tokens = data as { access_token?: string; refresh_token?: string; error?: string } | null;
+      if (tokens?.access_token && tokens.refresh_token) {
+        ({ error } = await supabase.auth.setSession({
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+        }));
+      } else {
+        let message = 'Invalid username or password.';
+        try {
+          const payload = await (invokeError as { context?: Response })?.context?.json?.();
+          if (payload?.error) message = String(payload.error);
+        } catch {
+          // keep the generic message
+        }
+        error = new Error(message);
+      }
+    }
     if (error) {
       const nextState = registerSignInFailure();
       queueRuntimeEvent('auth_signin_failed', {
