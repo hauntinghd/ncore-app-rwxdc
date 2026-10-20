@@ -1,0 +1,30 @@
+[package]
+name = "ncore-media"
+version = "0.1.0"
+edition = "2021"
+description = "NCore Media Engine: screen tile codec, speculative playout, native capture"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+lz4_flex = "0.14"
+thiserror = "2"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
+xcap = { version = "0.9", optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
+base64 = { version = "0.22", optional = true }
+
+[features]
+default = []
+# Native capture-source enumeration with thumbnails (used by the Tauri app).
+capture = ["dep:xcap", "dep:image", "dep:base64"]
+
+[dev-dependencies]
+rand = "0.9"
+
+[profile.release]
+opt-level = 3
