@@ -66,6 +66,44 @@ fn secure_storage_remove(key: String) -> SecureStorageResult {
     }
 }
 
+/*
+  WebView2 treats NCore's window like a web page and asks "tauri.localhost
+  wants to use your microphone" the first time a call starts. A native app
+  should not do that — Discord does not. Grant camera and microphone to our
+  own app origin only; anything else keeps WebView2's default behaviour.
+*/
+#[cfg(windows)]
+fn grant_own_origin_media_permissions(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        };
+        use webview2_com::PermissionRequestedEventHandler;
+
+        let Ok(core) = webview.controller().CoreWebView2() else { return };
+        let handler = PermissionRequestedEventHandler::create(Box::new(|_sender, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut uri = windows::core::PWSTR::null();
+            args.Uri(&mut uri)?;
+            let uri = webview2_com::take_pwstr(uri);
+            let own_origin = uri.starts_with("http://tauri.localhost")
+                || uri.starts_with("https://tauri.localhost");
+            if !own_origin {
+                return Ok(());
+            }
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+            args.PermissionKind(&mut kind)?;
+            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA {
+                args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+            }
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = core.add_PermissionRequested(&handler, &mut token);
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         // single-instance must be registered before deep-link: on Windows an
@@ -90,6 +128,10 @@ fn main() {
         ])
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                grant_own_origin_media_permissions(&window);
+            }
             // Installed builds register ncore:// via the NSIS installer; this
             // covers dev runs and portable copies so the scheme always points
             // at the binary actually running.

@@ -1,6 +1,6 @@
 [package]
 name = "ncore"
-version = "11.7.125"
+version = "11.7.126"
 description = "NCore native desktop client"
 authors = ["NYPTID Industries Advanced Technologies"]
 edition = "2021"
@@ -34,3 +34,10 @@ lto = "thin"
 codegen-units = 1
 opt-level = "z"
 panic = "abort"
+
+# Windows-only: grant NCore's own window camera/microphone without WebView2's
+# browser-style "tauri.localhost wants to use your microphone" prompt.
+# Versions must match the ones wry pulls in (see Cargo.lock).
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = "0.61"

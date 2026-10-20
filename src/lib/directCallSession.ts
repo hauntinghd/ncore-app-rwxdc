@@ -376,14 +376,17 @@ class DirectCallSessionStore {
   private updateRtcStats() {
     const rtcStats = (this.client as any)?.getRTCStats?.();
     if (!rtcStats) return;
-    const lastPingMs = Number(
-      rtcStats.RTT
-      ?? rtcStats.rtt
-      ?? rtcStats.Rtt
-      ?? rtcStats.roundTripTime
-      ?? rtcStats.NetworkTransportDelay
-      ?? 0,
-    );
+    // Agora reports RTT: 0 until media is flowing, so `??` would stop at that
+    // zero and the UI would never show a ping. Take the first positive reading.
+    const lastPingMs = [
+      rtcStats.RTT,
+      rtcStats.rtt,
+      rtcStats.Rtt,
+      rtcStats.roundTripTime,
+      rtcStats.NetworkTransportDelay,
+    ]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0) ?? 0;
     if (Number.isFinite(lastPingMs) && lastPingMs > 0) {
       this.latencySamples = [...this.latencySamples, Math.round(lastPingMs)].slice(-12);
     }
@@ -951,7 +954,13 @@ class DirectCallSessionStore {
     }
   }
 
-  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean }) {
+  async setMuted(muted: boolean, options?: { persist?: boolean; playSound?: boolean; fromDeafen?: boolean }) {
+    // Unmuting yourself while deafened means you want back in: undeafen too.
+    if (!muted && this.state.isDeafened && !options?.fromDeafen) {
+      this.mutedBeforeDeafen = false;
+      await this.toggleDeafen();
+      return;
+    }
     if (this.state.isMuted === muted) return;
     if (this.audioTrack) {
       await this.audioTrack.setEnabled(!muted);
@@ -961,11 +970,28 @@ class DirectCallSessionStore {
     if (options?.playSound) playVoiceToggleSound('mute', muted);
   }
 
+  /*
+    Discord semantics: deafening also mutes you (you cannot hear the room, so
+    you should not be talking into it), and undeafening restores whatever mute
+    state you had before. Unmuting while deafened undeafens too — see setMuted.
+  */
+  private mutedBeforeDeafen: boolean | null = null;
+
   async toggleDeafen() {
     const nextDeafened = !this.state.isDeafened;
     persistVoiceTogglePreferences({ startDeafened: nextDeafened });
-    this.setState({ isDeafened: nextDeafened });
-    await this.applyRemoteAudioState();
+    if (nextDeafened) {
+      this.mutedBeforeDeafen = this.state.isMuted;
+      this.setState({ isDeafened: true });
+      await this.applyRemoteAudioState();
+      await this.setMuted(true, { fromDeafen: true });
+    } else {
+      this.setState({ isDeafened: false });
+      await this.applyRemoteAudioState();
+      const restoreMuted = this.mutedBeforeDeafen ?? false;
+      this.mutedBeforeDeafen = null;
+      await this.setMuted(restoreMuted, { fromDeafen: true });
+    }
     playVoiceToggleSound('deafen', nextDeafened);
   }
 

@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "ncore"
-version = "11.7.125"
+version = "11.7.126"
 dependencies = [
  "getrandom 0.3.4",
  "keyring",
@@ -2249,6 +2249,8 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
  "tauri-plugin-updater",
+ "webview2-com",
+ "windows",
 ]
 
 [[package]]

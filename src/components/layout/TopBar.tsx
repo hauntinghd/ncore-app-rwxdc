@@ -164,6 +164,24 @@ function canUseRendererNotificationAudio(): boolean {
   return !document.hidden && document.hasFocus();
 }
 
+
+/*
+  How long an incoming call rings before the popup gives up. Matches the
+  caller's no-answer timeout in DirectCallPage (20s) plus a little slack for
+  delivery delay.
+*/
+const INCOMING_CALL_RING_WINDOW_MS = 25 * 1000;
+
+function incomingCallRingRemainingMs(notification: { created_at?: string | null }): number {
+  const createdAt = Date.parse(String(notification.created_at || ''));
+  if (Number.isNaN(createdAt)) return INCOMING_CALL_RING_WINDOW_MS;
+  return createdAt + INCOMING_CALL_RING_WINDOW_MS - Date.now();
+}
+
+function isIncomingCallStillRinging(notification: { created_at?: string | null }): boolean {
+  return incomingCallRingRemainingMs(notification) > 0;
+}
+
 export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSidebar, sidebarOpen }: TopBarProps) {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -493,7 +511,11 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
       const list = sortNotificationsByCreatedAt(filtered);
       setNotificationError('');
       setNotifications((prev) => mergeNotificationLists(prev, list).slice(0, 50));
-      const latestIncomingCall = list.find((notification) => notification.type === 'incoming_call' && !notification.is_read) || null;
+      const latestIncomingCall = list.find(
+        (notification) => notification.type === 'incoming_call'
+          && !notification.is_read
+          && isIncomingCallStillRinging(notification),
+      ) || null;
       setIncomingCall(latestIncomingCall);
 
       if (!useMainProcessDesktopNotifications && emitDesktopForNew && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -585,6 +607,20 @@ export function TopBar({ title, subtitle, actions, showSidebarToggle, onToggleSi
   useEffect(() => {
     setShowNotifications(false);
   }, [location.pathname, location.search]);
+
+  // An incoming call only rings for its ring window. The notification row is
+  // not cleared when the caller gives up, so without this the popup (and the
+  // ring) would outlive the call indefinitely.
+  useEffect(() => {
+    if (!incomingCall) return;
+    const remainingMs = incomingCallRingRemainingMs(incomingCall);
+    if (remainingMs <= 0) {
+      setIncomingCall(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setIncomingCall(null), remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [incomingCall]);
 
   useEffect(() => {
     if (streamerMode.silentNotifications) {

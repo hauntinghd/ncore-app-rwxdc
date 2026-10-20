@@ -12,8 +12,28 @@ const cues = {
   'ncore-deafen-off.wav': [[587, 0.00, 0.060], [1175, 0.065, 0.125]],
 };
 
-function writeCue(name, notes) {
-  const duration = 0.24;
+/*
+  Looping call sounds. Each file is exactly one loop period so playback can
+  set loop=true with no gap logic. Placeholders until custom (fal.ai) sounds
+  replace them — same file names, drop-in.
+*/
+const loops = {
+  // Caller hears this while the other side rings: two soft pulses, rest.
+  'ncore-ringback.wav': {
+    duration: 3.0,
+    notes: [[440, 0.00, 0.40], [480, 0.00, 0.40], [440, 0.55, 0.40], [480, 0.55, 0.40]],
+  },
+  // Callee hears this: a rising three-note phrase, twice, then rest.
+  'ncore-ringtone.wav': {
+    duration: 2.4,
+    notes: [
+      [784, 0.00, 0.14], [988, 0.15, 0.14], [1175, 0.30, 0.22],
+      [784, 0.70, 0.14], [988, 0.85, 0.14], [1175, 1.00, 0.22],
+    ],
+  },
+};
+
+function writeCue(name, notes, duration = 0.24) {
   const frames = Math.ceil(duration * sampleRate);
   const pcm = Buffer.alloc(frames * 2);
   for (let index = 0; index < frames; index += 1) {
@@ -39,4 +59,5 @@ function writeCue(name, notes) {
 
 fs.mkdirSync(outputDir, { recursive: true });
 for (const [name, notes] of Object.entries(cues)) writeCue(name, notes);
-console.log(`[voice-cues] Generated ${Object.keys(cues).length} NCore voice cues.`);
+for (const [name, loop] of Object.entries(loops)) writeCue(name, loop.notes, loop.duration);
+console.log(`[voice-cues] Generated ${Object.keys(cues).length + Object.keys(loops).length} NCore voice cues.`);

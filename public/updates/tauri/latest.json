@@ -1,11 +1,11 @@
 {
-  "version": "11.7.125",
-  "notes": "NCore 11.7.125: Big group calls stay stable: up to 17 cameras and screen shares can be on at once, so everyone sees the same people instead of a random, shifting subset.",
-  "pub_date": "2026-10-20T04:42:16.469Z",
+  "version": "11.7.126",
+  "notes": "NCore 11.7.126: Calls now ring: you hear a ringback while the other person's phone rings, and they hear a ringtone. An unanswered call ends automatically after 20 seconds instead of sitting open forever. The call bar now shows your ping in milliseconds next to the connection quality. The desktop app no longer asks for permission to use your microphone and camera like a web page — NCore's own window is trusted. Deafening now also mutes you, like Discord. Undeafening puts your mute back how it was, and unmuting while deafened undeafens you. An incoming call popup no longer keeps ringing after the caller has hung up or the call timed out. Fixed profile picture, banner and attachment uploads failing with a security policy error after the server move.",
+  "pub_date": "2026-10-20T05:08:48.025Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEsvd3RmeFllSC9uUUJ3YnhnSmR3NkJyM2MxclpEb2pJbFF0OHJ4bkdpdFlocDNXR3A3dUhaNmNHaHllaERKVHJ5T3crSEFpcXNQV2gyYTIrcWRZSGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDcxMzI5CWZpbGU6TkNvcmVfMTEuNy4xMjVfeDY0LXNldHVwLmV4ZQozb1N4NDNxenpTNWh2Q2JJQnFsQkJCcFREQlhHdU05MVlnTkRJTjlzZXlRek9DQmYxTTc3d1h4MTl3VjZvb2t1cm03c0JqQzdKUDNDMEtsU0NQT2NEdz09Cg==",
-      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.125_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEdLTHV1MzBFMmlLWnMwaFBwRDBPZkJ1ZHZGVVRkWlQ3OWp0UTFvV3NGV0QrOC9Xd0ZRcFY0NFdQdzFuVzBvSmpoRzVJSko5NlVHRFcvSWZ6ajg2d0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDcyOTIyCWZpbGU6TkNvcmVfMTEuNy4xMjZfeDY0LXNldHVwLmV4ZQpHMm12NWR3QkpOcFdRNnplVE1ncTFyOFU0N3FIM0gzcmFaRW9nRG9BWGcraklkR2xFOVFib1dMbTFHWFNFamgyN0hMaFpUdVZlWnlaYWYzbXNGNWRCdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.126_x64-setup.exe"
     }
   }
 }

@@ -1,9 +1,25 @@
 {
     "releases": [
         {
-            "version": "11.7.125",
+            "version": "11.7.126",
             "date": "2026-10-20",
             "badge": "Current Build",
+            "improvements": [
+                "Calls now ring: you hear a ringback while the other person's phone rings, and they hear a ringtone.",
+                "An unanswered call ends automatically after 20 seconds instead of sitting open forever.",
+                "The call bar now shows your ping in milliseconds next to the connection quality.",
+                "The desktop app no longer asks for permission to use your microphone and camera like a web page — NCore's own window is trusted."
+            ],
+            "bugFixes": [
+                "Deafening now also mutes you, like Discord. Undeafening puts your mute back how it was, and unmuting while deafened undeafens you.",
+                "An incoming call popup no longer keeps ringing after the caller has hung up or the call timed out.",
+                "Fixed profile picture, banner and attachment uploads failing with a security policy error after the server move."
+            ]
+        },
+        {
+            "version": "11.7.125",
+            "date": "2026-10-20",
+            "badge": "Previous",
             "improvements": [
                 "Big group calls stay stable: up to 17 cameras and screen shares can be on at once, so everyone sees the same people instead of a random, shifting subset."
             ],

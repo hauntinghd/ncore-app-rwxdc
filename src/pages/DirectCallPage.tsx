@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { trackGrowthEvent } from '../lib/growthEvents';
 import { supabase } from '../lib/supabase';
 import { directCallSession, ScreenShareQuality, useDirectCallSession } from '../lib/directCallSession';
+import { startCallRing } from '../lib/callRing';
 import { loadCallSettings, saveCallSettings } from '../lib/callSettings';
 import { InCallDevicePicker } from '../components/call/InCallDevicePicker';
 import { NetworkQualityBars } from '../components/call/NetworkQualityBars';
@@ -23,7 +24,8 @@ import {
 import type { Profile } from '../lib/types';
 
 const RTC_APP_ID = String(import.meta.env.VITE_AGORA_APP_ID || '').trim();
-const OUTGOING_RING_TIMEOUT_MS = 3 * 60 * 1000;
+// An unanswered call rings for 20 seconds, then ends for both sides.
+const OUTGOING_RING_TIMEOUT_MS = 20 * 1000;
 const BANDWIDTH_IDLE_DISCONNECT_MS = 2 * 60 * 1000;
 
 interface CallParticipantProfile {
@@ -384,6 +386,14 @@ export function DirectCallPage() {
       navigate(`/app/dm/${conversationId}`);
     }
   }, [callState, conversationId, navigate, profile?.id, remoteParticipantUids.length, session.phase]);
+
+  // Ring while the call is unanswered: ringback for the caller, ringtone for
+  // the person being called. Stops the moment anyone joins or the call ends.
+  useEffect(() => {
+    if (callState !== 'ringing') return;
+    if (isCaller && remoteParticipantUids.length > 0) return;
+    return startCallRing(isCaller ? 'ringback' : 'ringtone');
+  }, [callState, isCaller, remoteParticipantUids.length]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -1157,7 +1167,7 @@ export function DirectCallPage() {
               <NetworkQualityBars
                 uplink={session.uplinkQuality}
                 downlink={session.downlinkQuality}
-                rttMs={session.lastPingMs}
+                rttMs={session.averagePingMs ?? session.lastPingMs}
               />
               {noiseSuppressionPreference && (
                 <VadThresholdSlider
