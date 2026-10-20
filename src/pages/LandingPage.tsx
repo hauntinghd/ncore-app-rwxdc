@@ -92,7 +92,7 @@ const COMMAND_LAYERS: CommandLayer[] = [
   {
     icon: Workflow,
     title: 'Growth and launch rails',
-    detail: 'Discovery, marketplace, and campaign surfaces can sit beside communication instead of outside it.',
+    detail: 'Discovery and community tools sit beside communication instead of outside it.',
   },
   {
     icon: Cpu,
@@ -138,7 +138,6 @@ export function LandingPage() {
   );
 
   const appHref = useMemo(() => resolveSurfaceUrl('app', '/app/dm'), []);
-  const marketplaceHref = useMemo(() => resolveSurfaceUrl('marketplace', '/'), []);
 
   /*
     The Tauri build is the production desktop client as of 11.7.121: it is the
@@ -187,16 +186,8 @@ export function LandingPage() {
         href: primaryDownloadHref,
         icon: Download,
       },
-      {
-        title: 'NCore Marketplace',
-        eyebrow: 'Separate web property',
-        detail: 'A dedicated surface for commerce, offers, and future operator workflows at the correct live domain.',
-        cta: 'Open Marketplace',
-        href: marketplaceHref,
-        icon: Store,
-      },
     ],
-    [appHref, marketplaceHref, primaryDownloadHref, primaryDownloadLabel]
+    [appHref, primaryDownloadHref, primaryDownloadLabel]
   );
 
   useEffect(() => {
@@ -532,7 +523,7 @@ export function LandingPage() {
             <div className="rounded-[32px] border border-white/8 bg-[linear-gradient(145deg,rgba(18,45,63,0.82),rgba(20,17,54,0.94))] p-6">
               <div className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#82f5df]">Execution Rail</div>
               <div className="mt-4 text-3xl font-black text-white">
-                Web, desktop, and marketplace should feel like one machine.
+                Web, desktop, and mobile should feel like one machine.
               </div>
               <div className="mt-4 text-sm leading-7 text-white/68">
                 The website cannot look like an engineering note. It has to sell the product, set the tone, and route
@@ -554,8 +545,8 @@ export function LandingPage() {
                 },
                 {
                   icon: Store,
-                  title: 'Marketplace',
-                  detail: 'Keep the external commerce surface reachable on the actual live domain, not stale copy.',
+                  title: 'Calls & Screen Share',
+                  detail: 'Voice, cameras, and screen sharing with system audio — in DMs, group chats, and servers.',
                 },
               ].map((item) => (
                 <div key={item.title} className="rounded-[28px] border border-white/8 bg-white/[0.04] p-5">

@@ -330,7 +330,8 @@ export function DirectMessagePage() {
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
   const maxUploadBytes = entitlements.uploadBytesCap;
-  const maxGroupDmMembers = 10 + Math.max(entitlements.groupDmMemberBonus || 0, 0);
+  // Flat 50 for everyone (2026-10-20); the database trigger in 20261020090000 enforces the same cap.
+  const maxGroupDmMembers = 50;
   const directCallMaxScreenShareQuality = entitlements.maxScreenShareQuality as ScreenShareQuality;
   const navigate = useNavigate();
   const location = useLocation();

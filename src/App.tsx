@@ -12,7 +12,6 @@ import { supabase } from './lib/supabase';
 import { isDesktopRuntime } from './lib/desktopRuntime';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
-const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
 const LoginPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.SignupPage })));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
@@ -21,14 +20,11 @@ const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage').then((m) 
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
 const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
-const MarketplaceComingSoonPage = lazy(() => import('./pages/MarketplaceComingSoonPage'));
 const CommunityPage = lazy(() => import('./pages/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const CommunitySettingsPage = lazy(() => import('./pages/CommunitySettingsPage').then((m) => ({ default: m.CommunitySettingsPage })));
 const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
 const VoiceChannelPage = lazy(() => import('./pages/VoiceChannelPage').then((m) => ({ default: m.VoiceChannelPage })));
 const ForumChannelPage = lazy(() => import('./pages/ForumChannelPage'));
-const GameLibraryPage = lazy(() => import('./pages/GameLibraryPage'));
-const GameDetailPage = lazy(() => import('./pages/GameDetailPage'));
 const DeveloperPortalPage = lazy(() => import('./pages/DeveloperPortalPage'));
 const DirectMessagePage = lazy(() => import('./pages/DirectMessagePage').then((m) => ({ default: m.DirectMessagePage })));
 const DirectCallPage = lazy(() => import('./pages/DirectCallPage').then((m) => ({ default: m.DirectCallPage })));
@@ -86,8 +82,6 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
               <Navigate to="/app" replace />
             ) : webSurface === 'app' ? (
               <Navigate to="/app/dm" replace />
-            ) : webSurface === 'marketplace' ? (
-              <MarketplaceWebPage />
             ) : (
               <PublicRoute><LandingPage /></PublicRoute>
             )
@@ -101,20 +95,15 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/invite/:inviteCode" element={<InvitePage />} />
         <Route path="/:inviteCode" element={<InvitePage />} />
-        <Route
-          path="/marketplace"
-          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
-        />
-        <Route
-          path="/marketplace/*"
-          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
-        />
+        {/* Marketplace removed 2026-10-20 — NCore is focused on chat, voice and video. */}
+        <Route path="/marketplace" element={<Navigate to="/" replace />} />
+        <Route path="/marketplace/*" element={<Navigate to="/" replace />} />
 
         <Route path="/app" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
         <Route path="/app/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
-        <Route path="/app/marketplace" element={<ProtectedRoute><MarketplaceComingSoonPage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/*" element={<ProtectedRoute><MarketplaceComingSoonPage /></ProtectedRoute>} />
+        <Route path="/app/marketplace" element={<Navigate to="/app/dm" replace />} />
+        <Route path="/app/marketplace/*" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/dm" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId/call" element={<ProtectedRoute><DirectCallPage /></ProtectedRoute>} />
@@ -123,8 +112,7 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
         <Route path="/app/community/:communityId/channel/:channelId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/voice/:channelId" element={<ProtectedRoute><VoiceChannelPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/forum/:channelId" element={<ProtectedRoute><ForumChannelPage /></ProtectedRoute>} />
-        <Route path="/app/games" element={<ProtectedRoute><GameLibraryPage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/games/:gameSlug" element={<ProtectedRoute><GameDetailPage /></ProtectedRoute>} />
+        <Route path="/app/games" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/developer" element={<ProtectedRoute><DeveloperPortalPage /></ProtectedRoute>} />
         <Route path="/app/profile/:userId" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/app/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
