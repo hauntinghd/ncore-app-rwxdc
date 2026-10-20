@@ -44,7 +44,7 @@ function sanitizeSku(value: string): string {
   return String(value || '')
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9_\-]/g, '_')
+    .replace(/[^a-z0-9_-]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
@@ -53,7 +53,7 @@ function normalizeSourceChannel(value: unknown): string {
   const normalized = String(value || '')
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9_\-]/g, '')
+    .replace(/[^a-z0-9_-]/g, '')
     .slice(0, 64);
   return normalized || 'organic';
 }
@@ -252,7 +252,7 @@ Deno.serve(async (req) => {
       if (String(listing.seller_id) !== String(user.id)) {
         return jsonResponse(403, { error: 'Only the listing owner can pay this listing fee.' });
       }
-      if (Boolean(listing.listing_fee_paid)) {
+      if (listing.listing_fee_paid) {
         return jsonResponse(409, { error: 'Listing fee already paid for this service.' });
       }
 
@@ -318,7 +318,7 @@ Deno.serve(async (req) => {
       if (String((listing as any).seller_id) === String(user.id)) {
         return jsonResponse(409, { error: 'You cannot hire your own service listing.' });
       }
-      if (String((listing as any).status) !== 'approved' || !Boolean((listing as any).listing_fee_paid)) {
+      if (String((listing as any).status) !== 'approved' || !(listing as any).listing_fee_paid) {
         return jsonResponse(409, { error: 'This service listing is not yet purchasable.' });
       }
 
@@ -399,7 +399,7 @@ Deno.serve(async (req) => {
       if (String((gameListing as any).seller_id) !== String(user.id)) {
         return jsonResponse(403, { error: 'Only the listing owner can pay this game listing fee.' });
       }
-      if (Boolean((gameListing as any).listing_fee_paid)) {
+      if ((gameListing as any).listing_fee_paid) {
         return jsonResponse(409, { error: 'Game listing fee already paid.' });
       }
 
@@ -461,7 +461,7 @@ Deno.serve(async (req) => {
       if (String((gameListing as any).seller_id) === String(user.id)) {
         return jsonResponse(409, { error: 'You cannot purchase your own game listing.' });
       }
-      if (String((gameListing as any).status) !== 'approved' || !Boolean((gameListing as any).listing_fee_paid)) {
+      if (String((gameListing as any).status) !== 'approved' || !(gameListing as any).listing_fee_paid) {
         return jsonResponse(409, { error: 'This game listing is not available for purchase yet.' });
       }
 
@@ -565,12 +565,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    let { data: product, error: productError } = await serviceClient
+    const productLookup = await serviceClient
       .from('store_products')
       .select('sku, name, description, price_cents, currency, active')
       .eq('sku', sku)
       .eq('active', true)
       .maybeSingle();
+    let product = productLookup.data;
+    const productError = productLookup.error;
 
     if (productError) {
       return jsonResponse(500, { error: productError.message });

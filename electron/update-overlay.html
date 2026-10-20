@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>Updating NCore</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #f3bb52;
+      --gold-hot: #ffd47e;
+      --orange: #c97621;
+      --red: #d3542b;
+      --bg: #0b1018;
+      --bg-2: #121a2a;
+      --ink: #e3e5e8;
+      --ink-dim: #94a0b3;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+    body {
+      font-family: 'Outfit', 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+      background:
+        radial-gradient(1000px 560px at 20% -10%, rgba(211, 84, 43, 0.24), transparent 65%),
+        radial-gradient(820px 460px at 80% 110%, rgba(243, 187, 82, 0.18), transparent 60%),
+        radial-gradient(640px 420px at 50% 50%, rgba(201, 118, 33, 0.18), transparent 55%),
+        #070b12;
+    }
+
+    /* Draggable titlebar (whole window is draggable except for buttons). */
+    body { -webkit-app-region: drag; }
+    button, a, input { -webkit-app-region: no-drag; }
+
+    .card {
+      width: 100%;
+      height: 100%;
+      padding: 28px 32px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    /* ============ Arc reactor ============ */
+    .reactor {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      display: grid;
+      place-items: center;
+      filter: drop-shadow(0 0 22px rgba(243, 187, 82, 0.35));
+    }
+
+    .reactor .halo {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, rgba(255, 212, 126, 0.22) 0%, transparent 60%);
+      animation: haloPulse 3.2s ease-in-out infinite;
+    }
+
+    /* Spinning rings — SVG-free CSS. */
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      background: conic-gradient(from 0deg, rgba(243, 187, 82, 0.0) 0deg, rgba(243, 187, 82, 0.85) 110deg, rgba(211, 84, 43, 0.95) 200deg, rgba(243, 187, 82, 0.0) 330deg);
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+    }
+    .ring.outer   { width: 220px; height: 220px; animation: spin 7s linear infinite; }
+    .ring.middle  { width: 172px; height: 172px; animation: spin 4.2s linear infinite reverse; opacity: .82; }
+    .ring.inner   { width: 128px; height: 128px; animation: spin 2.8s linear infinite; opacity: .72; }
+
+    /* Six stator spokes between outer and middle rings. */
+    .spokes {
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      pointer-events: none;
+    }
+    .spokes span {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 2px;
+      height: 36px;
+      margin: -18px -1px;
+      background: linear-gradient(to bottom, rgba(243, 187, 82, 0.65), rgba(243, 187, 82, 0));
+      transform-origin: 50% 100%;
+      filter: drop-shadow(0 0 4px rgba(243, 187, 82, 0.5));
+    }
+    .spokes span:nth-child(1) { transform: rotate(0deg)   translateY(-72px); }
+    .spokes span:nth-child(2) { transform: rotate(60deg)  translateY(-72px); }
+    .spokes span:nth-child(3) { transform: rotate(120deg) translateY(-72px); }
+    .spokes span:nth-child(4) { transform: rotate(180deg) translateY(-72px); }
+    .spokes span:nth-child(5) { transform: rotate(240deg) translateY(-72px); }
+    .spokes span:nth-child(6) { transform: rotate(300deg) translateY(-72px); }
+    .spokes { animation: counterSpin 18s linear infinite; }
+
+    /* Core — glowing gold disc with the NCore mark. */
+    .core {
+      position: relative;
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 50% 35%, #fff4d1 0%, #f3bb52 26%, #c97621 62%, #6e3715 100%);
+      box-shadow:
+        0 0 30px rgba(255, 212, 126, 0.55),
+        0 0 70px rgba(211, 84, 43, 0.35),
+        inset 0 0 12px rgba(0, 0, 0, 0.45);
+      animation: coreBreath 2.6s ease-in-out infinite;
+      display: grid; place-items: center;
+    }
+    .core img {
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(255, 255, 255, 0.45);
+      box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Progress ring — outer circumference fills 0% → 100%. */
+    .progress-ring {
+      position: absolute;
+      width: 230px; height: 230px;
+      border-radius: 50%;
+      padding: 0;
+      --p: 0;
+      /* Uses a conic-gradient sweep based on --p (0..100). */
+      background:
+        conic-gradient(
+          var(--gold-hot) 0deg,
+          var(--gold) calc(var(--p) * 3.6deg),
+          rgba(243, 187, 82, 0.08) calc(var(--p) * 3.6deg),
+          rgba(243, 187, 82, 0.08) 360deg
+        );
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+      transition: background 0.25s ease-out;
+      filter: drop-shadow(0 0 8px rgba(243, 187, 82, 0.45));
+    }
+
+    /* ============ Text + progress ============ */
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      background: linear-gradient(120deg, var(--gold-hot), var(--orange));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .status {
+      margin: 0;
+      font-size: 13px;
+      color: var(--ink-dim);
+      text-align: center;
+      min-height: 18px;
+      letter-spacing: 0.2px;
+    }
+
+    .meta {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 11px;
+      color: var(--ink-dim);
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .meta .chip {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 187, 82, 0.35);
+      background: rgba(243, 187, 82, 0.10);
+      color: var(--gold-hot);
+      font-weight: 700;
+    }
+
+    .barwrap {
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      overflow: hidden;
+      position: relative;
+    }
+    .bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--gold) 0%, var(--red) 100%);
+      box-shadow: 0 0 10px rgba(243, 187, 82, 0.55);
+      transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .bar.indeterminate {
+      width: 35%;
+      animation: slide 1.8s ease-in-out infinite;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .actions button {
+      border: 1px solid rgba(243, 187, 82, 0.4);
+      background: linear-gradient(135deg, #f3bb52 0%, #df9732 52%, #b14024 100%);
+      color: #1c0c02;
+      font-weight: 800;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      padding: 8px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      text-transform: uppercase;
+      box-shadow: 0 0 12px rgba(243, 187, 82, 0.35);
+    }
+    .actions button.secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--ink);
+      border-color: rgba(255, 255, 255, 0.12);
+      box-shadow: none;
+    }
+    .actions button[disabled] { opacity: .55; cursor: default; }
+
+    /* ============ Animations ============ */
+    @keyframes spin        { to { transform: rotate(360deg); } }
+    @keyframes counterSpin { to { transform: rotate(-360deg); } }
+    @keyframes haloPulse {
+      0%, 100% { transform: scale(1);    opacity: 1;   }
+      50%      { transform: scale(1.05); opacity: 0.7; }
+    }
+    @keyframes coreBreath {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 30px rgba(255, 212, 126, 0.55), 0 0 70px rgba(211, 84, 43, 0.35), inset 0 0 12px rgba(0, 0, 0, 0.45);
+      }
+      50% {
+        transform: scale(1.03);
+        box-shadow: 0 0 44px rgba(255, 212, 126, 0.75), 0 0 96px rgba(211, 84, 43, 0.55), inset 0 0 14px rgba(0, 0, 0, 0.45);
+      }
+    }
+    @keyframes slide {
+      0%   { transform: translateX(-110%); }
+      100% { transform: translateX(310%);  }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ring, .spokes, .halo, .core, .bar.indeterminate { animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="reactor" aria-hidden="true">
+      <div class="halo"></div>
+      <div class="progress-ring" id="progressRing"></div>
+      <div class="spokes">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="ring outer"></div>
+      <div class="ring middle"></div>
+      <div class="ring inner"></div>
+      <div class="core">
+        <img id="coreLogo" src="" alt="" draggable="false" />
+      </div>
+    </div>
+
+    <div class="meta">
+      <span>NCore</span>
+      <span class="chip" id="versionChip">—</span>
+    </div>
+
+    <h1 id="headline">Updating NCore</h1>
+    <p class="status" id="status">Preparing…</p>
+
+    <div class="barwrap"><div class="bar indeterminate" id="bar"></div></div>
+
+    <div class="actions">
+      <button id="restartBtn" type="button" hidden>Restart now</button>
+      <button id="laterBtn" type="button" class="secondary" hidden>Later</button>
+      <button id="retryBtn" type="button" class="secondary" hidden>Retry</button>
+      <button id="downloadBtn" type="button" hidden>Download manually</button>
+      <button id="revealBtn" type="button" class="secondary" hidden>Show folder</button>
+    </div>
+
+    <p class="status" id="hint" style="display:none; font-size: 11px; opacity: 0.75;"></p>
+  </div>
+
+  <script>
+    (function () {
+      var bridge = window.updateOverlay;
+      var progressRing = document.getElementById('progressRing');
+      var bar = document.getElementById('bar');
+      var statusEl = document.getElementById('status');
+      var headlineEl = document.getElementById('headline');
+      var versionChip = document.getElementById('versionChip');
+      var restartBtn = document.getElementById('restartBtn');
+      var laterBtn = document.getElementById('laterBtn');
+      var retryBtn = document.getElementById('retryBtn');
+      var downloadBtn = document.getElementById('downloadBtn');
+      var revealBtn = document.getElementById('revealBtn');
+      var hintEl = document.getElementById('hint');
+      var coreLogo = document.getElementById('coreLogo');
+      if (bridge && typeof bridge.getLogoDataUri === 'function') {
+        bridge.getLogoDataUri().then(function (dataUri) {
+          if (dataUri) coreLogo.src = dataUri;
+        }).catch(function () { /* no-op */ });
+      }
+
+      function setProgress(p) {
+        var clamped = Math.max(0, Math.min(100, Math.round(Number(p) || 0)));
+        progressRing.style.setProperty('--p', String(clamped));
+        if (clamped > 0) {
+          bar.classList.remove('indeterminate');
+          bar.style.width = clamped + '%';
+        } else {
+          bar.classList.add('indeterminate');
+          bar.style.width = '';
+        }
+      }
+
+      function hideAllActions() {
+        restartBtn.hidden = true;
+        laterBtn.hidden = true;
+        retryBtn.hidden = true;
+        downloadBtn.hidden = true;
+        revealBtn.hidden = true;
+        hintEl.style.display = 'none';
+      }
+
+      function applyState(state) {
+        if (!state) return;
+        if (state.version) versionChip.textContent = 'v' + String(state.version);
+        var phase = state.phase || 'downloading';
+        if (phase === 'checking') {
+          headlineEl.textContent = 'Checking for updates';
+          statusEl.textContent = state.message || '';
+          hideAllActions();
+          setProgress(0);
+        } else if (phase === 'downloading') {
+          headlineEl.textContent = 'Updating NCore';
+          statusEl.textContent = state.message || 'Downloading the new build…';
+          hideAllActions();
+          setProgress(state.progress != null ? state.progress : 0);
+        } else if (phase === 'ready') {
+          headlineEl.textContent = 'Update ready';
+          statusEl.textContent = state.message || 'Restart NCore to finish installing.';
+          setProgress(100);
+          hideAllActions();
+          restartBtn.hidden = false;
+          laterBtn.hidden = false;
+        } else if (phase === 'installing') {
+          headlineEl.textContent = 'Installing…';
+          statusEl.textContent = state.message || 'Applying the new build. NCore will restart on its own.';
+          setProgress(100);
+          hideAllActions();
+        } else if (phase === 'error') {
+          headlineEl.textContent = state.title || 'Update error';
+          statusEl.textContent = state.message || 'We hit a snag pulling the new build.';
+          bar.classList.remove('indeterminate');
+          bar.style.width = state.progress != null ? Math.max(0, Math.min(100, Math.round(state.progress))) + '%' : '0%';
+          hideAllActions();
+          if (state.downloadUrl) downloadBtn.hidden = false;
+          if (state.revealPath) revealBtn.hidden = false;
+          retryBtn.hidden = false;
+          laterBtn.hidden = false;
+          if (state.hint) {
+            hintEl.style.display = 'block';
+            hintEl.textContent = state.hint;
+          }
+          downloadBtn.dataset.url = state.downloadUrl || '';
+          revealBtn.dataset.path = state.revealPath || '';
+        }
+      }
+
+      restartBtn.addEventListener('click', function () {
+        restartBtn.disabled = true;
+        if (bridge && typeof bridge.install === 'function') {
+          bridge.install().catch(function () { /* main handles errors */ });
+        }
+      });
+      laterBtn.addEventListener('click', function () {
+        if (bridge && typeof bridge.dismiss === 'function') {
+          bridge.dismiss();
+        }
+      });
+      retryBtn.addEventListener('click', function () {
+        retryBtn.disabled = true;
+        if (bridge && typeof bridge.retry === 'function') {
+          bridge.retry().finally(function () { retryBtn.disabled = false; });
+        }
+      });
+      downloadBtn.addEventListener('click', function () {
+        var url = downloadBtn.dataset.url;
+        if (url && bridge && typeof bridge.openExternal === 'function') {
+          bridge.openExternal(url);
+        }
+      });
+      revealBtn.addEventListener('click', function () {
+        var p = revealBtn.dataset.path;
+        if (p && bridge && typeof bridge.revealInFolder === 'function') {
+          bridge.revealInFolder(p);
+        }
+      });
+
+      if (bridge && typeof bridge.onStateChange === 'function') {
+        bridge.onStateChange(applyState);
+      }
+      if (bridge && typeof bridge.getInitialState === 'function') {
+        bridge.getInitialState().then(applyState).catch(function () { /* no-op */ });
+      }
+    })();
+  </script>
+</body>
+</html>

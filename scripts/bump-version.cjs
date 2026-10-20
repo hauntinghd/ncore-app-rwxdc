@@ -4,6 +4,8 @@ const path = require('path');
 
 const packageJsonPath = path.resolve(__dirname, '..', 'package.json');
 const packageLockPath = path.resolve(__dirname, '..', 'package-lock.json');
+const tauriConfigPath = path.resolve(__dirname, '..', 'src-tauri', 'tauri.conf.json');
+const cargoTomlPath = path.resolve(__dirname, '..', 'src-tauri', 'Cargo.toml');
 const bumpType = String(process.argv[2] || 'patch').toLowerCase();
 
 if (!['major', 'minor', 'patch'].includes(bumpType)) {
@@ -52,6 +54,24 @@ if (fs.existsSync(packageLockPath)) {
   } catch (error) {
     console.warn(`Warning: failed to sync package-lock version: ${error?.message || error}`);
   }
+}
+
+// The native updater validates the version embedded in its bundle as well as
+// the version in the web update manifest. Keep all three release surfaces in
+// lockstep so a patch release cannot publish mismatched metadata.
+if (fs.existsSync(tauriConfigPath)) {
+  const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, 'utf8'));
+  tauriConfig.version = nextVersion;
+  fs.writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`, 'utf8');
+}
+
+if (fs.existsSync(cargoTomlPath)) {
+  const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
+  const syncedCargoToml = cargoToml.replace(
+    /(^\[package\][\s\S]*?^version\s*=\s*)"[^"]+"/m,
+    `$1"${nextVersion}"`,
+  );
+  fs.writeFileSync(cargoTomlPath, syncedCargoToml, 'utf8');
 }
 
 console.log(`Version bumped: ${current} -> ${nextVersion}`);

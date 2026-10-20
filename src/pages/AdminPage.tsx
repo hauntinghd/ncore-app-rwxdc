@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Shield, Users, Globe, Ban, Crown, TrendingUp,
-  MessageSquare, BookOpen, ChevronRight, Search,
-  AlertCircle, CheckCircle, Trash2, Star, Eye, ShoppingBag
+  MessageSquare, ChevronRight, Search,
+  CheckCircle, Trash2, Star, Eye, ShoppingBag
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
@@ -102,7 +102,7 @@ export function AdminPage() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [bans, setBans] = useState<PlatformBan[]>([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [banReason, setBanReason] = useState('');
   const [showBanModal, setShowBanModal] = useState(false);

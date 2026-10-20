@@ -113,10 +113,89 @@ function assertPatchStepVersion(version, releases) {
     && currentTuple[2] === expected[2];
 
   if (!isExpectedPatchStep) {
+    /*
+      Escape hatch for deliberate jumps.
+
+      The +1 rule assumes the published feed is the highest version in
+      existence. It is not always: locally-built installs can run ahead of what
+      was ever published, and when they do, publishing +1 from the feed ships a
+      version LOWER than what is installed. The updater then correctly reports
+      "up to date" and the user never receives another update — which is
+      exactly what happened between v11.7.113 and an installed v11.7.116.
+
+      Recovering requires jumping past the installed version, so this allows it
+      explicitly rather than by hand-editing versions.
+    */
+    if (String(process.env.NCORE_ALLOW_VERSION_JUMP || '').trim()) {
+      console.warn(
+        `Version jump allowed: v${previous.value} -> v${version} (NCORE_ALLOW_VERSION_JUMP set).`,
+      );
+      return;
+    }
     throw new Error(
-      `Version step violation: expected next release v${formatSemverTuple(expected)} after v${previous.value}; got v${version}. Run npm run version:bump before syncing.`,
+      `Version step violation: expected next release v${formatSemverTuple(expected)} after v${previous.value}; got v${version}. `
+      + `Run npm run version:bump before syncing, or set NCORE_ALLOW_VERSION_JUMP=1 if you are deliberately jumping past a locally-installed build.`,
     );
   }
+}
+
+/*
+  Empty by default: the installer is served from ncore.nyptidindustries.com
+  alongside the feed, so `latest.yml` keeps a relative URL and people download
+  the app from the actual website.
+
+  An earlier release pointed this at GitHub Releases because a ~99 MB installer
+  was believed to trip Vercel's 100 MB file limit. That was wrong — the limit
+  was being hit by src-tauri/target, which is now excluded in .vercelignore, and
+  the installer uploads without complaint.
+
+  Set NCORE_INSTALLER_BASE_URL to a base like
+  'https://github.com/<owner>/<repo>/releases/download' to host binaries
+  elsewhere; the feed still ships from this domain either way, so installed
+  clients never need to change.
+*/
+const DEFAULT_INSTALLER_BASE_URL = '';
+
+/**
+ * Rewrites the installer URL in a synced latest.yml to an absolute location.
+ *
+ * electron-updater resolves a relative `url` against the feed's own base, and
+ * accepts an absolute one as-is — so this is the whole change needed to move
+ * where binaries live without touching any installed client.
+ *
+ * A no-op when the base URL is explicitly blank, which restores the old
+ * behaviour of serving the installer next to the feed.
+ */
+function rewriteInstallerUrl(latestYmlTargetPath, version, installerFileName) {
+  const base = process.env.NCORE_INSTALLER_BASE_URL !== undefined
+    ? String(process.env.NCORE_INSTALLER_BASE_URL).trim()
+    : DEFAULT_INSTALLER_BASE_URL;
+  if (!base) return;
+  if (!fs.existsSync(latestYmlTargetPath)) return;
+
+  const absoluteUrl = `${base.replace(/\/+$/, '')}/v${version}/${installerFileName}`;
+  const raw = fs.readFileSync(latestYmlTargetPath, 'utf8');
+
+  // Line-wise rather than regex: the filename contains dots and the YAML has
+  // only two lines to touch, so building an escaped pattern is more ways to be
+  // wrong than it is worth.
+  const rewritten = raw
+    .split('\n')
+    .map((line) => {
+      const urlMatch = line.match(/^(\s*-\s*url:\s*)(.+?)\s*$/);
+      if (urlMatch && urlMatch[2] === installerFileName) {
+        return `${urlMatch[1]}${absoluteUrl}`;
+      }
+      const pathMatch = line.match(/^(path:\s*)(.+?)\s*$/);
+      if (pathMatch && pathMatch[2] === installerFileName) {
+        return `${pathMatch[1]}${absoluteUrl}`;
+      }
+      return line;
+    })
+    .join('\n');
+
+  fs.writeFileSync(latestYmlTargetPath, rewritten, 'utf8');
+  console.log(`Installer URL -> ${absoluteUrl}`);
 }
 
 function listApkCandidates(searchDirs) {
@@ -346,12 +425,33 @@ function main() {
   const blockmapFileName = path.basename(blockmapPath);
   syncReleaseNotes(parsed.version);
 
+  /*
+    The installer ships with the site by default, so people download NCore from
+    ncore.nyptidindustries.com and `latest.yml` keeps a relative URL.
+
+    When NCORE_INSTALLER_BASE_URL points somewhere else, the binary is NOT
+    copied into the deploy payload and the URL is rewritten to that absolute
+    location instead. The feed itself always ships from this domain either way,
+    because electron-updater's `publish.url` points here and every installed
+    client depends on that not moving.
+  */
+  const installerBaseUrl = process.env.NCORE_INSTALLER_BASE_URL !== undefined
+    ? String(process.env.NCORE_INSTALLER_BASE_URL).trim()
+    : DEFAULT_INSTALLER_BASE_URL;
+  const coHostInstaller = !installerBaseUrl;
+
   for (const targetDir of targets) {
     copyFile(latestYmlPath, targetDir);
-    copyFile(installerPath, targetDir);
-    copyFile(blockmapPath, targetDir);
     copyFile(publicReleaseNotesPath, targetDir);
+    copyFile(blockmapPath, targetDir);
+    if (coHostInstaller) {
+      // Skipping this is what silently produced a feed pointing at an
+      // installer that was never deployed.
+      copyFile(installerPath, targetDir);
+    }
+    rewriteInstallerUrl(path.join(targetDir, 'latest.yml'), parsed.version, installerFileName);
   }
+
   const latestApkFileName = syncMobileFeed(parsed.version);
   for (const targetDir of targets) {
     pruneTargetBinaries(targetDir, [installerFileName, blockmapFileName, latestApkFileName]);

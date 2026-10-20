@@ -3,7 +3,9 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Users, MessageSquare, Settings, UserPlus, UserMinus, Crown, Shield, ChevronRight, UserX } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { CommunityAvatar } from '../components/ui/CommunityAvatar';
 import { Badge } from '../components/ui/Badge';
+import { Skeleton, SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { buildCommunityInviteLink } from '../lib/inviteLinks';
@@ -30,6 +32,8 @@ export function CommunityPage() {
   const initialTab: 'overview' | 'members' = requestedTab === 'members' ? 'members' : 'overview';
   const [tab, setTab] = useState<'overview' | 'members'>(initialTab);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string>('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [joining, setJoining] = useState(false);
   const [openingChat, setOpeningChat] = useState(false);
   const [transferringOwnerId, setTransferringOwnerId] = useState<string | null>(null);
@@ -111,44 +115,56 @@ export function CommunityPage() {
 
     void (async () => {
       setLoading(true);
-      const [commRes, customizationRes, hydratedMembers] = await Promise.all([
-        supabase
-          .from('communities')
-          .select('*')
-          .eq('id', communityId)
-          .maybeSingle(),
-        supabase
-          .from('community_server_customizations')
-          .select('*')
-          .eq('community_id', communityId)
-          .maybeSingle(),
-        fetchHydratedMembers(communityId),
-      ]);
+      setLoadError('');
+      try {
+        const [commRes, customizationRes, hydratedMembers] = await Promise.all([
+          supabase
+            .from('communities')
+            .select('*')
+            .eq('id', communityId)
+            .maybeSingle(),
+          supabase
+            .from('community_server_customizations')
+            .select('*')
+            .eq('community_id', communityId)
+            .maybeSingle(),
+          fetchHydratedMembers(communityId),
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (commRes.data) {
-        const comm = commRes.data as Community;
-        const myMembership = hydratedMembers.find((member) => member.user_id === profile?.id);
-        setCommunity({
-          ...comm,
-          member_count: hydratedMembers.length,
-          is_member: !!myMembership,
-          member_role: myMembership?.role,
-        });
-      } else {
-        setCommunity(null);
+        if (commRes.error) throw commRes.error;
+        if (customizationRes.error) throw customizationRes.error;
+
+        if (commRes.data) {
+          const comm = commRes.data as Community;
+          const myMembership = hydratedMembers.find((member) => member.user_id === profile?.id);
+          setCommunity({
+            ...comm,
+            member_count: hydratedMembers.length,
+            is_member: !!myMembership,
+            member_role: myMembership?.role,
+          });
+        } else {
+          setCommunity(null);
+        }
+
+        setMembers(hydratedMembers);
+        setCustomization(customizationRes.data ? customizationRes.data as CommunityServerCustomization : null);
+      } catch (error) {
+        if (cancelled) return;
+        const message = String((error as any)?.message || error || 'Could not load community.');
+        console.warn('CommunityPage load failed:', message);
+        setLoadError(message);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      setMembers(hydratedMembers);
-      setCustomization(customizationRes.data ? customizationRes.data as CommunityServerCustomization : null);
-      setLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [communityId, profile?.id]);
+  }, [communityId, profile?.id, loadAttempt]);
 
   useEffect(() => {
     memberUserIdsRef.current = new Set(
@@ -730,8 +746,58 @@ export function CommunityPage() {
   if (loading) {
     return (
       <AppShell activeCommunityId={communityId} showChannelSidebar={true}>
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-5xl mx-auto p-6 space-y-6">
+            <div className="nyptid-card p-5">
+              <div className="flex items-center gap-4">
+                <Skeleton className="h-16 w-16" rounded="lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="nyptid-card">
+                  <SkeletonUserRow />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <AppShell activeCommunityId={communityId} showChannelSidebar={true}>
         <div className="flex items-center justify-center h-full">
-          <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+          <div className="nyptid-card max-w-md w-full m-6 p-6 text-center">
+            <div className="text-lg font-semibold text-surface-100">Couldn't load this community</div>
+            <div className="mt-2 text-sm text-surface-400 break-words">{loadError}</div>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLoadAttempt((n) => n + 1)}
+                className="nyptid-btn-primary !text-xs !px-3 !py-1.5"
+              >
+                Try again
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/app/dm')}
+                className="nyptid-btn-secondary !text-xs !px-3 !py-1.5"
+              >
+                Back to DMs
+              </button>
+            </div>
+          </div>
         </div>
       </AppShell>
     );
@@ -911,11 +977,7 @@ export function CommunityPage() {
           <div className="max-w-4xl mx-auto px-6">
             <div className="flex items-end gap-4 -mt-8 mb-4">
               <div className="w-20 h-20 rounded-2xl border-4 border-surface-900 bg-gradient-to-br from-nyptid-800 to-nyptid-950 flex items-center justify-center text-2xl font-black text-nyptid-300 flex-shrink-0">
-                {community.icon_url ? (
-                  <img src={community.icon_url} alt="" className="w-full h-full rounded-xl object-cover" />
-                ) : (
-                  community.name.slice(0, 2).toUpperCase()
-                )}
+                <CommunityAvatar iconUrl={community.icon_url} name={community.name} className="rounded-xl text-5xl" />
               </div>
               <div className="flex-1 min-w-0 pb-2">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1029,7 +1091,6 @@ export function CommunityPage() {
                   <div className="space-y-2">
                     {members.slice(0, 8).map(member => {
                       const memberProfile = getMemberProfile(member);
-                      const roleBadge = getCommunityRoleBadge(member.role);
                       return (
                         <div
                           key={member.id}
@@ -1093,7 +1154,7 @@ export function CommunityPage() {
                               transferringOwnerId === member.user_id
                                 ? 'bg-amber-500/20 text-amber-200'
                                 : 'bg-surface-700 text-surface-300 hover:bg-surface-600'
-                            } ${Boolean(transferringOwnerId) ? 'opacity-70 cursor-not-allowed' : ''}`}
+                            } ${transferringOwnerId ? 'opacity-70 cursor-not-allowed' : ''}`}
                           >
                             {transferringOwnerId === member.user_id ? 'Transferring...' : 'Transfer Ownership'}
                           </button>

@@ -3,19 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   ChevronRight,
+  Copy,
   MonitorUp,
   Mic,
   MicOff,
+  Pencil,
   PhoneOff,
   Settings,
-  User,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Profile, UserStatus } from '../../lib/types';
-import { getPlatformRoleBadge, getRankBadgeClasses, getStatusLabel } from '../../lib/utils';
+import { getStatusLabel } from '../../lib/utils';
+import { DeafenIcon } from '../ui/DeafenIcon';
 
 export interface SidebarVoiceDockState {
   phase: 'idle' | 'connecting' | 'active';
@@ -47,6 +47,25 @@ interface SidebarUserDockProps {
   onOpenSettings?: () => void;
 }
 
+const STATUS_OPTIONS: Array<{ value: UserStatus; label: string; hint?: string }> = [
+  { value: 'online', label: 'Online' },
+  { value: 'idle', label: 'Idle' },
+  { value: 'dnd', label: 'Do Not Disturb', hint: 'You will not receive desktop notifications' },
+  { value: 'invisible', label: 'Invisible', hint: 'You will appear offline' },
+];
+
+const STATUS_DOT_CLASS: Record<string, string> = {
+  online: 'bg-green-500',
+  idle: 'bg-yellow-500',
+  dnd: 'bg-red-500',
+  invisible: 'bg-surface-500',
+  offline: 'bg-surface-500',
+};
+
+function StatusDot({ status }: { status: UserStatus | string }) {
+  return <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT_CLASS[status] ?? STATUS_DOT_CLASS.online}`} />;
+}
+
 export function SidebarUserDock({
   profile,
   communityRoleLabel,
@@ -64,16 +83,13 @@ export function SidebarUserDock({
   const [showProfilePopover, setShowProfilePopover] = useState(false);
   const [showVoiceDetails, setShowVoiceDetails] = useState(false);
   const [voiceTab, setVoiceTab] = useState<'connection' | 'privacy'>('connection');
-  const [statusUpdating, setStatusUpdating] = useState(false);
-  const [statusDraft, setStatusDraft] = useState<UserStatus>(profile.status);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [editingCustomStatus, setEditingCustomStatus] = useState(false);
   const [customStatusDraft, setCustomStatusDraft] = useState(profile.custom_status || '');
   const [customStatusEmojiDraft, setCustomStatusEmojiDraft] = useState(profile.custom_status_emoji || '');
   const [statusSaveError, setStatusSaveError] = useState('');
-  const [statusSaved, setStatusSaved] = useState(false);
 
   const hasActiveVoice = Boolean(voice && voice.phase !== 'idle' && voice.channelId);
-  const roleBadge = getPlatformRoleBadge(profile.platform_role);
-  const rankClasses = getRankBadgeClasses(profile.rank);
   const isDirectCallVoice = Boolean(hasActiveVoice && voice && !voice.communityId);
   const voiceConnectionLabel = voice
     ? (voice.phase === 'connecting'
@@ -120,32 +136,37 @@ export function SidebarUserDock({
   }, [showProfilePopover, showVoiceDetails]);
 
   useEffect(() => {
-    setStatusDraft(profile.status);
     setCustomStatusDraft(profile.custom_status || '');
     setCustomStatusEmojiDraft(profile.custom_status_emoji || '');
     setStatusSaveError('');
   }, [profile.custom_status, profile.custom_status_emoji, profile.status]);
 
-  async function handleSaveStatus() {
-    if (statusUpdating) return;
-    setStatusUpdating(true);
-    setStatusSaveError('');
-    setStatusSaved(false);
+  useEffect(() => {
+    if (!showProfilePopover) {
+      setShowStatusMenu(false);
+      setEditingCustomStatus(false);
+    }
+  }, [showProfilePopover]);
 
+  // Status changes apply on click, like Discord: no separate Save step.
+  async function setPresence(status: UserStatus) {
+    setStatusSaveError('');
+    setShowStatusMenu(false);
+    const { error } = await updateProfile({ status });
+    if (error) setStatusSaveError(error.message);
+  }
+
+  async function saveCustomStatus() {
+    setStatusSaveError('');
     const { error } = await updateProfile({
-      status: statusDraft,
-      custom_status: customStatusDraft.trim().slice(0, 160),
+      custom_status: customStatusDraft.trim().slice(0, 128),
       custom_status_emoji: customStatusEmojiDraft.trim().slice(0, 16),
     });
-
     if (error) {
       setStatusSaveError(error.message);
-    } else {
-      setStatusSaved(true);
-      window.setTimeout(() => setStatusSaved(false), 2200);
+      return;
     }
-
-    setStatusUpdating(false);
+    setEditingCustomStatus(false);
   }
 
   return (
@@ -179,8 +200,8 @@ export function SidebarUserDock({
               <div className="px-4 py-4">
                 {voiceTab === 'connection' ? (
                   <div className="space-y-2 text-sm text-surface-300">
-                    <div>Average ping: <span className="font-semibold text-surface-100">{voice.averagePingMs ?? 'â€”'} ms</span></div>
-                    <div>Last ping: <span className="font-semibold text-surface-100">{voice.lastPingMs ?? 'â€”'} ms</span></div>
+                    <div>Average ping: <span className="font-semibold text-surface-100">{voice.averagePingMs ?? '—'} ms</span></div>
+                    <div>Last ping: <span className="font-semibold text-surface-100">{voice.lastPingMs ?? '—'} ms</span></div>
                     <div>Outbound packet loss rate: <span className="font-semibold text-surface-100">{voice.outboundPacketLossPct ?? 0}%</span></div>
                     <p className="pt-2 text-xs leading-relaxed text-surface-500">
                       Audio usually starts degrading around 250 ms or when packet loss climbs above 10%. If it keeps drifting, leave and rejoin the channel.
@@ -268,203 +289,126 @@ export function SidebarUserDock({
 
       <div className="relative" onClick={(event) => event.stopPropagation()}>
         {showProfilePopover && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-2xl border border-surface-700 bg-surface-900/95 shadow-2xl backdrop-blur">
-            <div className="relative h-24 overflow-hidden bg-gradient-to-br from-nyptid-900/70 to-surface-800">
+          <div className="absolute bottom-full left-0 mb-2 w-[300px] overflow-visible rounded-xl border border-surface-700/80 bg-surface-900 shadow-2xl">
+            <div className="relative h-[72px] overflow-hidden rounded-t-xl bg-gradient-to-br from-nyptid-900/70 to-surface-800">
               {profile.banner_url && (
                 <img
                   src={profile.banner_url}
-                  alt={`${profile.display_name || profile.username} banner`}
+                  alt=""
                   className="absolute inset-0 h-full w-full object-cover"
                 />
               )}
-              <div className="absolute inset-0 bg-black/30" />
             </div>
-            <div className="px-4 pb-4">
-              <div className="-mt-8 flex items-end gap-3">
+            <div className="px-4 pb-3">
+              <div className="-mt-9">
                 <Avatar
                   src={profile.avatar_url}
                   name={profile.display_name || profile.username}
                   size="xl"
                   status={profile.status}
-                  className="rounded-full border-4 border-surface-900"
+                  className="rounded-full border-[5px] border-surface-900"
                 />
-                <div className="min-w-0 pb-1">
-                  <div className="truncate text-lg font-black text-surface-100">{profile.display_name || profile.username}</div>
-                  <div className="truncate text-xs text-surface-400">@{profile.username}</div>
-                </div>
               </div>
+              <div className="mt-2 truncate text-lg font-bold text-surface-100">{profile.display_name || profile.username}</div>
+              <div className="truncate text-sm text-surface-400">{profile.username}</div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {roleBadge && <span className={`rank-badge ${roleBadge.classes}`}>{roleBadge.label}</span>}
-                {communityRoleLabel && (
-                  <span className="rank-badge bg-surface-700 text-surface-200">{communityRoleLabel}</span>
-                )}
-                <span className={`rank-badge ${rankClasses}`}>{profile.rank}</span>
-              </div>
-
-              <div className="mt-3 rounded-xl border border-surface-700 bg-surface-800/70 px-3 py-2 text-sm text-surface-300">
-                {statusLine}
-              </div>
-
-              <div className="mt-3 rounded-xl border border-surface-700 bg-surface-950/70 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-surface-500">Quick Status</div>
-                    <div className="mt-1 text-xs text-surface-400">Update presence and custom status without leaving the chat.</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStatusDraft(profile.status);
-                      setCustomStatusDraft('');
-                      setCustomStatusEmojiDraft('');
-                      setStatusSaveError('');
+              {editingCustomStatus ? (
+                <div className="mt-3 flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={customStatusEmojiDraft}
+                    onChange={(event) => setCustomStatusEmojiDraft(event.target.value)}
+                    maxLength={16}
+                    placeholder=":)"
+                    className="nyptid-input w-11 px-1 text-center text-sm"
+                  />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={customStatusDraft}
+                    onChange={(event) => setCustomStatusDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void saveCustomStatus();
+                      if (event.key === 'Escape') setEditingCustomStatus(false);
                     }}
-                    className="text-[11px] font-semibold text-surface-500 transition-colors hover:text-surface-300"
-                  >
-                    Clear
-                  </button>
+                    maxLength={128}
+                    placeholder="What are you up to?"
+                    className="nyptid-input min-w-0 flex-1 text-sm"
+                  />
                 </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {([
-                    { value: 'online', label: 'Online', tone: 'border-green-500/30 bg-green-500/10 text-green-200' },
-                    { value: 'idle', label: 'Idle', tone: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200' },
-                    { value: 'dnd', label: 'DND', tone: 'border-red-500/30 bg-red-500/10 text-red-200' },
-                    { value: 'invisible', label: 'Invisible', tone: 'border-surface-600 bg-surface-800 text-surface-200' },
-                  ] as const).map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setStatusDraft(option.value)}
-                      className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors ${
-                        statusDraft === option.value ? option.tone : 'border-surface-700 bg-surface-900/70 text-surface-400 hover:text-surface-200'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-3 grid grid-cols-[84px_minmax(0,1fr)] gap-2">
-                  <label className="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
-                    Emoji
-                    <input
-                      type="text"
-                      value={customStatusEmojiDraft}
-                      onChange={(event) => setCustomStatusEmojiDraft(event.target.value)}
-                      maxLength={16}
-                      placeholder=":)"
-                      className="nyptid-input mt-1 text-center"
-                    />
-                  </label>
-                  <label className="text-[11px] font-semibold uppercase tracking-wide text-surface-500">
-                    Status
-                    <input
-                      type="text"
-                      value={customStatusDraft}
-                      onChange={(event) => setCustomStatusDraft(event.target.value)}
-                      maxLength={160}
-                      placeholder="What are you doing right now?"
-                      className="nyptid-input mt-1"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-surface-500">
-                  <span>{customStatusDraft.length}/160 characters</span>
-                  <span>{statusDraft === 'dnd' ? 'Notifications stay muted.' : 'Applies across profile, DMs, and the dock.'}</span>
-                </div>
-
-                {(statusSaveError || statusSaved) && (
-                  <div className={`mt-2 text-xs ${statusSaveError ? 'text-red-300' : 'text-emerald-300'}`}>
-                    {statusSaveError || 'Status updated.'}
-                  </div>
-                )}
-
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveStatus()}
-                    disabled={statusUpdating}
-                    className="nyptid-btn-primary flex-1 py-2 text-xs disabled:opacity-60"
-                  >
-                    {statusUpdating ? 'Saving...' : 'Save Status'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigate('/app/settings?section=privacy');
-                      setShowProfilePopover(false);
-                    }}
-                    className="nyptid-btn-secondary px-3 py-2 text-xs"
-                  >
-                    More
-                  </button>
-                </div>
-              </div>
-
-              {profile.bio && (
-                <div className="mt-3 text-sm leading-relaxed text-surface-300 line-clamp-4">
-                  {profile.bio}
-                </div>
-              )}
-
-              <div className="mt-4 space-y-1">
+              ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    navigate(`/app/profile/${profile.id}`);
-                    setShowProfilePopover(false);
-                  }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
+                  onClick={() => setEditingCustomStatus(true)}
+                  className="mt-3 w-full truncate rounded-lg bg-surface-800/80 px-3 py-2 text-left text-sm text-surface-300 transition-colors hover:bg-surface-800"
                 >
-                  <span className="flex items-center gap-2"><User size={14} /> View Profile</span>
-                  <ChevronRight size={14} className="text-surface-500" />
+                  {profile.custom_status
+                    ? `${profile.custom_status_emoji ? `${profile.custom_status_emoji} ` : ''}${profile.custom_status}`
+                    : <span className="text-surface-500">Set a custom status</span>}
                 </button>
+              )}
+
+              {statusSaveError && <div className="mt-2 text-xs text-red-300">{statusSaveError}</div>}
+
+              <div className="mt-3 rounded-lg bg-surface-950/60">
                 <button
                   type="button"
                   onClick={() => {
                     navigate('/app/settings?section=profile');
                     setShowProfilePopover(false);
                   }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
+                  className="flex w-full items-center gap-2.5 rounded-t-lg px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
                 >
-                  <span className="flex items-center gap-2"><Settings size={14} /> Edit Profile</span>
-                  <ChevronRight size={14} className="text-surface-500" />
+                  <Pencil size={15} className="text-surface-400" />
+                  Edit Profile
                 </button>
+
+                <div className="mx-3 border-t border-surface-800" />
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowStatusMenu((prev) => !prev)}
+                    className="flex w-full items-center gap-2.5 rounded-b-lg px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
+                  >
+                    <StatusDot status={profile.status} />
+                    <span className="flex-1">{STATUS_OPTIONS.find((o) => o.value === profile.status)?.label ?? 'Online'}</span>
+                    <ChevronRight size={15} className="text-surface-500" />
+                  </button>
+                  {showStatusMenu && (
+                    <div className="absolute bottom-0 left-full z-10 ml-2 w-64 overflow-hidden rounded-lg border border-surface-700/80 bg-surface-900 py-1 shadow-2xl">
+                      {STATUS_OPTIONS.map((option, index) => (
+                        <div key={option.value}>
+                          {index === 1 && <div className="mx-2 my-1 border-t border-surface-800" />}
+                          <button
+                            type="button"
+                            onClick={() => void setPresence(option.value)}
+                            className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-800"
+                          >
+                            <span className="mt-1"><StatusDot status={option.value} /></span>
+                            <span className="min-w-0">
+                              <span className="block text-sm text-surface-100">{option.label}</span>
+                              {option.hint && <span className="block text-xs text-surface-500">{option.hint}</span>}
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-lg bg-surface-950/60">
                 <button
                   type="button"
                   onClick={() => {
-                    navigate('/app/settings?section=privacy');
+                    void navigator.clipboard?.writeText(profile.id).catch(() => undefined);
                     setShowProfilePopover(false);
                   }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800 disabled:opacity-60"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
                 >
-                  <span>Privacy &amp; Status</span>
-                  <ChevronRight size={14} className="text-surface-500" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenSettings?.();
-                    setShowProfilePopover(false);
-                  }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-200 transition-colors hover:bg-surface-800"
-                >
-                  <span>Settings</span>
-                  <ChevronRight size={14} className="text-surface-500" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.alert('Switch Accounts is rolling out.');
-                    setShowProfilePopover(false);
-                  }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-surface-500 transition-colors hover:bg-surface-800 hover:text-surface-300"
-                >
-                  <span>Switch Accounts</span>
-                  <ChevronRight size={14} className="text-surface-600" />
+                  <Copy size={15} className="text-surface-400" />
+                  Copy User ID
                 </button>
               </div>
             </div>
@@ -526,7 +470,7 @@ export function SidebarUserDock({
                 ? (voice?.isDeafened ? 'Undeafen' : 'Deafen')
                 : (voice?.isDeafened ? 'Undeafen (ready for next call)' : 'Deafen (ready for next call)')}
             >
-              {voice?.isDeafened ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              <DeafenIcon deafened={Boolean(voice?.isDeafened)} size={14} />
             </button>
             <button
               type="button"

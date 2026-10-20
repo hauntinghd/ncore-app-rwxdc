@@ -1,9 +1,8 @@
-import { memo, useCallback, useState, useEffect, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { memo, useCallback, useState, useEffect, useId, useMemo, useRef, type ChangeEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   BellOff,
   BellRing,
-  Hash,
   MessageSquareQuote,
   Paperclip,
   Pin,
@@ -14,9 +13,15 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
+import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
+import { MarkdownContent } from '../components/ui/MarkdownContent';
+import { ThreadsPanel } from '../components/chat/ThreadsPanel';
+import { useFocusTrap } from '../components/ui/useFocusTrap';
+import { SkeletonMessageRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { ensureFreshAuthSession } from '../lib/authSession';
 import { useEntitlements } from '../lib/entitlements';
@@ -25,14 +30,29 @@ import {
   getActiveMentionQuery,
   insertMentionSuggestion,
   resolveMentionTargetIds,
-  splitMentionText,
   type MentionSuggestion,
 } from '../lib/mentions';
 import { analyzeMessageShield, describeShieldAssessment } from '../lib/securityShield';
 import { queueRuntimeEvent } from '../lib/runtimeTelemetry';
 import { supabase } from '../lib/supabase';
 import type { Message, Channel, MessageAttachment } from '../lib/types';
-import { formatFileSize, formatMessageTime, formatShortTime, EMOJI_LIST } from '../lib/utils';
+import { formatFileSize, formatMessageTime, formatShortTime } from '../lib/utils';
+import { EmojiPicker, ReactionEmoji } from '../components/chat/EmojiPicker';
+import { LinkEmbeds } from '../components/chat/LinkEmbeds';
+import { GifPicker } from '../components/chat/GifPicker';
+import { isGifSearchAvailable } from '../lib/gifs';
+import {
+  MUTE_DURATIONS,
+  resolveChannelMode,
+  setNotificationPreference,
+} from '../lib/notificationPrefs';
+import { useCustomEmojis } from '../contexts/CustomEmojiContext';
+import {
+  filterEmojiSuggestions,
+  getActiveEmojiQuery,
+  insertEmojiToken,
+  type CustomEmoji,
+} from '../lib/customEmoji';
 
 interface MessageGroupProps {
   messages: Message[];
@@ -44,6 +64,10 @@ interface MessageGroupProps {
   onOpenContextMenu: (event: ReactMouseEvent, message: Message) => void;
   currentUserId?: string;
   canModerateMessages?: boolean;
+  /** Message to flash after a jump from search or a mention. */
+  highlightMessageId?: string | null;
+  /** Sorts this community's custom emoji first in the reaction picker. */
+  communityId?: string | null;
 }
 
 interface ChatMember {
@@ -73,18 +97,7 @@ interface LightweightMessageReaction {
 }
 
 function renderMessageContent(content: string) {
-  return splitMentionText(content).map((segment, index) => (
-    segment.isMention ? (
-      <span
-        key={`${segment.text}:${index}`}
-        className="rounded-md bg-nyptid-300/18 px-1 py-0.5 font-medium text-nyptid-200"
-      >
-        {segment.text}
-      </span>
-    ) : (
-      <span key={`${segment.text}:${index}`}>{segment.text}</span>
-    )
-  ));
+  return <MarkdownContent content={content} />;
 }
 
 function MessageGroup({
@@ -97,13 +110,18 @@ function MessageGroup({
   onOpenContextMenu,
   currentUserId,
   canModerateMessages = false,
+  highlightMessageId = null,
+  communityId = null,
 }: MessageGroupProps) {
   const [showEmojiFor, setShowEmojiFor] = useState<string | null>(null);
   const first = messages[0];
 
   const author = first.author as any;
-  const authorName = author?.display_name || author?.username || 'Unknown';
-  const authorAvatar = author?.avatar_url;
+  const metadata = (first as any).metadata;
+  const isBot = metadata?.is_bot_message === true;
+  const botName = metadata?.bot_username;
+  const authorName = isBot && botName ? botName : (author?.display_name || author?.username || 'Unknown');
+  const authorAvatar = isBot && metadata?.bot_avatar_url ? metadata.bot_avatar_url : author?.avatar_url;
 
   return (
     <div className="flex gap-3 px-4 py-1 group hover:bg-surface-800/30 transition-colors">
@@ -111,19 +129,31 @@ function MessageGroup({
         <Avatar src={authorAvatar} name={authorName} size="md" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-0.5">
+        <div className="flex items-center gap-2 mb-0.5">
           <span className="font-semibold text-surface-100 text-sm hover:underline cursor-pointer">{authorName}</span>
+          {isBot && (
+            <span className="px-1.5 py-0.5 rounded bg-nyptid-600/30 text-nyptid-300 text-[10px] font-bold leading-none">BOT</span>
+          )}
           <span className="text-xs text-surface-600">{formatMessageTime(first.created_at)}</span>
         </div>
         {messages.map(msg => (
           <div
             key={msg.id}
-            className="relative group/msg"
+            id={`message-${msg.id}`}
+            data-message-id={msg.id}
+            className={`relative group/msg ${
+              highlightMessageId === msg.id
+                ? '-mx-2 rounded-lg bg-nyptid-300/10 px-2 ring-1 ring-nyptid-300/40'
+                : ''
+            }`}
             onContextMenu={(event) => onOpenContextMenu(event, msg)}
           >
             <div className="text-sm text-surface-300 leading-relaxed break-words">
               {msg.content && (
-                <div className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content)}</div>
+                <>
+                  <div className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content)}</div>
+                  <LinkEmbeds content={msg.content} />
+                </>
               )}
               {(msg.attachments || []).length > 0 && (
                 <div className={`${msg.content ? 'mt-2' : ''} space-y-2`}>
@@ -173,7 +203,7 @@ function MessageGroup({
                     onClick={() => onReact(msg.id, emoji)}
                     className="flex items-center gap-1 px-2 py-0.5 bg-surface-700 hover:bg-surface-600 rounded-full text-xs transition-colors"
                   >
-                    {emoji} <span className="text-surface-300">{count}</span>
+                    <ReactionEmoji value={emoji} /> <span className="text-surface-300">{count}</span>
                   </button>
                 ))}
               </div>
@@ -228,16 +258,14 @@ function MessageGroup({
             </div>
 
             {showEmojiFor === msg.id && (
-              <div className="flex flex-wrap gap-1 mt-2 p-2 bg-surface-800 border border-surface-700 rounded-xl w-fit shadow-xl z-20">
-                {EMOJI_LIST.map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={() => { onReact(msg.id, emoji); setShowEmojiFor(null); }}
-                    className="w-8 h-8 flex items-center justify-center hover:bg-surface-700 rounded-lg text-lg transition-colors"
-                  >
-                    {emoji}
-                  </button>
-                ))}
+              <div className="relative z-20 mt-2 w-fit">
+                <EmojiPicker
+                  communityId={communityId}
+                  onSelect={(emoji) => {
+                    onReact(msg.id, emoji);
+                    setShowEmojiFor(null);
+                  }}
+                />
               </div>
             )}
           </div>
@@ -352,6 +380,10 @@ async function insertNotificationsWithRetry(rows: any[]) {
 
 export function ChatPage() {
   const { communityId, channelId } = useParams<{ communityId: string; channelId: string }>();
+  const { emojis: usableEmojis } = useCustomEmojis();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const jumpToMessageId = searchParams.get('message');
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const { profile } = useAuth();
   const { entitlements } = useEntitlements();
   const maxMessageLength = entitlements.messageLengthCap;
@@ -365,7 +397,7 @@ export function ChatPage() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMsg, setEditingMsg] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
-  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [typingUsers] = useState<string[]>([]);
   const [composerError, setComposerError] = useState('');
   const [communityRole, setCommunityRole] = useState<'owner' | 'admin' | 'moderator' | 'member'>('member');
   const [members, setMembers] = useState<ChatMember[]>([]);
@@ -374,12 +406,41 @@ export function ChatPage() {
     if (typeof window === 'undefined') return 'all';
     return (window.localStorage.getItem('ncore.chat.channelNotifMode') as 'all' | 'mentions' | 'none') || 'all';
   });
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [showComposerEmoji, setShowComposerEmoji] = useState(false);
+  /*
+    GIF search depends on a server-side Tenor key. Probed once per session so
+    the button is simply absent on a deployment without one, rather than
+    present and broken.
+  */
+  const [gifsAvailable, setGifsAvailable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void isGifSearchAvailable().then((available) => {
+      if (!cancelled) setGifsAvailable(available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [showThreadsModal, setShowThreadsModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPinnedModal, setShowPinnedModal] = useState(false);
+  const [showCatchUp, setShowCatchUp] = useState(false);
+  const notificationModalRef = useFocusTrap(showNotificationModal, () => setShowNotificationModal(false));
+  const pinnedModalRef = useFocusTrap(showPinnedModal, () => setShowPinnedModal(false));
+  const catchUpModalRef = useFocusTrap(showCatchUp, () => setShowCatchUp(false));
+  const notificationTitleId = useId();
+  const pinnedTitleId = useId();
+  const catchUpTitleId = useId();
+  const [catchUpSummary, setCatchUpSummary] = useState<string | null>(null);
+  const [catchUpLoading, setCatchUpLoading] = useState(false);
   const [messageContextMenu, setMessageContextMenu] = useState<MessageContextMenuState | null>(null);
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [mentionSuggestionIndex, setMentionSuggestionIndex] = useState(0);
+  const [emojiSuggestionIndex, setEmojiSuggestionIndex] = useState(0);
   const messageScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -440,6 +501,29 @@ export function ChatPage() {
     [members, profile],
   );
   const messageGroups = useMemo(() => groupMessages(messages), [messages]);
+
+  // Jump-to-message, used by search results and mention links. The target has
+  // to already be in the loaded window; if it is older than that, we leave the
+  // param in place rather than silently scrolling to the wrong place.
+  useEffect(() => {
+    if (!jumpToMessageId || loading) return;
+    if (!messages.some((message) => message.id === jumpToMessageId)) return;
+
+    const node = document.getElementById(`message-${jumpToMessageId}`);
+    if (!node) return;
+
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedMessageId(jumpToMessageId);
+
+    // Drop the param so a refresh or a later scroll does not re-trigger it.
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('message');
+    setSearchParams(nextParams, { replace: true });
+
+    const timer = setTimeout(() => setHighlightedMessageId(null), 2400);
+    return () => clearTimeout(timer);
+  }, [jumpToMessageId, loading, messages, searchParams, setSearchParams]);
+
   const mentionTargets = useMemo(() => {
     const deduped = new Map<string, {
       id: string;
@@ -472,6 +556,17 @@ export function ChatPage() {
     () => (activeMentionQuery ? buildMentionSuggestions(mentionTargets, activeMentionQuery.query) : []),
     [activeMentionQuery, mentionTargets],
   );
+  const activeEmojiQuery = useMemo(
+    () => getActiveEmojiQuery(input, composerSelectionStart),
+    [input, composerSelectionStart],
+  );
+  const emojiSuggestions = useMemo(
+    () => (activeEmojiQuery ? filterEmojiSuggestions(usableEmojis, activeEmojiQuery.query) : []),
+    [activeEmojiQuery, usableEmojis],
+  );
+  useEffect(() => {
+    setEmojiSuggestionIndex(0);
+  }, [activeEmojiQuery?.query, activeEmojiQuery?.start, channelId]);
 
   useEffect(() => {
     setMentionSuggestionIndex(0);
@@ -545,22 +640,62 @@ export function ChatPage() {
     };
   }, [communityId]);
 
+  /*
+    Notification mode was device-local in localStorage, so muting a channel on
+    desktop did nothing on the phone. It now lives in `notification_preferences`
+    and follows the account. localStorage is kept as a synchronous mirror only:
+    the sidebar reads it to render mute state on first paint without waiting on
+    a round trip.
+  */
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
-    const next = window.localStorage.getItem(storageKey) as 'all' | 'mentions' | 'none' | null;
-    if (next === 'all' || next === 'mentions' || next === 'none') {
-      setChannelNotificationMode(next);
-    } else {
-      setChannelNotificationMode('all');
-    }
-  }, [channelId]);
+    const cached = window.localStorage.getItem(storageKey) as 'all' | 'mentions' | 'none' | null;
+    setChannelNotificationMode(
+      cached === 'all' || cached === 'mentions' || cached === 'none' ? cached : 'all',
+    );
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
-    window.localStorage.setItem(storageKey, channelNotificationMode);
-  }, [channelId, channelNotificationMode]);
+    if (!channelId) return;
+    let cancelled = false;
+    void resolveChannelMode(channelId, communityId ?? null)
+      .then((mode) => {
+        if (cancelled) return;
+        setChannelNotificationMode(mode);
+        window.localStorage.setItem(storageKey, mode);
+      })
+      .catch(() => {
+        // Offline or the migration is not applied yet — the cached value stands.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId, communityId]);
+
+  async function applyChannelNotificationMode(
+    mode: 'all' | 'mentions' | 'none',
+    muteMinutes?: number | null,
+  ) {
+    setChannelNotificationMode(mode);
+    if (typeof window !== 'undefined') {
+      const storageKey = channelId ? `ncore.chat.channelNotifMode.${channelId}` : 'ncore.chat.channelNotifMode';
+      // A timed mute reads as silent until it lapses, which is what the sidebar
+      // needs to know; the exact expiry lives server-side.
+      window.localStorage.setItem(storageKey, muteMinutes ? 'none' : mode);
+    }
+    if (!channelId) return;
+    try {
+      await setNotificationPreference({
+        scopeKind: 'channel',
+        scopeId: channelId,
+        mode,
+        muteMinutes: muteMinutes ?? undefined,
+      });
+    } catch {
+      // The local mirror already applied; a failed sync is not worth blocking
+      // the menu over. It reconciles on the next channel open.
+    }
+  }
 
   useEffect(() => {
     if (!messageContextMenu) return undefined;
@@ -807,11 +942,16 @@ export function ChatPage() {
     }
   }
 
-  async function handleSend() {
+  /**
+   * `overrideContent` lets the GIF picker send without routing through the
+   * composer's `input` state — a setState followed by a send would race, and
+   * the picker must not be able to drop or duplicate the user's draft.
+   */
+  async function handleSend(overrideContent?: string) {
     if (!profile || !channelId || sending) return;
     setComposerError('');
 
-    const content = input.trim().slice(0, maxMessageLength);
+    const content = (overrideContent ?? input).trim().slice(0, maxMessageLength);
     const filesToSend = [...pendingFiles];
     const hasText = content.length > 0;
     const hasFiles = filesToSend.length > 0;
@@ -843,7 +983,9 @@ export function ChatPage() {
       }, { userId: profile.id, sampleRate: 1 });
     }
 
-    setInput('');
+    // A GIF send carries its own content, so the draft in the composer is not
+    // its to clear.
+    if (overrideContent === undefined) setInput('');
     setPendingFiles([]);
     setSending(true);
 
@@ -1047,7 +1189,7 @@ export function ChatPage() {
 
   const handleTogglePin = useCallback(async (message: Message) => {
     if (!message?.id) return;
-    const nextPinned = !Boolean(message.is_pinned);
+    const nextPinned = !message.is_pinned;
     const { error: updateError } = await supabase
       .from('messages')
       .update({ is_pinned: nextPinned } as any)
@@ -1089,6 +1231,19 @@ export function ChatPage() {
     });
   }, [activeMentionQuery, input]);
 
+  const commitEmojiSuggestion = useCallback((emoji: CustomEmoji) => {
+    if (!activeEmojiQuery) return;
+    const next = insertEmojiToken(input, activeEmojiQuery, emoji);
+    setInput(next.value);
+    requestAnimationFrame(() => {
+      const target = inputRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(next.caretPosition, next.caretPosition);
+      setComposerSelectionStart(next.caretPosition);
+    });
+  }, [activeEmojiQuery, input]);
+
   const handleComposerChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = event.target.value.slice(0, maxMessageLength);
     setInput(nextValue);
@@ -1096,6 +1251,23 @@ export function ChatPage() {
   }, [maxMessageLength]);
 
   function handleKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (activeEmojiQuery && emojiSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setEmojiSuggestionIndex((prev) => (prev + 1) % emojiSuggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setEmojiSuggestionIndex((prev) => (prev - 1 + emojiSuggestions.length) % emojiSuggestions.length);
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        commitEmojiSuggestion(emojiSuggestions[emojiSuggestionIndex] || emojiSuggestions[0]);
+        return;
+      }
+    }
     if (activeMentionQuery && mentionSuggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -1136,10 +1308,14 @@ export function ChatPage() {
         onOpenContextMenu={openMessageContextMenu}
         currentUserId={profile?.id}
         canModerateMessages={canModerateMessages}
+        highlightMessageId={highlightedMessageId}
+        communityId={communityId}
       />
     ))
   ), [
     canModerateMessages,
+    communityId,
+    highlightedMessageId,
     handleDelete,
     handleEditSelect,
     handleReact,
@@ -1167,6 +1343,33 @@ export function ChatPage() {
         title="Notification settings"
       >
         {channelNotificationMode === 'none' ? <BellOff size={15} /> : <BellRing size={15} />}
+      </button>
+      <button
+        type="button"
+        onClick={async () => {
+          if (catchUpLoading) return;
+          setCatchUpLoading(true);
+          setShowCatchUp(true);
+          setCatchUpSummary(null);
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token || '';
+            const { data, error } = await supabase.functions.invoke('channel-summarize', {
+              body: { channel_id: channelId, message_count: 50 },
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (error) throw error;
+            setCatchUpSummary(data?.summary || 'No summary available.');
+          } catch {
+            setCatchUpSummary('Could not generate summary. Try again later.');
+          } finally {
+            setCatchUpLoading(false);
+          }
+        }}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
+        title="Catch up on this channel"
+      >
+        <Zap size={15} />
       </button>
       <button
         type="button"
@@ -1202,22 +1405,24 @@ export function ChatPage() {
       <div className="flex h-full">
         <div className="flex min-w-0 flex-1 flex-col">
         {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+          <div className="flex-1 overflow-hidden py-4 space-y-1" aria-label="Loading messages">
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={1} />
+            <SkeletonMessageRow lines={3} />
+            <SkeletonMessageRow lines={1} />
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={2} />
+            <SkeletonMessageRow lines={1} />
           </div>
         ) : (
           <div ref={messageScrollRef} className="flex-1 overflow-y-auto py-4 scrollbar-thin space-y-1">
             {messageGroups.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <div className="w-16 h-16 bg-surface-800 rounded-2xl flex items-center justify-center mb-4">
-                  <Hash size={28} className="text-surface-400" />
-                </div>
-                <h3 className="text-lg font-bold text-surface-200 mb-1">
-                  Welcome to #{channel?.name || 'channel'}!
-                </h3>
-                <p className="text-surface-500 text-sm">
-                  This is the beginning of the channel. Send a message to get started.
-                </p>
+              <div className="flex items-center justify-center h-full">
+                <EmptyState
+                  illustration={EmptyIllustrations.EmptyChannel}
+                  title={`Welcome to #${channel?.name || 'channel'}`}
+                  description="Beginning of the channel. Say hi, drop a link, or start a voice call — this is your space."
+                />
               </div>
             )}
 
@@ -1276,6 +1481,34 @@ export function ChatPage() {
             </div>
           )}
           <div className="relative">
+            {activeEmojiQuery && emojiSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 shadow-2xl z-20">
+                <div className="border-b border-surface-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-surface-500">
+                  Custom emoji
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {emojiSuggestions.map((emoji, index) => (
+                    <button
+                      key={`emoji-${emoji.id}`}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        commitEmojiSuggestion(emoji);
+                      }}
+                      className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                        index === emojiSuggestionIndex
+                          ? 'bg-nyptid-300/10 text-surface-100'
+                          : 'text-surface-300 hover:bg-surface-800'
+                      }`}
+                    >
+                      <img src={emoji.imageUrl} alt="" className="h-6 w-6 object-contain" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm">:{emoji.name}:</span>
+                      <span className="truncate text-[11px] text-surface-500">{emoji.communityName}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {activeMentionQuery && mentionSuggestions.length > 0 && (
               <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-surface-700 bg-surface-900 shadow-2xl z-20">
                 <div className="border-b border-surface-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-surface-500">
@@ -1311,6 +1544,35 @@ export function ChatPage() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+            {/* Slash command autocomplete */}
+            {input.startsWith('/') && input.length > 1 && input.indexOf(' ') === -1 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 mx-0 bg-surface-800 border border-surface-700 rounded-xl shadow-xl overflow-hidden z-30">
+                <div className="px-3 py-2 border-b border-surface-700/50">
+                  <span className="text-[10px] font-bold text-surface-500 uppercase tracking-wider">Bot Commands</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {[
+                    { name: '/help', desc: 'Show available bot commands' },
+                    { name: '/poll', desc: 'Create a poll in this channel' },
+                    { name: '/remind', desc: 'Set a reminder' },
+                    { name: '/summarize', desc: 'Summarize recent messages' },
+                  ].filter(cmd => cmd.name.startsWith(input.toLowerCase())).map(cmd => (
+                    <button
+                      key={cmd.name}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); setInput(cmd.name + ' '); }}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-700/50 transition-colors"
+                    >
+                      <span className="text-nyptid-300 font-mono text-sm font-semibold">{cmd.name}</span>
+                      <span className="text-xs text-surface-500">{cmd.desc}</span>
+                    </button>
+                  ))}
+                  {['/help', '/poll', '/remind', '/summarize'].filter(c => c.startsWith(input.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-surface-500">No matching commands</div>
+                  )}
                 </div>
               </div>
             )}
@@ -1354,11 +1616,60 @@ export function ChatPage() {
               }}
             />
             <div className="flex items-center gap-1 flex-shrink-0">
-              <button className="p-1.5 text-surface-500 hover:text-surface-300 transition-colors">
-                <Smile size={18} />
-              </button>
+              {gifsAvailable && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGifPicker((value) => !value);
+                      setShowComposerEmoji(false);
+                    }}
+                    aria-label="Add a GIF"
+                    title="GIF"
+                    className={`px-1.5 py-1 text-xs font-bold transition-colors ${
+                      showGifPicker ? 'text-nyptid-300' : 'text-surface-500 hover:text-surface-300'
+                    }`}
+                  >
+                    GIF
+                  </button>
+                  {showGifPicker && (
+                    <div className="absolute bottom-full right-0 z-50 mb-2">
+                      <GifPicker
+                        onSelect={(content) => void handleSend(content)}
+                        onClose={() => setShowGifPicker(false)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowComposerEmoji((value) => !value);
+                    setShowGifPicker(false);
+                  }}
+                  aria-label="Add an emoji"
+                  className={`p-1.5 transition-colors ${
+                    showComposerEmoji ? 'text-nyptid-300' : 'text-surface-500 hover:text-surface-300'
+                  }`}
+                >
+                  <Smile size={18} />
+                </button>
+                {showComposerEmoji && (
+                  <div className="absolute bottom-full right-0 z-50 mb-2">
+                    <EmojiPicker
+                      communityId={communityId ?? null}
+                      onSelect={(value) => {
+                        setInput((current) => `${current}${value}`);
+                        setShowComposerEmoji(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
               <button
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 disabled={(!input.trim() && pendingFiles.length === 0) || sending || uploadingFiles}
                 className={`p-1.5 rounded-lg transition-colors ${
                   input.trim() || pendingFiles.length > 0
@@ -1461,39 +1772,39 @@ export function ChatPage() {
           </div>
         )}
 
-        {showThreadsModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/70" onClick={() => setShowThreadsModal(false)} />
-            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Threads</div>
-              <p className="text-sm text-surface-400 mt-2">
-                Thread channels are being rolled out. This channel will support full thread creation and management in an upcoming patch.
-              </p>
-              <div className="mt-4 flex justify-end">
-                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowThreadsModal(false)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ThreadsPanel
+          open={showThreadsModal}
+          onClose={() => setShowThreadsModal(false)}
+          channelId={channelId || ''}
+          channelName={channel?.name || ''}
+          authorId={profile?.id || null}
+        />
 
         {showNotificationModal && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowNotificationModal(false)} />
-            <div className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Notification Settings</div>
-              <p className="text-sm text-surface-400 mt-2">Choose how notifications work for this channel.</p>
+            <div
+              ref={notificationModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={notificationTitleId}
+              className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
+              <div id={notificationTitleId} className="text-lg font-semibold text-surface-100">Notification Settings</div>
+              <p className="text-sm text-surface-400 mt-2">
+                Choose how notifications work for this channel. This follows your account, not just
+                this device.
+              </p>
               <div className="mt-4 space-y-2">
                 {[
                   { id: 'all' as const, label: 'All Messages', desc: 'Receive notifications for all channel activity.' },
                   { id: 'mentions' as const, label: 'Only @mentions', desc: 'Only notify when you are directly mentioned.' },
-                  { id: 'none' as const, label: 'Nothing', desc: 'Mute this channel.' },
+                  { id: 'none' as const, label: 'Nothing', desc: 'Mute this channel. Direct mentions still show a badge.' },
                 ].map((option) => (
                   <button
                     key={option.id}
                     type="button"
-                    onClick={() => setChannelNotificationMode(option.id)}
+                    onClick={() => void applyChannelNotificationMode(option.id)}
                     className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                       channelNotificationMode === option.id
                         ? 'border-nyptid-300/40 bg-nyptid-300/10'
@@ -1504,6 +1815,28 @@ export function ChatPage() {
                     <div className="text-xs text-surface-500 mt-0.5">{option.desc}</div>
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-4 border-t border-surface-700 pt-3">
+                <div className="text-xs font-semibold tracking-wide text-surface-500 uppercase">
+                  Mute temporarily
+                </div>
+                <p className="mt-1 text-xs text-surface-500">
+                  Silences the channel and then puts your setting back, so a busy afternoon does
+                  not turn into a channel you forgot you muted.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {MUTE_DURATIONS.filter((duration) => duration.minutes !== null).map((duration) => (
+                    <button
+                      key={duration.label}
+                      type="button"
+                      onClick={() => void applyChannelNotificationMode('all', duration.minutes)}
+                      className="nyptid-btn-secondary px-2.5 py-1 text-xs"
+                    >
+                      {duration.label.replace(/^For /, '')}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowNotificationModal(false)}>
@@ -1517,8 +1850,14 @@ export function ChatPage() {
         {showPinnedModal && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/70" onClick={() => setShowPinnedModal(false)} />
-            <div className="relative w-full max-w-2xl rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up">
-              <div className="text-lg font-semibold text-surface-100">Pinned Messages</div>
+            <div
+              ref={pinnedModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={pinnedTitleId}
+              className="relative w-full max-w-2xl rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
+              <div id={pinnedTitleId} className="text-lg font-semibold text-surface-100">Pinned Messages</div>
               <div className="mt-3 max-h-[60vh] overflow-y-auto space-y-2">
                 {pinnedMessages.map((message) => (
                   <div key={message.id} className="rounded-lg border border-surface-700 bg-surface-900/60 px-3 py-2">
@@ -1532,6 +1871,39 @@ export function ChatPage() {
               </div>
               <div className="mt-4 flex justify-end">
                 <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowPinnedModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showCatchUp && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowCatchUp(false)} />
+            <div
+              ref={catchUpModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={catchUpTitleId}
+              className="relative w-full max-w-lg rounded-2xl border border-surface-700 bg-surface-800 p-5 animate-slide-up"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Zap size={18} className="text-nyptid-400" />
+                <span id={catchUpTitleId} className="text-lg font-semibold text-surface-100">Catch Up</span>
+              </div>
+              <p className="text-xs text-surface-500 mb-3">AI-generated summary of recent messages in #{channel?.name || 'channel'}</p>
+              {catchUpLoading ? (
+                <div className="flex items-center gap-3 py-6 justify-center">
+                  <div className="w-5 h-5 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-surface-400 text-sm">Generating summary...</span>
+                </div>
+              ) : (
+                <div className="bg-surface-900/60 rounded-lg border border-surface-700 p-4 text-sm text-surface-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto">
+                  {catchUpSummary || 'No summary available.'}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="nyptid-btn-secondary text-sm" onClick={() => setShowCatchUp(false)}>
                   Close
                 </button>
               </div>

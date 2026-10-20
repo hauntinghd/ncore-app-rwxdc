@@ -1,25 +1,30 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, Suspense, lazy, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CustomEmojiProvider } from './contexts/CustomEmojiContext';
 import { LoadingScreen } from './components/ui/Spinner';
 import { probeRunPodBackend } from './lib/runpod';
 import { PwaExperienceBar } from './components/pwa/PwaExperienceBar';
 import { detectWebSurface, type WebSurface } from './lib/webSurface';
 import { readPendingInviteCode } from './lib/inviteLinks';
 import { createDurationTracker, queueRuntimeEvent, reportRuntimeError } from './lib/runtimeTelemetry';
+import { supabase } from './lib/supabase';
+import { isDesktopRuntime } from './lib/desktopRuntime';
 
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
-const MarketplaceWebPage = lazy(() => import('./pages/MarketplaceWebPage').then((m) => ({ default: m.MarketplaceWebPage })));
 const LoginPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.LoginPage })));
 const SignupPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.SignupPage })));
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
+const MfaChallengePage = lazy(() => import('./pages/MfaChallengePage').then((m) => ({ default: m.MfaChallengePage })));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
-const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then((m) => ({ default: m.DiscoverPage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
-const MarketplacePage = lazy(() => import('./pages/MarketplacePage').then((m) => ({ default: m.MarketplacePage })));
 const CommunityPage = lazy(() => import('./pages/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const CommunitySettingsPage = lazy(() => import('./pages/CommunitySettingsPage').then((m) => ({ default: m.CommunitySettingsPage })));
 const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
 const VoiceChannelPage = lazy(() => import('./pages/VoiceChannelPage').then((m) => ({ default: m.VoiceChannelPage })));
+const ForumChannelPage = lazy(() => import('./pages/ForumChannelPage'));
+const DeveloperPortalPage = lazy(() => import('./pages/DeveloperPortalPage'));
 const DirectMessagePage = lazy(() => import('./pages/DirectMessagePage').then((m) => ({ default: m.DirectMessagePage })));
 const DirectCallPage = lazy(() => import('./pages/DirectCallPage').then((m) => ({ default: m.DirectCallPage })));
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
@@ -27,13 +32,16 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ de
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })));
+const PrivacyPage = lazy(() => import('./pages/LegalPages').then((m) => ({ default: m.PrivacyPage })));
+const TermsPage = lazy(() => import('./pages/LegalPages').then((m) => ({ default: m.TermsPage })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { user, profile, loading, profileLoading, mfaPending } = useAuth();
   const location = useLocation();
 
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  if (mfaPending && location.pathname !== '/mfa') return <Navigate to="/mfa" state={{ from: location }} replace />;
   if (user && !profileLoading && !profile?.username && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />;
   }
@@ -41,10 +49,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { user, profile, loading, profileLoading, mfaPending } = useAuth();
   const location = useLocation();
 
   if (loading || (user && profileLoading)) return <LoadingScreen />;
+  if (user && mfaPending) return <Navigate to="/mfa" replace />;
   if (user && profile?.username) {
     const params = new URLSearchParams(location.search);
     const inviteCode = String(params.get('invite') || readPendingInviteCode() || '').trim();
@@ -57,19 +66,23 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface: WebSurface }) {
+function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: WebSurface }) {
+  const location = useLocation();
+  const authHash = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
+  const isRecoveryCallback = authHash.get('type') === 'recovery' || authHash.has('error');
+
   return (
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route
           path="/"
           element={
-            isElectron ? (
+            isRecoveryCallback ? (
+              <Navigate to={`/reset-password${location.hash}`} replace />
+            ) : isDesktop ? (
               <Navigate to="/app" replace />
             ) : webSurface === 'app' ? (
               <Navigate to="/app/dm" replace />
-            ) : webSurface === 'marketplace' ? (
-              <MarketplaceWebPage />
             ) : (
               <PublicRoute><LandingPage /></PublicRoute>
             )
@@ -77,24 +90,24 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         />
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/mfa" element={<ProtectedRoute><MfaChallengePage /></ProtectedRoute>} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/invite/:inviteCode" element={<InvitePage />} />
         <Route path="/:inviteCode" element={<InvitePage />} />
-        <Route
-          path="/marketplace"
-          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
-        />
-        <Route
-          path="/marketplace/*"
-          element={webSurface === 'app' ? <Navigate to="/app/marketplace" replace /> : <MarketplaceWebPage />}
-        />
+        {/* Marketplace removed 2026-10-20 — NCore is focused on chat, voice and video. */}
+        <Route path="/marketplace" element={<Navigate to="/" replace />} />
+        <Route path="/marketplace/*" element={<Navigate to="/" replace />} />
 
         <Route path="/app" element={<Navigate to="/app/dm" replace />} />
-        <Route path="/app/discover" element={<ProtectedRoute><DiscoverPage /></ProtectedRoute>} />
+        {/* Discovery removed 2026-10-20 — to be rebuilt. */}
+        <Route path="/app/discover" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/friends" element={<ProtectedRoute><FriendsPage /></ProtectedRoute>} />
-        <Route path="/app/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/quickdraw" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-        <Route path="/app/marketplace/games" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
+        <Route path="/app/marketplace" element={<Navigate to="/app/dm" replace />} />
+        <Route path="/app/marketplace/*" element={<Navigate to="/app/dm" replace />} />
         <Route path="/app/dm" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId" element={<ProtectedRoute><DirectMessagePage /></ProtectedRoute>} />
         <Route path="/app/dm/:conversationId/call" element={<ProtectedRoute><DirectCallPage /></ProtectedRoute>} />
@@ -102,6 +115,9 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
         <Route path="/app/community/:communityId/settings" element={<ProtectedRoute><CommunitySettingsPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/channel/:channelId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="/app/community/:communityId/voice/:channelId" element={<ProtectedRoute><VoiceChannelPage /></ProtectedRoute>} />
+        <Route path="/app/community/:communityId/forum/:channelId" element={<ProtectedRoute><ForumChannelPage /></ProtectedRoute>} />
+        <Route path="/app/games" element={<Navigate to="/app/dm" replace />} />
+        <Route path="/app/developer" element={<ProtectedRoute><DeveloperPortalPage /></ProtectedRoute>} />
         <Route path="/app/profile/:userId" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/app/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
         <Route path="/app/leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
@@ -114,27 +130,26 @@ function AppRoutes({ isElectron, webSurface }: { isElectron: boolean; webSurface
 }
 
 export default function App() {
-  const isElectron =
-    typeof window !== 'undefined' &&
-    (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
-  const webSurface = detectWebSurface(isElectron);
+  const isDesktop = isDesktopRuntime();
+  const webSurface = detectWebSurface(isDesktop);
 
-  const Router = isElectron ? HashRouter : BrowserRouter;
+  const Router = isDesktop ? HashRouter : BrowserRouter;
 
   return (
     <Router>
       <AuthProvider>
-        <RealtimeBridge />
-        <PwaExperienceBar isElectron={isElectron} />
-        <AppRoutes isElectron={isElectron} webSurface={webSurface} />
+        <CustomEmojiProvider>
+          <RealtimeBridge />
+          <PwaExperienceBar isElectron={isDesktop} />
+          <AppRoutes isDesktop={isDesktop} webSurface={webSurface} />
+        </CustomEmojiProvider>
       </AuthProvider>
     </Router>
   );
 }
 
 function RealtimeBridge() {
-  const isElectron =
-    typeof window !== 'undefined' && (window.location.protocol === 'file:' || navigator.userAgent.toLowerCase().includes('electron'));
+  const isDesktop = isDesktopRuntime();
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -215,7 +230,7 @@ function RealtimeBridge() {
 
   // Start/stop realtime listener in main process when running in Electron
   useEffect(() => {
-    if (!isElectron) return;
+    if (!isDesktop) return;
     if (!session) return;
     const token = (session as any).access_token;
     if (!token) return;
@@ -287,24 +302,46 @@ function RealtimeBridge() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isElectron, session]);
+  }, [isDesktop, session]);
 
   useEffect(() => {
-    if (!isElectron || !session || !profile) return;
+    if (!isDesktop || !session || !profile) return;
     try {
       void window.desktopBridge?.realtimeSetStatus(profile.status || 'online');
     } catch (err) {
       console.warn('desktopBridge.realtimeSetStatus failed', err);
     }
-  }, [isElectron, session, profile?.status, profile?.id]);
+  }, [isDesktop, session, profile?.status, profile?.id]);
 
   useEffect(() => {
     queueRuntimeEvent('session_bridge_ready', {
-      is_electron: isElectron,
+      is_desktop: isDesktop,
       has_session: Boolean(session),
       route: `${location.pathname}${location.search}`,
     }, { userId: profile?.id, sampleRate: 0.2 });
-  }, [isElectron, location.pathname, location.search, profile?.id, session]);
+  }, [isDesktop, location.pathname, location.search, profile?.id, session]);
+
+  // iOS Safari evicts localStorage for sites not opened in ~7 days (for non-installed
+  // origins) and pauses Supabase's auto-refresh while the tab is backgrounded. When
+  // the PWA returns to foreground, proactively refresh the session so we don't leave
+  // the user on a silently-expired token.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void (async () => {
+        try {
+          const { data } = await supabase.auth.refreshSession();
+          if (!data?.session) {
+            queueRuntimeEvent('auth_session_stale_on_resume', {}, { userId: profile?.id, sampleRate: 1 });
+          }
+        } catch (err) {
+          reportRuntimeError('auth_resume_refresh_failed', err, {}, { userId: profile?.id, sampleRate: 1 });
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [profile?.id]);
 
   return null;
 }

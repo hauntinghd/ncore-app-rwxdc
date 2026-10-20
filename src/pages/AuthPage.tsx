@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  KeyRound,
   Loader2,
   Lock,
   LogIn,
@@ -13,10 +14,13 @@ import {
   MessageSquare,
   UserPlus,
   Users,
+  Wand2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { consumePendingInviteCode } from '../lib/inviteLinks';
 import { supabase } from '../lib/supabase';
+import { isTauriRuntime } from '../lib/desktopRuntime';
+import { TauriWindowChrome } from '../components/layout/TauriWindowChrome';
 
 interface GlobalStats {
   members: number | null;
@@ -46,29 +50,35 @@ function useGlobalStats() {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     const loadStats = async () => {
-      const [membersRes, communitiesRes, messagesRes, dmMessagesRes, onlineNowRes] = await Promise.all([
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('communities').select('id', { count: 'exact', head: true }),
-        supabase.from('messages').select('id', { count: 'exact', head: true }),
-        supabase.from('direct_messages').select('id', { count: 'exact', head: true }),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }).in('status', ['online', 'idle', 'dnd']),
-      ]);
+      try {
+        const [membersRes, communitiesRes, messagesRes, dmMessagesRes, onlineNowRes] = await Promise.all([
+          supabase.from('profiles').select('id', { count: 'exact', head: true }),
+          supabase.from('communities').select('id', { count: 'exact', head: true }),
+          supabase.from('messages').select('id', { count: 'exact', head: true }),
+          supabase.from('direct_messages').select('id', { count: 'exact', head: true }),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).in('status', ['online', 'idle', 'dnd']),
+        ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      const members = membersRes.error ? null : (membersRes.count ?? 0);
-      const communities = communitiesRes.error ? null : (communitiesRes.count ?? 0);
-      const roomMessages = messagesRes.error ? 0 : (messagesRes.count ?? 0);
-      const directMessages = dmMessagesRes.error ? 0 : (dmMessagesRes.count ?? 0);
-      const onlineNow = onlineNowRes.error ? null : (onlineNowRes.count ?? 0);
+        const members = membersRes.error ? null : (membersRes.count ?? 0);
+        const communities = communitiesRes.error ? null : (communitiesRes.count ?? 0);
+        const roomMessages = messagesRes.error ? 0 : (messagesRes.count ?? 0);
+        const directMessages = dmMessagesRes.error ? 0 : (dmMessagesRes.count ?? 0);
+        const onlineNow = onlineNowRes.error ? null : (onlineNowRes.count ?? 0);
 
-      setStats({
-        members,
-        communities,
-        messages: roomMessages + directMessages,
-        onlineNow,
-      });
-      setLoading(false);
+        setStats({
+          members,
+          communities,
+          messages: roomMessages + directMessages,
+          onlineNow,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.warn('Auth stats load failed:', (error as any)?.message || error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
 
     const scheduleRefresh = () => {
@@ -102,7 +112,7 @@ function useGlobalStats() {
   return { stats, loading };
 }
 
-function AuthShell({
+export function AuthShell({
   title,
   subtitle,
   children,
@@ -127,6 +137,7 @@ function AuthShell({
 
   return (
     <div className="min-h-screen bg-surface-950 text-surface-100 px-4 py-6 md:px-8 md:py-8">
+      {isTauriRuntime() && <TauriWindowChrome />}
       <div className="absolute inset-0 bg-grid pointer-events-none" />
       <div className="absolute inset-0 bg-hero-gradient pointer-events-none" />
 
@@ -191,18 +202,26 @@ function AuthShell({
   );
 }
 
+type LoginMode = 'password' | 'magic';
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { signIn } = useAuth();
+  const { signIn, signInWithMagicLink, clearSignInThrottle, resendConfirmationEmail } = useAuth();
+  const [mode, setMode] = useState<LoginMode>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
-  async function handleSubmit(event: React.FormEvent) {
+  const isThrottled = /too many failed/i.test(error);
+  const isUnconfirmed = /not confirmed|confirmation|verify your email/i.test(error);
+
+  async function handlePasswordSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError('');
+    setInfo('');
     setLoading(true);
 
     const { error: signInError } = await signIn(email.trim(), password);
@@ -216,58 +235,241 @@ export function LoginPage() {
     navigate(inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app');
   }
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unsubscribe: (() => void) | undefined;
+    void import('../lib/desktopOAuth').then(({ onDesktopOAuthResult }) => {
+      unsubscribe = onDesktopOAuthResult((result) => {
+        setLoading(false);
+        if (result.ok) {
+          navigate('/app');
+        } else {
+          setInfo('');
+          setError(result.error || 'Google sign-in failed. Try again.');
+        }
+      });
+    });
+    return () => unsubscribe?.();
+  }, [navigate]);
+
+  async function handleGoogleSignIn() {
+    setError('');
+    setInfo('');
+    setLoading(true);
+    if (isTauriRuntime()) {
+      try {
+        const { startDesktopGoogleSignIn } = await import('../lib/desktopOAuth');
+        await startDesktopGoogleSignIn();
+        setInfo('Finish signing in with Google in your browser — NCore will pick it up automatically.');
+        // Don't hold the form hostage: the user may close the browser tab.
+        setLoading(false);
+      } catch (err) {
+        setError(String((err as Error)?.message || err));
+        setLoading(false);
+      }
+      return;
+    }
+    const inviteCode = String(searchParams.get('invite') || '').trim();
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}${inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app/dm'}`,
+      },
+    });
+    // On success the browser navigates to Google; only failures land here.
+    if (oauthError) {
+      setError(oauthError.message || 'Google sign-in is unavailable right now.');
+      setLoading(false);
+    }
+  }
+
+  async function handleMagicLinkSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError('');
+    setInfo('');
+    setLoading(true);
+
+    const { error: otpError } = await signInWithMagicLink(email.trim());
+    setLoading(false);
+    if (otpError) {
+      setError(otpError.message || 'Could not send magic link. Try again.');
+      return;
+    }
+    setInfo('Magic link sent. Check your email and tap the link to sign in.');
+  }
+
+  async function handleResendConfirmation() {
+    if (!email.trim()) {
+      setError('Enter your email above first.');
+      return;
+    }
+    setError('');
+    setInfo('');
+    setLoading(true);
+    const { error: resendError } = await resendConfirmationEmail(email.trim());
+    setLoading(false);
+    if (resendError) {
+      setError(resendError.message || 'Could not resend confirmation email.');
+      return;
+    }
+    setInfo('Confirmation email sent. Check your inbox.');
+  }
+
+  function handleClearThrottle() {
+    clearSignInThrottle();
+    setError('');
+    setInfo('Lockout cleared. Try again.');
+  }
+
   return (
     <AuthShell title="Welcome back" subtitle="Sign in to your account to continue.">
-      <form className="space-y-4" onSubmit={handleSubmit}>
+      <form className="space-y-4" onSubmit={mode === 'password' ? handlePasswordSubmit : handleMagicLinkSubmit}>
         {error && (
           <div className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200 flex items-start gap-2">
             <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-            <span>{error}</span>
+            <div className="flex-1 space-y-2">
+              <span>{error}</span>
+              {isThrottled && (
+                <button
+                  type="button"
+                  onClick={handleClearThrottle}
+                  className="text-xs underline text-red-100 hover:text-white"
+                >
+                  Clear lockout now
+                </button>
+              )}
+              {isUnconfirmed && (
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  className="text-xs underline text-red-100 hover:text-white"
+                >
+                  Resend confirmation email
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {info && (
+          <div className="rounded-lg border border-green-500/35 bg-green-500/10 px-3 py-2 text-sm text-green-200 flex items-start gap-2">
+            <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
+            <span>{info}</span>
           </div>
         )}
 
+        {(
+          <>
+            {/*
+              On desktop, Google sign-in runs in the system browser and returns
+              through an ncore:// deep link (see lib/desktopOAuth.ts) — Google
+              refuses OAuth inside embedded webviews.
+            */}
+            <button
+              type="button"
+              onClick={() => void handleGoogleSignIn()}
+              disabled={loading}
+              className="nyptid-btn-secondary w-full py-3 inline-flex items-center justify-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
+                <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.9-5.5 3.9-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.1 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4.1 9.6-9.8 0-.7-.1-1.2-.2-1.7H12z" />
+              </svg>
+              Continue with Google
+            </button>
+            <div className="flex items-center gap-3 text-xs text-surface-500">
+              <span className="h-px flex-1 bg-surface-700" />
+              or
+              <span className="h-px flex-1 bg-surface-700" />
+            </div>
+          </>
+        )}
+
         <label className="block">
-          <span className="text-sm text-surface-300">Email address</span>
+          <span className="text-sm text-surface-300">{mode === 'password' ? 'Email or username' : 'Email address'}</span>
           <div className="mt-1 relative">
             <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
             <input
-              type="email"
+              type={mode === 'password' ? 'text' : 'email'}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
+              placeholder={mode === 'password' ? 'you@example.com or username' : 'you@example.com'}
+              autoComplete="username"
+              inputMode={mode === 'password' ? 'text' : 'email'}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="nyptid-input pl-9"
               required
             />
           </div>
         </label>
 
-        <label className="block">
-          <span className="text-sm text-surface-300">Password</span>
-          <div className="mt-1 relative">
-            <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Your password"
-              autoComplete="current-password"
-              className="nyptid-input pl-9"
-              required
-            />
-          </div>
-        </label>
+        {mode === 'password' && (
+          <>
+            <label className="block">
+              <span className="text-sm text-surface-300">Password</span>
+              <div className="mt-1 relative">
+                <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Your password"
+                  autoComplete="current-password"
+                  className="nyptid-input pl-9"
+                  required
+                />
+              </div>
+            </label>
+            <div className="flex justify-end -mt-2">
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                className="text-xs text-nyptid-200 hover:text-nyptid-100 inline-flex items-center gap-1"
+              >
+                <KeyRound size={12} />
+                Forgot password?
+              </button>
+            </div>
+          </>
+        )}
 
         <button type="submit" disabled={loading} className="nyptid-btn-primary w-full py-3">
           {loading ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              Signing in...
+              {mode === 'password' ? 'Signing in...' : 'Sending magic link...'}
             </>
-          ) : (
+          ) : mode === 'password' ? (
             <>
               <LogIn size={16} />
               Sign In
+            </>
+          ) : (
+            <>
+              <Wand2 size={16} />
+              Send Magic Link
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === 'password' ? 'magic' : 'password');
+            setError('');
+            setInfo('');
+          }}
+          className="w-full text-sm text-surface-300 hover:text-surface-100 inline-flex items-center justify-center gap-2 py-2"
+        >
+          {mode === 'password' ? (
+            <>
+              <Wand2 size={14} />
+              Sign in with a magic link instead
+            </>
+          ) : (
+            <>
+              <Lock size={14} />
+              Use my password instead
             </>
           )}
         </button>
@@ -357,6 +559,10 @@ export function SignupPage() {
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
               autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="nyptid-input pl-9"
               required
             />

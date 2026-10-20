@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Compass,
   Flame,
-  Globe,
   Lock,
   Plus,
   Radar,
@@ -17,7 +16,9 @@ import {
   Users,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { EmptyState, EmptyIllustrations } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
+import { CommunityAvatar } from '../components/ui/CommunityAvatar';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Community } from '../lib/types';
@@ -142,13 +143,7 @@ function DiscoverServerCard({ community, joined, joining, onOpen, onJoin }: Disc
         <div className="flex h-full items-end px-5 pb-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="h-14 w-14 overflow-hidden rounded-[18px] border border-white/10 bg-surface-900 shadow-xl">
-              {community.icon_url ? (
-                <img src={community.icon_url} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-lg font-black text-nyptid-200">
-                  {community.name.slice(0, 2).toUpperCase()}
-                </div>
-              )}
+              <CommunityAvatar iconUrl={community.icon_url} name={community.name} className="text-3xl" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-2xl font-black text-white">{community.name}</div>
@@ -558,10 +553,12 @@ export function DiscoverPage() {
                       ))}
                     </div>
                   ) : trendingCommunities.length === 0 ? (
-                    <div className="rounded-[28px] border border-dashed border-surface-700 bg-surface-900/60 px-6 py-14 text-center">
-                      <Globe size={42} className="mx-auto text-surface-600" />
-                      <div className="mt-4 text-xl font-bold text-surface-100">No servers matched this slice</div>
-                      <div className="mt-2 text-sm text-surface-500">Change the category or search to broaden the directory.</div>
+                    <div className="rounded-[28px] border border-dashed border-surface-700 bg-surface-900/60">
+                      <EmptyState
+                        illustration={EmptyIllustrations.NoCommunities}
+                        title="No servers matched this slice"
+                        description="Change the category or search above to broaden the directory."
+                      />
                     </div>
                   ) : (
                     <div className="grid gap-5 xl:grid-cols-2">

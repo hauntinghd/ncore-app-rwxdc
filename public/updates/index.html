@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0b1018" />
+  <meta name="robots" content="noindex" />
+  <title>Download NCore</title>
+  <link rel="icon" type="image/jpeg" href="/NCore.jpg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/NCore.jpg" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: 'Outfit', 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+      color: #e3e5e8;
+      background:
+        radial-gradient(1000px 560px at 20% -10%, rgba(211, 84, 43, 0.24), transparent 65%),
+        radial-gradient(820px 460px at 80% 110%, rgba(243, 187, 82, 0.18), transparent 60%),
+        #070b12;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      max-width: 520px;
+      width: 100%;
+      border-radius: 24px;
+      border: 1px solid rgba(243, 187, 82, 0.28);
+      background: linear-gradient(165deg, rgba(98, 54, 28, 0.55) 0%, rgba(33, 20, 12, 0.82) 60%, rgba(21, 12, 7, 0.92) 100%);
+      padding: 28px 28px 24px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+    .brand img {
+      width: 56px; height: 56px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14);
+    }
+    .brand-name { font-size: 20px; font-weight: 800; letter-spacing: 0.4px; }
+    .brand-sub { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #94a0b3; }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      font-weight: 900;
+      background: linear-gradient(120deg, #ffd47e, #c97621);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    p { margin: 0 0 16px; color: #a8b4c6; font-size: 14px; line-height: 1.55; }
+    .version-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(243, 187, 82, 0.4);
+      background: rgba(243, 187, 82, 0.12);
+      color: #ffd47e;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.4px;
+      margin-bottom: 16px;
+    }
+    .primary, .secondary {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border-radius: 12px; padding: 12px 18px;
+      font-weight: 800; font-size: 14px; letter-spacing: 0.3px;
+      text-decoration: none; cursor: pointer; border: none;
+      transition: transform 0.15s ease;
+    }
+    .primary {
+      background: linear-gradient(135deg, #f3bb52 0%, #df9732 52%, #b14024 100%);
+      color: #1c0c02;
+      box-shadow: 0 0 24px rgba(243, 187, 82, 0.4);
+      width: 100%;
+    }
+    .primary:hover { transform: translateY(-1px); }
+    .primary[disabled] { opacity: .5; cursor: default; transform: none; }
+    .meta {
+      display: flex; flex-wrap: wrap; gap: 12px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 12px; color: #94a0b3;
+    }
+    .meta a { color: #ffd47e; text-decoration: none; }
+    .meta a:hover { text-decoration: underline; }
+    .hint {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #6f798c;
+      line-height: 1.5;
+    }
+    code { font-family: 'JetBrains Mono', ui-monospace, monospace; color: #ffd47e; background: rgba(243,187,82,0.08); padding: 1px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <img src="/NCore.jpg" alt="" />
+      <div>
+        <div class="brand-name">NCore</div>
+        <div class="brand-sub">NYPTID · Owned Comms Infra</div>
+      </div>
+    </div>
+
+    <div class="version-chip" id="versionChip">Loading…</div>
+    <h1>Download NCore Desktop</h1>
+    <p>Windows installer (x64). Auto-updates keep you on the latest build via the NCore update feed.</p>
+
+    <a id="downloadBtn" class="primary" href="#" rel="noopener">
+      Download · <span id="downloadSize">—</span>
+    </a>
+
+    <div class="meta">
+      <a id="webAppLink" href="https://app.ncore.nyptidindustries.com/">Web app</a>
+      <a href="/updates/release-notes.json">Release notes</a>
+      <a href="/updates/latest.yml">latest.yml</a>
+    </div>
+
+    <p class="hint">
+      If Windows Defender or SmartScreen blocks the installer, click <strong>More info</strong> → <strong>Run anyway</strong>. One-time install; the updater handles everything after.
+    </p>
+  </main>
+
+  <script>
+    (async function () {
+      var btn = document.getElementById('downloadBtn');
+      var chip = document.getElementById('versionChip');
+      var sizeEl = document.getElementById('downloadSize');
+      function fmtBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) return '';
+        var units = ['B','KB','MB','GB'];
+        var i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+        return bytes.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+      }
+      try {
+        var res = await fetch('/updates/latest.yml', { cache: 'no-store' });
+        if (!res.ok) throw new Error('feed ' + res.status);
+        var text = await res.text();
+        var versionMatch = text.match(/^version:\s*(.+)$/m);
+        var pathMatch = text.match(/^path:\s*(.+)$/m);
+        var sizeMatch = text.match(/^\s*size:\s*(\d+)/m);
+        var version = versionMatch ? versionMatch[1].trim().replace(/^['"]|['"]$/g, '') : '';
+        var installerName = pathMatch ? pathMatch[1].trim().replace(/^['"]|['"]$/g, '') : '';
+        var size = sizeMatch ? Number(sizeMatch[1]) : 0;
+        if (version) chip.textContent = 'v' + version + ' · Windows x64';
+        if (installerName) btn.setAttribute('href', '/updates/' + encodeURIComponent(installerName));
+        if (installerName) btn.setAttribute('download', installerName);
+        if (size) sizeEl.textContent = fmtBytes(size);
+        else sizeEl.textContent = 'latest';
+      } catch (error) {
+        chip.textContent = 'Feed unreachable — try again in a moment';
+        btn.setAttribute('disabled', 'true');
+        btn.setAttribute('aria-disabled', 'true');
+        sizeEl.textContent = '';
+      }
+    })();
+  </script>
+</body>
+</html>

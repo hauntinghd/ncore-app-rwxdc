@@ -12,6 +12,12 @@ export interface CallSettings {
   qualityHD: boolean;
   hardwareAcceleration: boolean;
   screenShareQuality: '720p30' | '1080p120' | '4k60';
+  pttEnabled: boolean;
+  // Single canonical key code (KeyboardEvent.code — e.g. "Space", "AltLeft").
+  pttKeybind: string;
+  // 0..1 — voice activity threshold used by the RNNoise worklet's gate.
+  // Higher = more aggressive (suppresses more quiet audio).
+  vadThreshold: number;
 }
 
 export interface MediaDeviceOption {
@@ -36,6 +42,9 @@ export const DEFAULT_CALL_SETTINGS: CallSettings = {
   qualityHD: false,
   hardwareAcceleration: true,
   screenShareQuality: '720p30',
+  pttEnabled: false,
+  pttKeybind: 'Space',
+  vadThreshold: 0.5,
 };
 
 export function loadCallSettings(): CallSettings {

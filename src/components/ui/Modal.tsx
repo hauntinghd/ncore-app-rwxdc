@@ -1,5 +1,6 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useId } from 'react';
 import { X } from 'lucide-react';
+import { useFocusTrap } from './useFocusTrap';
 
 interface ModalProps {
   isOpen: boolean;
@@ -18,6 +19,9 @@ const sizeClasses = {
 };
 
 export function Modal({ isOpen, onClose, title, children, size = 'md', className = '' }: ModalProps) {
+  const panelRef = useFocusTrap(isOpen, onClose);
+  const titleId = useId();
+
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -27,16 +31,6 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', className
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-    }
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   return (
@@ -45,12 +39,19 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', className
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className={`relative w-full ${sizeClasses[size]} bg-surface-800 border border-surface-700 rounded-2xl shadow-2xl animate-slide-up ${className}`}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        className={`relative w-full ${sizeClasses[size]} bg-surface-800 border border-surface-700 rounded-2xl shadow-2xl animate-slide-up ${className}`}
+      >
         {title && (
           <div className="flex items-center justify-between px-6 py-4 border-b border-surface-700">
-            <h2 className="text-lg font-semibold text-surface-100">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold text-surface-100">{title}</h2>
             <button
               onClick={onClose}
+              aria-label="Close dialog"
               className="p-1.5 rounded-lg text-surface-400 hover:text-surface-200 hover:bg-surface-700 transition-colors"
             >
               <X size={18} />

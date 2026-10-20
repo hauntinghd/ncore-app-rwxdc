@@ -66,15 +66,14 @@ export function OnboardingPage() {
 
     const { error: err } = await supabase
       .from('profiles')
-      .insert({
+      .upsert({
         id: user.id,
         username: username.toLowerCase().replace(/[^a-z0-9_]/g, ''),
         display_name: displayName,
         bio,
         avatar_url: selectedAvatar || null,
-        platform_role: 'user',
         status: 'online',
-      });
+      }, { onConflict: 'id' });
 
     if (err) {
       if (err.message.includes('unique')) {

@@ -24,6 +24,8 @@ let _streamerModeConfig = {
 };
 let _preferredDesktopSourceId = null;
 let mainWindow = null;
+let updateOverlayWindow = null;
+let cachedLogoDataUri = null;
 let appTray = null;
 let isAppQuitting = false;
 let isInstallingUpdate = false;
@@ -65,6 +67,197 @@ function emitUpdateReadyState() {
       // ignore renderer event delivery failures
     }
   }
+  pushUpdateOverlayState();
+}
+
+// ---------------------------------------------------------------------------
+// Update overlay (Discord-style frameless "arc reactor" window)
+// ---------------------------------------------------------------------------
+
+let updateOverlayErrorState = null; // { title, message, hint, downloadUrl, revealPath } | null
+
+function getUpdateOverlayPhase() {
+  if (updateOverlayErrorState) return 'error';
+  if (isInstallingUpdate) return 'installing';
+  if (isUpdateReady) return 'ready';
+  if (isDownloadingUpdate) return 'downloading';
+  if (isCheckingForUpdate) return 'checking';
+  return 'idle';
+}
+
+function buildUpdateOverlayState() {
+  const base = {
+    phase: getUpdateOverlayPhase(),
+    progress: Number.isFinite(updateDownloadProgress) ? Number(updateDownloadProgress) : 0,
+    version: String(downloadedUpdateVersion || availableUpdateVersion || ''),
+    message: String(updateStatusMessage || ''),
+    installing: isInstallingUpdate,
+    ready: isUpdateReady,
+    downloading: isDownloadingUpdate,
+    checking: isCheckingForUpdate,
+  };
+  if (updateOverlayErrorState) {
+    return { ...base, ...updateOverlayErrorState };
+  }
+  return base;
+}
+
+function getPendingInstallerPath() {
+  try {
+    // electron-updater stores downloaded installers under %LOCALAPPDATA% on
+    // Windows (NOT %APPDATA% / userData). Computing this from app.getPath
+    // ('userData') + '..' resolves to Roaming, which is the wrong drive root,
+    // so the preflight always concluded the installer was missing and bailed
+    // out via pushOverlayInstallerMissing — even when the real installer was
+    // sitting in the correct LocalAppData folder ready to run.
+    if (process.platform === 'win32') {
+      const localAppData = process.env.LOCALAPPDATA
+        || path.join(app.getPath('home'), 'AppData', 'Local');
+      return path.join(localAppData, 'ncore-updater', 'pending');
+    }
+    return path.join(app.getPath('userData'), '..', 'ncore-updater', 'pending');
+  } catch {
+    return '';
+  }
+}
+
+function resolveUpdateDownloadUrl() {
+  const feed = readUpdateFeedUrl();
+  if (!feed) return '';
+  // The installer filename varies by version. Link to the directory listing
+  // so users can grab whatever latest.yml points at.
+  return feed.replace(/\/$/, '') + '/';
+}
+
+function ensureUpdateOverlay() {
+  if (isPortableBuild) return null;
+  if (updateOverlayWindow && !updateOverlayWindow.isDestroyed()) {
+    updateOverlayWindow.show();
+    return updateOverlayWindow;
+  }
+  try {
+    updateOverlayWindow = new BrowserWindow({
+      width: 420,
+      height: 440,
+      resizable: false,
+      minimizable: true,
+      maximizable: false,
+      fullscreenable: false,
+      frame: false,
+      transparent: true,
+      hasShadow: true,
+      alwaysOnTop: true,
+      skipTaskbar: false,
+      backgroundColor: '#00000000',
+      title: 'Updating NCore',
+      icon: resolveAppIconPath() || undefined,
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: path.join(__dirname, 'update-overlay-preload.cjs'),
+      },
+    });
+    updateOverlayWindow.setMenuBarVisibility(false);
+    updateOverlayWindow.loadFile(path.join(__dirname, 'update-overlay.html'));
+    updateOverlayWindow.once('ready-to-show', () => {
+      if (updateOverlayWindow && !updateOverlayWindow.isDestroyed()) {
+        updateOverlayWindow.show();
+      }
+    });
+    updateOverlayWindow.on('closed', () => {
+      updateOverlayWindow = null;
+    });
+  } catch (error) {
+    console.warn('Failed to open update overlay window:', error?.message || error);
+    updateOverlayWindow = null;
+  }
+  return updateOverlayWindow;
+}
+
+function pushUpdateOverlayState() {
+  if (!updateOverlayWindow || updateOverlayWindow.isDestroyed()) return;
+  try {
+    updateOverlayWindow.webContents.send('updateOverlay:state', buildUpdateOverlayState());
+  } catch {
+    // ignore — overlay may still be loading
+  }
+}
+
+function closeUpdateOverlay() {
+  if (!updateOverlayWindow) return;
+  try {
+    if (!updateOverlayWindow.isDestroyed()) updateOverlayWindow.close();
+  } catch {
+    // ignore
+  }
+  updateOverlayWindow = null;
+}
+
+function pushOverlayInstallerMissing() {
+  const version = downloadedUpdateVersion || availableUpdateVersion || '';
+  const feed = resolveUpdateDownloadUrl();
+  const pendingDir = getPendingInstallerPath();
+  updateOverlayErrorState = {
+    title: 'Installer was blocked',
+    message: version
+      ? `The NCore v${version} installer was downloaded, but Windows (usually Defender or SmartScreen) removed it before we could run it.`
+      : 'The installer was downloaded, but Windows removed it before we could run it.',
+    hint: 'Whitelist the ncore-updater folder under Windows Security → Virus & threat protection → Exclusions to keep this from happening.',
+    downloadUrl: feed,
+    revealPath: pendingDir,
+  };
+  isInstallingUpdate = false;
+  isUpdateReady = false;
+  emitUpdateReadyState();
+  ensureUpdateOverlay();
+  return { ok: false, ...updateOverlayErrorState };
+}
+
+function pushOverlayInstallError(error) {
+  const feed = resolveUpdateDownloadUrl();
+  const pendingDir = getPendingInstallerPath();
+  const rawMessage = String(error?.message || error || 'Unknown install error.');
+  const looksLikeMissing = /cannot find|not found|ENOENT|no such file/i.test(rawMessage);
+  updateOverlayErrorState = {
+    title: looksLikeMissing ? 'Installer was blocked' : 'Install failed',
+    message: looksLikeMissing
+      ? 'Windows (usually Defender or SmartScreen) blocked the installer. Download the latest build manually to finish updating.'
+      : rawMessage,
+    hint: looksLikeMissing
+      ? 'Whitelist the ncore-updater folder under Windows Security → Virus & threat protection → Exclusions to keep this from happening.'
+      : '',
+    downloadUrl: feed,
+    revealPath: pendingDir,
+  };
+  isInstallingUpdate = false;
+  emitUpdateReadyState();
+  ensureUpdateOverlay();
+  return { ok: false, ...updateOverlayErrorState };
+}
+
+function readAppLogoDataUri() {
+  if (cachedLogoDataUri) return cachedLogoDataUri;
+  const candidates = [
+    path.join(__dirname, 'assets', 'NCore.jpg'),
+    path.join(__dirname, '..', 'public', 'NCore.jpg'),
+    path.join(__dirname, '..', 'dist', 'NCore.jpg'),
+    path.join(process.resourcesPath || __dirname, 'NCore.jpg'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const buf = fs.readFileSync(candidate);
+      const ext = path.extname(candidate).toLowerCase();
+      const mime = ext === '.png' ? 'image/png' : ext === '.svg' ? 'image/svg+xml' : 'image/jpeg';
+      cachedLogoDataUri = `data:${mime};base64,${buf.toString('base64')}`;
+      return cachedLogoDataUri;
+    } catch {
+      // try next candidate
+    }
+  }
+  return '';
 }
 
 // Keep media/playback responsive for realtime calling.
@@ -96,16 +289,20 @@ function createWindow() {
     icon: appIconPath,
     ...(isWindows ? {
       titleBarStyle: 'hidden',
+      // Height matches the app's own h-14 (56px) top bar so the native Windows
+      // caption buttons sit centered in that row rather than floating in a
+      // shorter strip above it. Windows draws these itself and always pins
+      // them to the true top-right corner of the window.
       titleBarOverlay: {
         color: '#11131a',
         symbolColor: '#f4f6fb',
-        height: 32,
+        height: 56,
       },
     } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
@@ -233,9 +430,14 @@ function destroyTray() {
 
 function closeAllWindows(options = {}) {
   const force = Boolean(options.force);
+  const keepOverlay = Boolean(options.keepOverlay);
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win || win.isDestroyed()) continue;
+    // The Discord-style update overlay is the one surface we want to survive
+    // the quit-for-update flow so users see the arc-reactor animation during
+    // install. closeAllWindows callers that want a hard reset pass force:true.
+    if (keepOverlay && updateOverlayWindow && win === updateOverlayWindow) continue;
     try {
       win.removeAllListeners('close');
     } catch {
@@ -263,18 +465,46 @@ function triggerUpdateInstall(reason = 'auto') {
   isUpdateReady = false;
   isAppQuitting = true;
   hasShownBackgroundHint = true;
+
+  // Show the arc-reactor overlay FIRST so the user sees the animation the
+  // moment they click the green update button — not just when
+  // before-quit-for-update happens to fire later in the tear-down.
+  updateStatusMessage = downloadedUpdateVersion
+    ? `Installing NCore v${downloadedUpdateVersion}...`
+    : 'Installing update...';
+  ensureUpdateOverlay();
   emitUpdateReadyState();
   destroyTray();
 
-  // Disable window "hide to tray" behavior for this update quit flow.
-  closeAllWindows();
+  // Preflight: if Defender / SmartScreen already ate the pending installer,
+  // bail out before NSIS so we can show a proper recovery UI instead of
+  // flashing the install animation for half a second and dying.
+  try {
+    const pendingDir = getPendingInstallerPath();
+    if (pendingDir && fs.existsSync(pendingDir)) {
+      const hasInstaller = fs.readdirSync(pendingDir).some((name) => /\.exe$/i.test(name));
+      if (!hasInstaller) {
+        isAppQuitting = false;
+        isInstallingUpdate = false;
+        pushOverlayInstallerMissing();
+        return;
+      }
+    }
+  } catch {
+    // if we can't read the pending dir, fall through and let autoUpdater try.
+  }
+
+  // Hide the main window (and any secondary) but keep the overlay alive so
+  // the animation stays on screen through the quit handoff to NSIS.
+  closeAllWindows({ keepOverlay: true });
 
   setTimeout(() => {
     try {
       autoUpdater.quitAndInstall(false, true);
     } catch (error) {
       console.warn(`quitAndInstall failed (${reason}):`, error?.message || error);
-      closeAllWindows({ force: true });
+      pushOverlayInstallError(error);
+      closeAllWindows({ force: true, keepOverlay: true });
       try {
         app.quit();
       } catch {
@@ -286,6 +516,9 @@ function triggerUpdateInstall(reason = 'auto') {
   // Fallback: if the app is still alive after quitAndInstall attempt, force exit.
   setTimeout(() => {
     if (!isInstallingUpdate) return;
+    // At this point NSIS should have already taken over. If not, force-close
+    // everything — the overlay included, since leaving it behind orphaned
+    // would look worse than a clean shutdown.
     closeAllWindows({ force: true });
     try {
       app.quit();
@@ -457,16 +690,7 @@ function showNativeNotificationForEvent(incoming) {
 }
 
 app.whenReady().then(() => {
-  if (app.isPackaged && process.platform === 'win32') {
-    try {
-      app.setLoginItemSettings({
-        openAtLogin: true,
-        openAsHidden: true,
-      });
-    } catch (error) {
-      console.warn('Failed to set startup login item:', error?.message || error);
-    }
-  }
+  applyStartupConfig(readStartupConfig());
 
   registerDesktopActions();
 
@@ -684,11 +908,38 @@ function setupAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  /*
+    NCore ships without an Authenticode certificate — every build runs
+    `-c.win.signAndEditExecutable=false`, and SmartScreen already shows
+    "Unknown publisher" as a result.
+
+    electron-updater's NsisUpdater verifies the downloaded installer's code
+    signature by default. Against an unsigned installer that check always
+    fails, so every in-app update was downloaded and then rejected, and
+    "Download Latest Update" appeared to do nothing. Overriding the verifier is
+    the only way to disable it: `verifyUpdateCodeSignature` is a runtime
+    property on the updater instance, NOT something electron-builder writes
+    into app-update.yml, so setting it in package.json has no effect (verified
+    by inspecting the packaged app-update.yml).
+
+    What is given up is proof of publisher identity — which an unsigned build
+    never had. What still protects the download is unchanged: the feed is
+    fetched over HTTPS, and electron-updater verifies the installer against the
+    sha512 recorded in latest.yml before running it, so a corrupted or
+    substituted file is still rejected.
+
+    If an Authenticode certificate is ever obtained, delete this override.
+  */
+  if ('verifyUpdateCodeSignature' in autoUpdater) {
+    autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
+  }
+
   autoUpdater.on('checking-for-update', () => {
     isCheckingForUpdate = true;
     isDownloadingUpdate = false;
     isUpdateReady = false;
     updateDownloadProgress = 0;
+    updateOverlayErrorState = null;
     updateStatusMessage = 'Checking for updates...';
     emitUpdateReadyState();
   });
@@ -712,6 +963,10 @@ function setupAutoUpdates() {
     updateStatusMessage = downloadedUpdateVersion
       ? `Applying NCore v${downloadedUpdateVersion}...`
       : 'Applying update...';
+    // The overlay is the only window that survives quitAndInstall to give the
+    // user a "we're working on it" surface during the brief window between
+    // the main app quitting and NSIS relaunching the new exe.
+    ensureUpdateOverlay();
     emitUpdateReadyState();
     destroyTray();
   });
@@ -726,6 +981,7 @@ function setupAutoUpdates() {
     updateStatusMessage = availableUpdateVersion
       ? `Downloading NCore v${availableUpdateVersion}...`
       : 'Downloading update...';
+    ensureUpdateOverlay();
     emitUpdateReadyState();
   });
 
@@ -824,6 +1080,52 @@ function getAuthStoragePath() {
   return path.join(app.getPath('userData'), 'auth-storage.json');
 }
 
+function getStartupConfigPath() {
+  return path.join(app.getPath('userData'), 'startup-config.json');
+}
+
+function readStartupConfig() {
+  try {
+    const raw = fs.readFileSync(getStartupConfigPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('invalid');
+    return {
+      openAtLogin: Boolean(parsed.openAtLogin ?? true),
+      openAsHidden: Boolean(parsed.openAsHidden ?? true),
+    };
+  } catch {
+    // Default: start with Windows, minimized to tray. Matches the "always running" posture.
+    return { openAtLogin: true, openAsHidden: true };
+  }
+}
+
+function writeStartupConfig(nextConfig) {
+  try {
+    const current = readStartupConfig();
+    const merged = {
+      openAtLogin: typeof nextConfig?.openAtLogin === 'boolean' ? nextConfig.openAtLogin : current.openAtLogin,
+      openAsHidden: typeof nextConfig?.openAsHidden === 'boolean' ? nextConfig.openAsHidden : current.openAsHidden,
+    };
+    fs.writeFileSync(getStartupConfigPath(), JSON.stringify(merged, null, 2), 'utf8');
+    return merged;
+  } catch (error) {
+    console.warn('Failed to persist startup-config.json:', error?.message || error);
+    return readStartupConfig();
+  }
+}
+
+function applyStartupConfig(config) {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(config.openAtLogin),
+      openAsHidden: Boolean(config.openAsHidden),
+    });
+  } catch (error) {
+    console.warn('Failed to apply startup login item:', error?.message || error);
+  }
+}
+
 function readUpdateState() {
   try {
     const statePath = getUpdateStatePath();
@@ -910,6 +1212,93 @@ function isPrivateIpv4Host(hostname) {
 }
 
 function registerDesktopActions() {
+  ipcMain.handle('updateOverlay:getState', async () => buildUpdateOverlayState());
+  ipcMain.handle('updateOverlay:getLogo', async () => readAppLogoDataUri());
+  ipcMain.handle('updateOverlay:install', async () => {
+    // Route through the shared triggerUpdateInstall() — it keeps the overlay
+    // alive, does the Defender preflight, and handles all the cleanup paths.
+    try {
+      triggerUpdateInstall('overlay-install-now');
+      return { ok: true };
+    } catch (error) {
+      return pushOverlayInstallError(error);
+    }
+  });
+  ipcMain.handle('updateOverlay:dismiss', async () => {
+    closeUpdateOverlay();
+    return { ok: true };
+  });
+  ipcMain.handle('updateOverlay:retry', async () => {
+    updateOverlayErrorState = null;
+    updateStatusMessage = 'Re-checking for updates...';
+    emitUpdateReadyState();
+    try {
+      await runAutoUpdaterCheck();
+      return { ok: true };
+    } catch (error) {
+      return pushOverlayInstallError(error);
+    }
+  });
+  ipcMain.handle('updateOverlay:openExternal', async (_event, payload) => {
+    const url = String(payload?.url || '').trim();
+    if (!url || !/^https?:\/\//i.test(url)) return { ok: false };
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error) };
+    }
+  });
+  ipcMain.handle('updateOverlay:revealInFolder', async (_event, payload) => {
+    const filePath = String(payload?.filePath || '').trim();
+    if (!filePath) return { ok: false };
+    try {
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        shell.openPath(filePath);
+      } else {
+        shell.showItemInFolder(filePath);
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error) };
+    }
+  });
+
+  ipcMain.handle('startup:get', async () => {
+    const config = readStartupConfig();
+    let effective = config;
+    if (app.isPackaged && process.platform === 'win32') {
+      try {
+        const live = app.getLoginItemSettings();
+        effective = {
+          openAtLogin: Boolean(live.openAtLogin),
+          openAsHidden: Boolean(live.openAsHidden ?? config.openAsHidden),
+        };
+      } catch {
+        // keep config as fallback
+      }
+    }
+    return {
+      ok: true,
+      openAtLogin: effective.openAtLogin,
+      openAsHidden: effective.openAsHidden,
+      supported: app.isPackaged && process.platform === 'win32',
+    };
+  });
+
+  ipcMain.handle('startup:set', async (_event, payload) => {
+    try {
+      const next = writeStartupConfig({
+        openAtLogin: typeof payload?.openAtLogin === 'boolean' ? payload.openAtLogin : undefined,
+        openAsHidden: typeof payload?.openAsHidden === 'boolean' ? payload.openAsHidden : undefined,
+      });
+      applyStartupConfig(next);
+      return { ok: true, ...next, supported: app.isPackaged && process.platform === 'win32' };
+    } catch (error) {
+      return { ok: false, message: String(error?.message || error) };
+    }
+  });
+
   ipcMain.handle('authStorage:getItem', async (_event, payload) => {
     try {
       const key = String(payload?.key || '').trim();

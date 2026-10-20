@@ -3,10 +3,22 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export type PlatformRole = 'owner' | 'admin' | 'moderator' | 'user';
 export type UserStatus = 'online' | 'idle' | 'dnd' | 'invisible' | 'offline';
 export type CommunityRole = 'owner' | 'admin' | 'moderator' | 'member';
-export type ChannelType = 'text' | 'voice' | 'announcement';
+export type ChannelType = 'text' | 'voice' | 'announcement' | 'forum' | 'stage';
 export type ContentType = 'video' | 'text' | 'quiz';
 export type Visibility = 'public' | 'private';
 export type ScreenShareQualityCap = '720p30' | '1080p120' | '4k60';
+
+export interface ProfileActivity {
+  type: 'playing' | 'streaming' | 'listening' | 'watching' | 'custom';
+  name: string;
+  details?: string | null;
+  state?: string | null;
+  started_at?: string | null;
+  large_image_url?: string | null;
+  small_image_url?: string | null;
+  party_size?: number | null;
+  party_max?: number | null;
+}
 
 export interface Profile {
   id: string;
@@ -17,12 +29,16 @@ export interface Profile {
   bio: string;
   custom_status?: string | null;
   custom_status_emoji?: string | null;
+  activity?: ProfileActivity | null;
   platform_role: PlatformRole;
   rank: string;
   xp: number;
   status: UserStatus;
   last_seen: string;
   is_banned: boolean;
+  /** Whether Open Graph cards render under links. Optional so profiles loaded
+   *  before `20260730100000_link_embeds.sql` is applied still typecheck. */
+  link_previews_enabled?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -156,6 +172,14 @@ export interface MarketplaceGameListing {
   rejection_reason?: string | null;
   security_status?: 'pending' | 'passed' | 'failed' | 'needs_changes' | string;
   security_notes?: string | null;
+  screenshots?: string[];
+  system_requirements?: Record<string, any>;
+  short_description?: string;
+  tags?: string[];
+  discount_percent?: number;
+  sale_ends_at?: string | null;
+  total_reviews?: number;
+  positive_review_pct?: number;
   created_at: string;
   updated_at: string;
   seller_profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'> | null;
@@ -563,6 +587,8 @@ export interface DirectMessage {
   updated_at: string;
   author?: Profile;
   attachments?: DirectMessageAttachment[];
+  ciphertext?: unknown;
+  e2e_version?: number | null;
 }
 
 export interface DirectMessageAttachment {
@@ -572,6 +598,7 @@ export interface DirectMessageAttachment {
   file_name: string;
   file_type: string;
   file_size: number;
+  encryption_metadata?: unknown | null;
   created_at: string;
 }
 

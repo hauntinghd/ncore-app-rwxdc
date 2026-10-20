@@ -140,7 +140,7 @@ export function InvitePage() {
           <div className="mt-5 flex gap-3">
             <button
               type="button"
-              onClick={() => navigate('/app/discover', { replace: true })}
+              onClick={() => navigate('/app/dm', { replace: true })}
               className="nyptid-btn-secondary flex-1"
             >
               Open Discover

@@ -4,6 +4,7 @@ import { Calendar, MessageSquare, Award, Users, Crown, Shield, Sparkles, CreditC
 import { AppShell } from '../components/layout/AppShell';
 import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
+import { Skeleton, SkeletonProfileHeader, SkeletonUserRow } from '../components/ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../lib/entitlements';
 import { mergeCosmeticPreviewEffects, resolveCosmeticPreviewMeta } from '../lib/cosmetics';
@@ -67,8 +68,24 @@ export function ProfilePage() {
   if (loading) {
     return (
       <AppShell showChannelSidebar={false}>
-        <div className="flex items-center justify-center h-full">
-          <div className="w-8 h-8 border-2 border-nyptid-300 border-t-transparent rounded-full animate-spin" />
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-3xl mx-auto p-6 space-y-6">
+            <SkeletonProfileHeader />
+            <div className="nyptid-card p-5 space-y-3">
+              <Skeleton className="h-4 w-1/4" />
+              <div className="grid grid-cols-3 gap-3">
+                <Skeleton className="h-14" />
+                <Skeleton className="h-14" />
+                <Skeleton className="h-14" />
+              </div>
+            </div>
+            <div className="nyptid-card p-5 space-y-2">
+              <Skeleton className="h-4 w-1/3" />
+              <SkeletonUserRow />
+              <SkeletonUserRow />
+              <SkeletonUserRow />
+            </div>
+          </div>
         </div>
       </AppShell>
     );

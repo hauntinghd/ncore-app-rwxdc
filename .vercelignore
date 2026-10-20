@@ -4,3 +4,24 @@ dist
 supabase
 tools
 *.log
+
+# The Windows installer IS served from this site, so it must NOT be excluded.
+# Earlier releases moved it to GitHub on the mistaken belief that its ~99 MB
+# size caused "File size limit exceeded". The real cause was src-tauri/target
+# below; with that excluded the installer uploads fine.
+# Superseded Tauri installers stay out — only the one latest.json references
+# needs to ship.
+
+# Build output that must never reach the deploy payload.
+# src-tauri/target is 5.7 GB of Rust artifacts and contains individual .rlib
+# files over 100 MB, which Vercel rejects outright. This was the real cause of
+# "File size limit exceeded" — it appeared after the Tauri migration started
+# and nothing excluded it.
+src-tauri
+android
+dist-tauri
+dist-mobile
+build
+e2e
+test-results
+playwright-report
