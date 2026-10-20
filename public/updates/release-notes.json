@@ -1,9 +1,18 @@
 {
     "releases": [
         {
-            "version": "11.7.123",
+            "version": "11.7.124",
             "date": "2026-10-20",
             "badge": "Current Build",
+            "improvements": [
+                "\"Continue with Google\" now works in the desktop app: it opens Google in your browser and signs you straight back into NCore when you're done."
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.123",
+            "date": "2026-10-20",
+            "badge": "Previous",
             "improvements": [
                 "NCore moved to new, faster servers that no longer go to sleep — no more outages from the backend pausing.",
                 "Sign in with your username or your email, or use \"Continue with Google\" on the website.",

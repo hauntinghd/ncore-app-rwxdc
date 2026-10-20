@@ -14,6 +14,12 @@ if (typeof window !== 'undefined' && !window.requestIdleCallback) {
 // any early navigation or auth code sees the same desktop contract.
 installTauriDesktopBridge();
 
+// Desktop Google sign-in returns through an ncore:// deep link; the listener
+// must exist before the link arrives, including when it is what launched us.
+if (isDesktopRuntime()) {
+  void import('./lib/desktopOAuth').then(({ installDesktopOAuthHandler }) => installDesktopOAuthHandler());
+}
+
 // Marketing visitors should not pay the cost of the authenticated product
 // shell: Supabase session restoration, E2E crypto, calls, and app routes are
 // all loaded only once someone enters NCore. This keeps the landing path lean.

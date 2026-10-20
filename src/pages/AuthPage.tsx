@@ -235,10 +235,40 @@ export function LoginPage() {
     navigate(inviteCode ? `/invite/${encodeURIComponent(inviteCode)}` : '/app');
   }
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unsubscribe: (() => void) | undefined;
+    void import('../lib/desktopOAuth').then(({ onDesktopOAuthResult }) => {
+      unsubscribe = onDesktopOAuthResult((result) => {
+        setLoading(false);
+        if (result.ok) {
+          navigate('/app');
+        } else {
+          setInfo('');
+          setError(result.error || 'Google sign-in failed. Try again.');
+        }
+      });
+    });
+    return () => unsubscribe?.();
+  }, [navigate]);
+
   async function handleGoogleSignIn() {
     setError('');
     setInfo('');
     setLoading(true);
+    if (isTauriRuntime()) {
+      try {
+        const { startDesktopGoogleSignIn } = await import('../lib/desktopOAuth');
+        await startDesktopGoogleSignIn();
+        setInfo('Finish signing in with Google in your browser — NCore will pick it up automatically.');
+        // Don't hold the form hostage: the user may close the browser tab.
+        setLoading(false);
+      } catch (err) {
+        setError(String((err as Error)?.message || err));
+        setLoading(false);
+      }
+      return;
+    }
     const inviteCode = String(searchParams.get('invite') || '').trim();
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -327,12 +357,12 @@ export function LoginPage() {
           </div>
         )}
 
-        {!isTauriRuntime() && (
+        {(
           <>
             {/*
-              Google sign-in is web-only for now: Google refuses OAuth inside
-              embedded webviews (disallowed_useragent), so the desktop client
-              needs a system-browser + deep-link flow, which is a follow-up.
+              On desktop, Google sign-in runs in the system browser and returns
+              through an ncore:// deep link (see lib/desktopOAuth.ts) — Google
+              refuses OAuth inside embedded webviews.
             */}
             <button
               type="button"

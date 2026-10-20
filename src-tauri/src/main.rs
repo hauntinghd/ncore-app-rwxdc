@@ -68,6 +68,17 @@ fn secure_storage_remove(key: String) -> SecureStorageResult {
 
 fn main() {
     tauri::Builder::default()
+        // single-instance must be registered before deep-link: on Windows an
+        // ncore:// link launches a second process, and the deep-link feature
+        // forwards that URL to the running instance instead of opening a new
+        // window. That is how Google sign-in returns from the system browser.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -77,12 +88,18 @@ fn main() {
             secure_storage_set,
             secure_storage_remove,
         ])
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_deep_link::init())
+        .setup(|app| {
+            // Installed builds register ncore:// via the NSIS installer; this
+            // covers dev runs and portable copies so the scheme always points
+            // at the binary actually running.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
             }
-        }))
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running NCore");
 }

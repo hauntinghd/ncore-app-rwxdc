@@ -1,7 +1,7 @@
 {
   "name": "ncore",
   "private": true,
-  "version": "11.7.123",
+  "version": "11.7.124",
   "description": "NCore desktop and web communication platform by NYPTID Industries Advanced Technologies.",
   "author": {
     "name": "NYPTID Industries Advanced Technologies"
@@ -42,7 +42,8 @@
     "@capacitor/push-notifications": "^8.1.1",
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "@supabase/supabase-js": "^2.57.4",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "~2.11.1",
+    "@tauri-apps/plugin-deep-link": "~2.4.10",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-store": "^2.4.3",

@@ -1,6 +1,6 @@
 [package]
 name = "ncore"
-version = "11.7.123"
+version = "11.7.124"
 description = "NCore native desktop client"
 authors = ["NYPTID Industries Advanced Technologies"]
 edition = "2021"
@@ -17,13 +17,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-store = "2"
 tauri-plugin-updater = "2"
 keyring = "4.1.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.3"
+tauri-plugin-deep-link = "2"
 
 [profile.release]
 # Desktop distribution builds should favor startup and download size over a
