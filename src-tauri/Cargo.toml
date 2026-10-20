@@ -1,6 +1,6 @@
 [package]
 name = "ncore"
-version = "11.7.124"
+version = "11.7.125"
 description = "NCore native desktop client"
 authors = ["NYPTID Industries Advanced Technologies"]
 edition = "2021"

@@ -1,9 +1,18 @@
 {
     "releases": [
         {
-            "version": "11.7.124",
+            "version": "11.7.125",
             "date": "2026-10-20",
             "badge": "Current Build",
+            "improvements": [
+                "Big group calls stay stable: up to 17 cameras and screen shares can be on at once, so everyone sees the same people instead of a random, shifting subset."
+            ],
+            "bugFixes": []
+        },
+        {
+            "version": "11.7.124",
+            "date": "2026-10-20",
+            "badge": "Previous",
             "improvements": [
                 "\"Continue with Google\" now works in the desktop app: it opens Google in your browser and signs you straight back into NCore when you're done."
             ],

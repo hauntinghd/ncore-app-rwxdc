@@ -191,6 +191,26 @@ class DirectCallSessionStore {
   private screenAudioTrack: IRTCLocalAudioTrack | null = null;
 
   private remoteVideoTracks = new Map<string, IRTCRemoteVideoTrack>();
+  /*
+    Agora recommends at most 17 concurrent video senders per channel (cameras
+    and screen shares both count). Beyond that it does not refuse — each
+    viewer silently receives a random subset, so in a 50-person group call
+    people would see different, shifting sets of cameras. Agora offers no API
+    to cap it, so the cap is enforced here before publishing new video.
+    https://docs.agora.io/en/api-reference/faq/product/capacity
+  */
+  static readonly MAX_CONCURRENT_VIDEO_SENDERS = 17;
+
+  private videoSenderCapReached(): boolean {
+    // Remote senders, plus our own camera/screen already live (the screen
+    // share publishes from a separate uid, so it is not in remoteVideoTracks),
+    // plus the stream about to be published.
+    const localLive = (this.videoTrack ? 1 : 0) + (this.screenTrack ? 1 : 0);
+    const remote = Array.from(this.remoteVideoTracks.keys())
+      .filter((uid) => uid !== this.screenUid).length;
+    return remote + localLive + 1 > DirectCallSessionStore.MAX_CONCURRENT_VIDEO_SENDERS;
+  }
+
   private remoteAudioTracks = new Map<string, IRTCRemoteAudioTrack>();
   private remoteAudioVolumes = new Map<string, number>();
   private remoteParticipantUids = new Set<string>();
@@ -1156,6 +1176,14 @@ class DirectCallSessionStore {
       return;
     }
 
+    if (this.videoSenderCapReached()) {
+      this.setState({
+        mediaError: `Up to ${DirectCallSessionStore.MAX_CONCURRENT_VIDEO_SENDERS} cameras and screen shares can be on at once. Ask someone to turn theirs off, then try again.`,
+        mediaErrorDetail: '',
+      });
+      return;
+    }
+
     const newVideoTrack = await this.createLocalVideoTrack();
     this.videoTrack = newVideoTrack;
     await this.client.publish([newVideoTrack]);
@@ -1195,6 +1223,14 @@ class DirectCallSessionStore {
 
     if (this.state.isScreenSharing) {
       await this.stopScreenShare();
+      return;
+    }
+
+    if (this.videoSenderCapReached()) {
+      this.setState({
+        mediaError: `Up to ${DirectCallSessionStore.MAX_CONCURRENT_VIDEO_SENDERS} cameras and screen shares can be on at once. Ask someone to turn theirs off, then try again.`,
+        mediaErrorDetail: '',
+      });
       return;
     }
 

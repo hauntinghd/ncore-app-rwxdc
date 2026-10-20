@@ -1,11 +1,11 @@
 {
-  "version": "11.7.124",
-  "notes": "NCore 11.7.124: \"Continue with Google\" now works in the desktop app: it opens Google in your browser and signs you straight back into NCore when you're done.",
-  "pub_date": "2026-10-20T04:36:44.253Z",
+  "version": "11.7.125",
+  "notes": "NCore 11.7.125: Big group calls stay stable: up to 17 cameras and screen shares can be on at once, so everyone sees the same people instead of a random, shifting subset.",
+  "pub_date": "2026-10-20T04:42:16.469Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEsyWEpWM2MvUmlQLzdyVU5VR2lhUFdMNTlOSTYxZmQxclNGckJxN21ld0Vobm5LQVNzQ0VlRjNZNGw3L241dFJ1VDdoUUZJaGh1NU9UVWxWaEhLandJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDcwOTkzCWZpbGU6TkNvcmVfMTEuNy4xMjRfeDY0LXNldHVwLmV4ZQpOYnNZc3lqUDMrTWt0MC9IL0dxT2o3TnFwTDY2a3NZcVlHazFLMjd4dEFHSDlRRjZUdy9iUGI0NkthSkxlOFcwM3lycnJ2eXduSGE4dGE3cDFGRkVEdz09Cg==",
-      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.124_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2VwTGF1WFRKVEsvd3RmeFllSC9uUUJ3YnhnSmR3NkJyM2MxclpEb2pJbFF0OHJ4bkdpdFlocDNXR3A3dUhaNmNHaHllaERKVHJ5T3crSEFpcXNQV2gyYTIrcWRZSGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDcxMzI5CWZpbGU6TkNvcmVfMTEuNy4xMjVfeDY0LXNldHVwLmV4ZQozb1N4NDNxenpTNWh2Q2JJQnFsQkJCcFREQlhHdU05MVlnTkRJTjlzZXlRek9DQmYxTTc3d1h4MTl3VjZvb2t1cm03c0JqQzdKUDNDMEtsU0NQT2NEdz09Cg==",
+      "url": "https://ncore.nyptidindustries.com/updates/tauri/NCore_11.7.125_x64-setup.exe"
     }
   }
 }
