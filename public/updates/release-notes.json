@@ -1,9 +1,25 @@
 {
     "releases": [
         {
+            "version": "11.7.123",
+            "date": "2026-10-20",
+            "badge": "Current Build",
+            "improvements": [
+                "NCore moved to new, faster servers that no longer go to sleep — no more outages from the backend pausing.",
+                "Sign in with your username or your email, or use \"Continue with Google\" on the website.",
+                "Group chats now hold up to 50 people.",
+                "The marketplace has been removed so NCore can focus on chat, voice, video and screen sharing.",
+                "Added Privacy Policy and Terms of Service pages."
+            ],
+            "bugFixes": [
+                "Password reset and confirmation emails now link to NCore instead of a broken local address, and are sent from no-reply@nyptid.com.",
+                "Because of the server move, you will need to sign in once more. Your account, password, messages and friends all came with you."
+            ]
+        },
+        {
             "version": "11.7.122",
             "date": "2026-08-12",
-            "badge": "Current Build",
+            "badge": "Previous",
             "improvements": [
                 "The desktop window can now be dragged from the title area again, and the minimize, maximize, and close buttons work — including on the sign-in screen."
             ],

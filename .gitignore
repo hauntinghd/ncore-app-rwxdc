@@ -58,3 +58,4 @@ dist-tauri/
 deploy/migrate_passwords*.sql
 deploy/*secrets*.env
 deploy/livekit/.env
+.env*

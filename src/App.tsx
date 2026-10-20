@@ -33,6 +33,8 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ de
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })));
+const PrivacyPage = lazy(() => import('./pages/LegalPages').then((m) => ({ default: m.PrivacyPage })));
+const TermsPage = lazy(() => import('./pages/LegalPages').then((m) => ({ default: m.TermsPage })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, profileLoading, mfaPending } = useAuth();
@@ -91,6 +93,8 @@ function AppRoutes({ isDesktop, webSurface }: { isDesktop: boolean; webSurface: 
         <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
         <Route path="/mfa" element={<ProtectedRoute><MfaChallengePage /></ProtectedRoute>} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/invite/:inviteCode" element={<InvitePage />} />
